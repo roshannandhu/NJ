@@ -417,7 +417,7 @@ export default function BackupSettings() {
                  <div style={{ display: 'flex', gap: 8 }}>
                    <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={handleOpenRestore}>Close</button>
                    <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={() => fileRef.current?.click()}><Upload size={12}/> Import File</button>
-                   <input ref={fileRef} type="file" accept=".json" onChange={handleRestoreFile} style={{ display:'none' }} />
+                   <input ref={fileRef} type="file" accept=".zip,.json,application/zip,application/json" onChange={handleRestoreFile} style={{ display:'none' }} />
                  </div>
               </div>
               

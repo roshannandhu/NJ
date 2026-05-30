@@ -10,15 +10,26 @@ import backup_service
 router = APIRouter()
 
 
-# ── full JSON export (download) ──────────────────────────────────────────────
+# ── full backup ZIP (data + all images) ──────────────────────────────────────
 @router.get("/api/backup")
 def backup():
-    payload = backup_service.build_payload()
+    import io, zipfile as zf
     stem = backup_service._ts_stem()
+    payload = backup_service.build_payload()
+
+    buf = io.BytesIO()
+    with zf.ZipFile(buf, "w", zf.ZIP_DEFLATED, compresslevel=6) as z:
+        z.writestr("backup.json", json.dumps(payload, ensure_ascii=False, indent=2))
+        udir = backup_service.UPLOADS_DIR
+        if udir.exists():
+            for f in sorted(udir.iterdir()):
+                if f.is_file():
+                    z.write(str(f), f"uploads/{f.name}")
+
     return Response(
-        content=json.dumps(payload, ensure_ascii=False, indent=2),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{stem}.json"'},
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{stem}.zip"'},
     )
 
 
@@ -297,20 +308,56 @@ def put_backup_settings(body: dict = Body(...)):
     return {"targets": state["targets"], "keep": state.get("keep"), "interval_days": state.get("interval_days")}
 
 
-# ── restore from an uploaded .json backup file ───────────────────────────────
+# ── restore from an uploaded backup file (ZIP or JSON) ───────────────────────
 @router.post("/api/backup/restore-file")
 async def restore_file(file: UploadFile = File(...)):
+    import io, zipfile as zf
+    raw = await file.read()
+    is_zip = raw[:4] == b"PK\x03\x04"
+
     try:
-        raw = await file.read()
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not read the file as a JSON backup. Choose an "
-            "nj_backup_*.json file.",
-        )
-    try:
-        return backup_service.restore_from_payload(payload)
+        if is_zip:
+            buf = io.BytesIO(raw)
+            try:
+                z_file = zf.ZipFile(buf, "r")
+            except zf.BadZipFile:
+                raise HTTPException(status_code=400, detail="ZIP file is corrupted.")
+
+            with z_file as z:
+                names = z.namelist()
+                json_name = next(
+                    (n for n in ("backup.json", "catalog.json") if n in names), None
+                )
+                if not json_name:
+                    raise HTTPException(status_code=400, detail="Invalid backup ZIP: no backup.json found inside.")
+
+                payload = json.loads(z.read(json_name).decode("utf-8"))
+                result = backup_service.restore_from_payload(payload)
+
+                # Restore images from uploads/ folder inside the ZIP
+                udir = backup_service.UPLOADS_DIR
+                udir.mkdir(parents=True, exist_ok=True)
+                img_count = 0
+                for name in names:
+                    if name.startswith("uploads/") and not name.endswith("/"):
+                        img_fname = name[len("uploads/"):]
+                        if img_fname:
+                            (udir / img_fname).write_bytes(z.read(name))
+                            img_count += 1
+
+            return {**result, "restored_images": img_count}
+
+        else:
+            # Plain JSON backup (legacy format)
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except Exception:
+                raise HTTPException(status_code=400, detail="File is not a valid ZIP or JSON backup.")
+            result = backup_service.restore_from_payload(payload)
+            return {**result, "restored_images": 0}
+
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
