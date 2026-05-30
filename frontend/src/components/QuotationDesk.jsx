@@ -68,7 +68,7 @@ export default function QuotationDesk() {
   const toolsActive = catalogView === TOOLS_SECTION_ID;
   const resolvedActiveStrip = tileClasses.some(c => c.id === activeStrip)
     ? activeStrip
-    : (tileClasses[0]?.id || null);
+    : null;
 
   const productTotal = (data.varieties || []).filter(v => {
     const cls = getVarietyClass(data.classes || [], v);
@@ -159,6 +159,7 @@ export default function QuotationDesk() {
     const price = getItemPrice(item);
     const qty = getSelectedQty(item);
     const cardColor = colorInfo?.hex || cls.color || '#8a857a';
+    const activeImage = colorInfo?.image || item.image;
 
     return (
       <article
@@ -170,13 +171,19 @@ export default function QuotationDesk() {
         }}
       >
         <div
-          className={`qd-variety-image ${item.image ? 'has-image' : ''}`}
-          style={item.image ? { background: imageBackground(item.image) } : undefined}
+          className={`qd-variety-image ${activeImage ? 'has-image' : ''}`}
+          style={activeImage ? { background: imageBackground(activeImage) } : undefined}
         >
-          {!item.image && (
+          {!activeImage && (
             <div className="qd-fallback-mark">
               {isTool ? <Wrench size={26} /> : <ImageIcon size={26} />}
               <span>{isTool ? 'Accessory' : cls.subtitle || cls.name || 'Product'}</span>
+            </div>
+          )}
+          
+          {!isTool && (
+            <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, zIndex: 2, backdropFilter: 'blur(4px)' }}>
+              {selectedColor}
             </div>
           )}
         </div>
