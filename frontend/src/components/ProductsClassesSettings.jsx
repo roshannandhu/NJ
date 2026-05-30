@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../AppContext';
 import { mediaUrl, uploadImage } from '../api';
-import { Plus, Image as ImageIcon, Trash2, FolderTree, Package, Palette, FileText } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, FolderTree, Package, Palette, FileText, CheckCircle2, Loader } from 'lucide-react';
 
 const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
@@ -15,6 +15,11 @@ export default function ProductsClassesSettings() {
   const [editClass, setEditClass] = useState(null);
   const [editVariety, setEditVariety] = useState(null);
   const [editColor, setEditColor] = useState(null);
+
+  // Auto-save state and refs
+  const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'pending' | 'saved'
+  const autoSaveTimer = useRef(null);
+  const skipAutoSave = useRef(false); // true when state was set by tree selection, not by user
 
   // --- Helpers ---
   const imagePreview = (url, fit = 'cover') => (
@@ -38,66 +43,73 @@ export default function ProductsClassesSettings() {
 
   // --- Tree Selection Handlers ---
   const selectClass = (cls) => {
+    skipAutoSave.current = true;
+    clearTimeout(autoSaveTimer.current);
+    setSaveStatus('idle');
     setSelectedNode({ type: 'class', id: cls.id });
     setEditClass({ ...cls });
   };
 
   const selectVariety = (variety) => {
+    skipAutoSave.current = true;
+    clearTimeout(autoSaveTimer.current);
+    setSaveStatus('idle');
     setSelectedNode({ type: 'variety', id: variety.id, parentId: variety.classId });
     setEditVariety({ ...variety });
   };
 
   const selectColor = (color, varietyId) => {
+    skipAutoSave.current = true;
+    clearTimeout(autoSaveTimer.current);
+    setSaveStatus('idle');
     setSelectedNode({ type: 'color', id: color.name, parentId: varietyId });
     setEditColor({ ...color, offset: color.offset ?? color.priceOffset ?? 0 });
   };
 
-  // --- Save Handlers ---
-  const saveClass = () => {
-    if (!editClass.name) return showToast("Class name required");
-    const isNew = !data.classes.find(c => c.id === editClass.id);
+  // --- Save Helpers ---
+  const markSaved = () => {
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 2200);
+  };
 
+  // --- Save Handlers (silent = auto-save, no toast) ---
+  const doSaveClass = (silent = false) => {
+    if (!editClass?.name) { if (!silent) showToast("Class name required"); return; }
+    const isNew = !data.classes.find(c => c.id === editClass.id);
     let newClasses = [...data.classes];
     if (isNew) newClasses.push(editClass);
     else newClasses = newClasses.map(c => c.id === editClass.id ? editClass : c);
     const nextData = { ...data, classes: newClasses };
     setData(nextData);
     persistConfig(nextData);
-    showToast("Class saved");
+    if (!silent) showToast("Class saved");
+    markSaved();
   };
 
-  const saveVariety = () => {
-    if (!editVariety.name) return showToast("Variety name required");
+  const doSaveVariety = (silent = false) => {
+    if (!editVariety?.name) { if (!silent) showToast("Variety name required"); return; }
     const isNew = !data.varieties.find(v => v.id === editVariety.id);
-    
     let newVars = [...data.varieties];
     if (isNew) newVars.push(editVariety);
     else newVars = newVars.map(v => v.id === editVariety.id ? editVariety : v);
     const nextData = { ...data, varieties: newVars };
     setData(nextData);
     persistConfig(nextData);
-    showToast("Variety saved");
+    if (!silent) showToast("Variety saved");
+    markSaved();
   };
 
-  const saveColor = () => {
-    if (!editColor.name) return showToast("Color/Type name required");
+  const doSaveColor = (silent = false) => {
+    if (!editColor?.name) { if (!silent) showToast("Color/Type name required"); return; }
     const restColor = { ...editColor };
     delete restColor.priceOffset;
-    const normalizedColor = {
-      ...restColor,
-      offset: parseFloat(restColor.offset) || 0,
-    };
-    
+    const normalizedColor = { ...restColor, offset: parseFloat(restColor.offset) || 0 };
     const newVars = data.varieties.map(v => {
       if (v.id === selectedNode.parentId) {
         let updatedColors = v.colors ? [...v.colors] : [];
         const exists = updatedColors.findIndex(c => c.name === selectedNode.id);
-
-        if (exists >= 0) {
-          updatedColors[exists] = normalizedColor;
-        } else {
-          updatedColors.push(normalizedColor);
-        }
+        if (exists >= 0) updatedColors[exists] = normalizedColor;
+        else updatedColors.push(normalizedColor);
         return { ...v, colors: updatedColors };
       }
       return v;
@@ -105,10 +117,77 @@ export default function ProductsClassesSettings() {
     const nextData = { ...data, varieties: newVars };
     setData(nextData);
     persistConfig(nextData);
-    showToast("Color/Type saved");
-    // Update selectedNode id since it's based on name
-    setSelectedNode({ ...selectedNode, id: normalizedColor.name });
+    if (!silent) showToast("Color/Type saved");
+    markSaved();
+    setSelectedNode(prev => ({ ...prev, id: normalizedColor.name }));
   };
+
+  // Manual save buttons call these (immediate, with toast)
+  const saveClass   = () => { clearTimeout(autoSaveTimer.current); doSaveClass(false); };
+  const saveVariety = () => { clearTimeout(autoSaveTimer.current); doSaveVariety(false); };
+  const saveColor   = () => { clearTimeout(autoSaveTimer.current); doSaveColor(false); };
+
+  // --- Auto-save effects (debounced 800ms after any field change) ---
+  useEffect(() => {
+    if (!editClass) return;
+    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
+    setSaveStatus('pending');
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSaveClass(true), 800);
+  }, [editClass]);
+
+  useEffect(() => {
+    if (!editVariety) return;
+    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
+    setSaveStatus('pending');
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSaveVariety(true), 800);
+  }, [editVariety]);
+
+  useEffect(() => {
+    if (!editColor) return;
+    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
+    setSaveStatus('pending');
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => doSaveColor(true), 800);
+  }, [editColor]);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => clearTimeout(autoSaveTimer.current), []);
+
+  // --- Ctrl+V paste image ---
+  useEffect(() => {
+    const handlePaste = async (e) => {
+      if (!selectedNode) return;
+      // Don't intercept when user is pasting text into an input/textarea
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      const imageItem = Array.from(e.clipboardData?.items || [])
+        .find(item => item.type.startsWith('image/'));
+      if (!imageItem) return;
+
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+
+      try {
+        showToast('Uploading pasted image...');
+        const uploaded = await uploadImage(file);
+        if (selectedNode.type === 'class')
+          setEditClass(prev => ({ ...prev, logo: uploaded.url }));
+        else if (selectedNode.type === 'variety')
+          setEditVariety(prev => ({ ...prev, image: uploaded.url }));
+        else if (selectedNode.type === 'color')
+          setEditColor(prev => ({ ...prev, image: uploaded.url }));
+      } catch {
+        showToast('Paste image upload failed', 'error');
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [selectedNode]);
 
   // --- Delete Handlers ---
   const deleteClass = (id) => {
@@ -288,6 +367,9 @@ export default function ProductsClassesSettings() {
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', marginBottom: '4px' }}>Upload category image for this class</div>
                         <div style={{ fontSize: '13px', color: 'var(--ink-soft)', lineHeight: 1.5 }}>This image appears on the Quotation Desk category card. If no image is uploaded, the class colour is used.</div>
+                        <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd> to paste image from clipboard
+                        </div>
                         {editClass.logo && (
                           <button
                             type="button"
@@ -336,8 +418,10 @@ export default function ProductsClassesSettings() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)' }}>
+                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <button onClick={saveClass} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Class</button>
+                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
+                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
                 </div>
               </div>
             )}
@@ -360,17 +444,22 @@ export default function ProductsClassesSettings() {
                   {/* Image Upload Zone */}
                   <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Display Image</label>
-                    <label style={{ 
-                      height: '240px', border: '2px dashed var(--line)', borderRadius: 'var(--radius-lg)', 
+                    <label style={{
+                      width: '240px', height: '240px',
+                      border: '2px dashed var(--line)', borderRadius: 'var(--radius-lg)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       background: editVariety.image ? imagePreview(editVariety.image, 'cover') : 'var(--bg-warm)',
-                      cursor: 'pointer', transition: 'all 0.2s', position: 'relative', overflow: 'hidden'
+                      cursor: 'pointer', transition: 'all 0.2s', position: 'relative', overflow: 'hidden',
+                      flexShrink: 0,
                     }} className="hover-lift">
                       {!editVariety.image && (
                         <>
                           <ImageIcon size={40} color="var(--ink-soft)" style={{ marginBottom: '16px' }}/>
                           <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Click to upload image</div>
                           <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>PNG, JPG up to 5MB</div>
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd> to paste
+                          </div>
                         </>
                       )}
                       {editVariety.image && (
@@ -410,8 +499,10 @@ export default function ProductsClassesSettings() {
                   </div>
                 </div>
 
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)' }}>
+                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <button onClick={saveVariety} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Variety</button>
+                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
+                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
                 </div>
               </div>
             )}
@@ -446,6 +537,10 @@ export default function ProductsClassesSettings() {
                       </label>
                       <div style={{ fontSize: '13px', color: 'var(--ink-soft)', flex: 1 }}>
                         Upload a specific image for this color/type. If no image is provided, the hex color below will be used as a swatch fallback.
+                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd>
+                          <span style={{ fontSize: '12px' }}>to paste image from clipboard</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -474,8 +569,10 @@ export default function ProductsClassesSettings() {
 
                 </div>
 
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)' }}>
+                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <button onClick={saveColor} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Color</button>
+                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
+                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
                 </div>
               </div>
             )}

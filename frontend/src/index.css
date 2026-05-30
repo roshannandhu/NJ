@@ -1893,7 +1893,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 .qd-variety-image {
   position: relative;
-  height: 142px;
+  aspect-ratio: 1 / 1;
   overflow: hidden;
   background:
     linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.18)),
@@ -1979,6 +1979,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 
 .qd-variety-card.is-tool .qd-variety-image {
+  aspect-ratio: unset;
   height: 100%;
   min-height: 132px;
 }
@@ -2046,6 +2047,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .qd-strip-workspace .qd-live-panel > div:last-child {
   min-height: 0;
   border-radius: var(--radius-sm) !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 @keyframes qdStripIn {
