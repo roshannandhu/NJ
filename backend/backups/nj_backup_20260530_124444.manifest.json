@@ -1,0 +1,22 @@
+{
+  "stem": "nj_backup_20260530_124444",
+  "reason": "startup",
+  "created_iso": "2026-05-30T12:44:44+05:30",
+  "db_bytes": 14151680,
+  "rows": {
+    "app_config": 1,
+    "quotations": 0,
+    "warranty_certificates": 0
+  },
+  "sha256": {
+    "db": "adce0ab36a0a0ae770bc451edb7718eec4c3da6dc1fd9d7e0ea1884594f3ec62",
+    "json": "f505baf90f219f46226f8e6bf96742f82409a4ede1a14382386e23c7aec2db8a"
+  },
+  "verify": {
+    "db_integrity": "ok",
+    "db_hash_match": true,
+    "json_parse": true
+  },
+  "targets": {},
+  "ok": false
+}

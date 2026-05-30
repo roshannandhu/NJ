@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 12mm 15mm; }
+  body { font-family: Georgia, 'Times New Roman', serif; font-size: 10.5pt; color: #000; line-height: 1.5; margin: 0; padding: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 5px 8px; text-align: left; }
+  .center { text-align: center; }
+  .warranty-logo { font-size: 42pt; font-weight: bold; letter-spacing: 1px; margin: 0; line-height: 1.1; }
+  .warranty-logo-img { max-height: 120px; max-width: 440px; object-fit: contain; display: block; margin: 0 auto 4px; }
+  .warranty-subtitle { font-size: 11pt; color: #555; margin: 2px 0 12px; }
+  .title-bar { background: #222; color: #fff; text-align: center; padding: 8px; font-size: 14pt; font-weight: bold; letter-spacing: 2px; margin: 8px 0 14px; }
+  .greeting { font-size: 11pt; }
+  .section { margin: 12px 0 6px; }
+  .section h3 { font-size: 11pt; margin: 0 0 4px; border-bottom: 1.5px solid #222; padding-bottom: 2px; text-transform: uppercase; letter-spacing: 1px; }
+  .section p, .section ul { margin: 3px 0; font-size: 10pt; }
+  .section ul { padding-left: 16px; margin: 2px 0; }
+  .section li { margin: 1px 0; }
+  .series-table { margin: 4px 0 10px; }
+  .series-table th { background: #222; color: #fff; font-size: 10pt; padding: 5px 8px; border: 1px solid #222; }
+  .series-table td { font-size: 10pt; border: 1px solid #ccc; padding: 5px 8px; }
+  .series-table .col-s { width: 60%; }
+  .series-table .col-d { width: 40%; text-align: center; }
+  .cert-details { margin: 10px 0; }
+  .cert-details table { width: 100%; }
+  .cert-details td { padding: 3px 6px; font-size: 10pt; vertical-align: top; border: none; }
+  .cert-details .cl { width: 35%; font-weight: bold; }
+  .cert-details .cv { width: 65%; }
+  .footer { display: flex; justify-content: space-between; margin-top: 28px; padding-top: 10px; }
+  .footer .signature { width: 40%; }
+  .footer .signature .line { border-top: 1px solid #000; margin-top: 38px; padding-top: 3px; font-size: 10pt; }
+  .footer .seal { width: 70px; height: 70px; border: 3px solid #222; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8pt; font-weight: bold; text-align: center; color: #222; }
+</style>
+</head>
+<body>
+
+{% if template.logo and template.logo.startswith('data:image/') %}
+<img class="warranty-logo-img" src="{{ template.logo }}" alt="Logo">
+{% else %}
+<p class="warranty-logo center">{{ template.logo }}</p>
+{% endif %}
+<p class="warranty-subtitle center">{{ template.title }}</p>
+
+<div class="title-bar">WARRANTY CERTIFICATE</div>
+
+{% set sections = template.sections or [] %}
+{% set half = 1 if sections|length == 3 else (sections|length + 1) // 2 %}
+{% set left_sections = sections[:half] %}
+{% set right_sections = sections[half:] %}
+
+<table style="width: 100%; border: none; margin-bottom: 8px;">
+  <tr>
+    <td style="width: 50%; vertical-align: top; padding: 0 10px 0 0; border: none;">
+      <p class="greeting"><strong>Dear Customer,</strong></p>
+      <p class="greeting">{{ template.opening | replace('\n', '<br>') }}</p>
+      {% for section in left_sections %}
+        <div class="section">
+          <h3>{{ section.title }}</h3>
+          {% if section.isBullets %}
+            <ul>
+              {% for line in section.content.split('\n') %}
+                {% if line.strip() %}
+                <li>{{ line }}</li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p>{{ section.content | replace('\n', '<br>') }}</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </td>
+    <td style="width: 50%; vertical-align: top; padding: 0 0 0 10px; border: none;">
+      {% for section in right_sections %}
+        <div class="section" style="{% if loop.first %}margin-top: 0;{% endif %}">
+          <h3>{{ section.title }}</h3>
+          {% if section.isBullets %}
+            <ul>
+              {% for line in section.content.split('\n') %}
+                {% if line.strip() %}
+                <li>{{ line }}</li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p>{{ section.content | replace('\n', '<br>') }}</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </td>
+  </tr>
+</table>
+
+{% if template.heatoutTable %}
+<div class="section">
+  <h3>Liability Table</h3>
+  <table class="series-table" style="margin-top: 5px;">
+    <thead>
+      <tr>
+        <th style="width: 50%;">Years of use counted from the purchase date</th>
+        <th style="width: 50%; text-align: center;">Share of the Warrantor liability in %</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>0-10 years</td><td class="center">100%</td></tr>
+      <tr><td>10-12 years</td><td class="center">50%</td></tr>
+      <tr><td>12-18 years</td><td class="center">40%</td></tr>
+      <tr><td>18-20 years</td><td class="center">30%</td></tr>
+      <tr><td>20-21 years</td><td class="center">20%</td></tr>
+      <tr><td>21-25 years</td><td class="center">10%</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if template.showSeriesTable %}
+<div class="section">
+  <h3>WARRANTY PERIOD</h3>
+  <table class="series-table">
+    <thead>
+      <tr><th class="col-s">Series</th><th class="col-d">Duration</th></tr>
+    </thead>
+    <tbody>
+      {% if template.seriesTable and template.seriesTable|length > 0 %}
+      {% for row in template.seriesTable %}
+      <tr><td>{{ row.series }}</td><td class="center">{{ row.duration }}</td></tr>
+      {% endfor %}
+      {% else %}
+      {% for _ in range(2) %}
+      <tr><td>&nbsp;</td><td>&nbsp;</td></tr>
+      {% endfor %}
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="section">
+  <h3>CERTIFICATE DETAILS</h3>
+  <table class="cert-details">
+    <!-- 1. Address Row (all templates) -->
+    <tr>
+      <td class="cl">Address</td>
+      <td class="cv">
+        {{ customer.name }}{% if customer.name and (certData.siteAddress or customer.address) %}, {% endif %}{{ certData.siteAddress or customer.address }}
+      </td>
+    </tr>
+
+    <!-- 2. Product Row (all templates) -->
+    <tr>
+      <td class="cl">
+        {% if template.id in ('heatout', 'stone_coated', 'ceramic') %}
+          The name of the sold products (complete, including color)
+        {% else %}
+          Product Name &amp; Colour
+        {% endif %}
+      </td>
+      <td class="cv">
+        {{ certData.productName }}{% if certData.productColor and certData.productColor != 'N/A' %} &mdash; {{ certData.productColor }}{% endif %}
+      </td>
+    </tr>
+
+    <!-- 3. Batch Row (Docke and Ceramic) -->
+    {% if template.id == 'docke' %}
+      <tr>
+        <td class="cl">Batch Number</td>
+        <td class="cv">{{ certData.batchNo or 'N/A' }}</td>
+      </tr>
+    {% elif template.id == 'ceramic' %}
+      <tr>
+        <td class="cl">Batch Number (see on the packaging)</td>
+        <td class="cv">{{ certData.batchNo or 'N/A' }}</td>
+      </tr>
+    {% endif %}
+
+    <!-- 4. Date Row (all templates EXCEPT Ceramic) -->
+    {% if template.id != 'ceramic' %}
+      <tr>
+        <td class="cl">Date</td>
+        <td class="cv">{{ certData.purchaseDate or cert.date }}</td>
+      </tr>
+    {% endif %}
+
+    <!-- 5. Trading Organization Row (all templates EXCEPT Heatout) -->
+    {% if template.id != 'heatout' %}
+      <tr>
+        <td class="cl">Trading Organization</td>
+        <td class="cv">NOUFAL &amp; JABBAR INTERNATIONAL LLP</td>
+      </tr>
+    {% endif %}
+
+    <!-- 6. Seller's Name & Signature Row (all templates) -->
+    <tr>
+      <td class="cl">Seller's Name &amp; Signature</td>
+      <td class="cv">{{ certData.sellerName or '—' }}</td>
+    </tr>
+
+    <!-- 7. Date Row for Ceramic only (renders at bottom) -->
+    {% if template.id == 'ceramic' %}
+      <tr>
+        <td class="cl">Date</td>
+        <td class="cv">{{ certData.purchaseDate or cert.date }}</td>
+      </tr>
+    {% endif %}
+  </table>
+</div>
+
+<div class="footer">
+  <div class="signature">
+    {% if template.signImage %}
+    <img src="{{ template.signImage }}" style="max-height: 50px; max-width: 180px;" alt="Signature">
+    {% else %}
+    <div class="line">Seller's Signature</div>
+    {% endif %}
+  </div>
+  <div class="seal">
+    {% if template.sealImage %}
+    <img src="{{ template.sealImage }}" style="width: 80px; height: 80px;" alt="Stamp">
+    {% else %}
+    SEAL
+    {% endif %}
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 15mm; }
+  body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; color: #000; line-height: 1.5; margin: 0; padding: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 6px 8px; text-align: left; }
+
+  .header { text-align: center; border-bottom: 3px solid #222; padding-bottom: 10px; margin-bottom: 14px; }
+  .quotation-logo { width: 72px; height: 72px; object-fit: contain; float: left; margin: 0 12px 4px 0; }
+  .header h1 { margin: 0; font-size: 20pt; letter-spacing: 1px; }
+  .header p { margin: 2px 0; font-size: 10pt; color: #444; }
+
+  .info-row { display: flex; justify-content: space-between; margin-bottom: 14px; }
+  .info-left { width: 60%; }
+  .info-right { width: 35%; text-align: right; }
+  .info-row h3 { margin: 0 0 4px 0; font-size: 12pt; }
+  .info-row p { margin: 1px 0; font-size: 10pt; color: #333; }
+
+  .section-title { text-align: center; font-weight: bold; font-size: 13pt; margin: 16px 0 8px; background: #eee; padding: 5px; }
+
+  .items-table thead tr { background: #222; color: #fff; }
+  .items-table th { padding: 7px 8px; font-size: 10pt; }
+  .items-table td { font-size: 10pt; border-bottom: 1px solid #ddd; }
+  .items-table .col-sno { width: 6%; text-align: center; }
+  .items-table .col-product { width: 40%; }
+  .items-table .col-qty { width: 18%; text-align: center; }
+  .items-table .col-price { width: 18%; text-align: right; }
+  .items-table .col-total { width: 18%; text-align: right; }
+
+  .color-label { font-size: 9pt; color: #666; }
+
+  .totals { text-align: right; margin-top: 10px; }
+  .totals table { width: auto; margin-left: auto; }
+  .totals td { padding: 4px 12px; font-size: 11pt; border: none; }
+  .totals .label { text-align: left; }
+  .totals .value { text-align: right; min-width: 100px; }
+  .totals .grand-total td { font-weight: bold; font-size: 13pt; background: #222; color: #fff; padding: 7px 12px; }
+
+  .terms { margin-top: 18px; }
+  .terms h4 { margin: 0 0 6px; font-size: 11pt; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+  .terms ul { margin: 0; padding-left: 18px; font-size: 10pt; color: #333; }
+  .terms li { margin: 2px 0; }
+
+  .footer { display: flex; justify-content: space-between; margin-top: 30px; }
+  .footer .signature { width: 40%; }
+  .footer .signature p { margin: 0; font-size: 10pt; }
+  .footer .signature .line { border-top: 1px solid #000; margin-top: 36px; padding-top: 4px; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  {% if settings.quotationLogo %}
+  <img class="quotation-logo" src="{{ settings.quotationLogo }}" alt="Quotation logo">
+  {% endif %}
+  <h1>{{ company.name }}</h1>
+  <p>{{ company.address | replace('\n', '<br>') }}</p>
+  <p>{{ company.phone }} &nbsp;|&nbsp; {{ company.website }}</p>
+</div>
+
+<div class="info-row">
+  <div class="info-left">
+    <h3>Quotation To:</h3>
+    <p><strong>{{ quotation.customer.name }}</strong></p>
+    {% if quotation.customer.phone %}
+    <p>{{ quotation.customer.phone }}</p>
+    {% endif %}
+    {% if quotation.customer.address %}
+    <p>{{ quotation.customer.address | replace('\n', '<br>') }}</p>
+    {% endif %}
+    {% if quotation.customer.email %}
+    <p>{{ quotation.customer.email }}</p>
+    {% endif %}
+  </div>
+  <div class="info-right">
+    <p><strong>Date:</strong> {{ quotation.date }}</p>
+    <p><strong>Ref:</strong> {{ quotation.id }}</p>
+  </div>
+</div>
+
+<div class="section-title">PRODUCT DETAILS</div>
+
+<table class="items-table">
+  <thead>
+    <tr>
+      <th class="col-sno">SI NO</th>
+      <th class="col-product">PRODUCT</th>
+      <th class="col-qty">QUANTITY</th>
+      <th class="col-price">PRICE/UNIT</th>
+      <th class="col-total">TOTAL</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in quotation.items %}
+    <tr>
+      <td class="col-sno">{{ loop.index }}</td>
+      <td class="col-product">
+        <strong>{{ item.name }}</strong>
+        {% if item.className %}
+        <br><span style="font-size:9pt;color:#666;">{{ item.className }}</span>
+        {% endif %}
+        {% if item.color and item.color not in ('', 'N/A', 'Standard') %}
+        <br><span class="color-label">Color: {{ item.color }}</span>
+        {% endif %}
+      </td>
+      <td class="col-qty">{{ item.qty }} {{ item.unit }}</td>
+      <td class="col-price">{{ currency }}{{ "{:,.0f}".format(item.price) }}</td>
+      <td class="col-total">{{ currency }}{{ "{:,.0f}".format(item.price * item.qty) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="totals">
+  <table>
+    <tr>
+      <td class="label">Subtotal</td>
+      <td class="value">{{ currency }}{{ "{:,.0f}".format(quotation.subtotal) }}</td>
+    </tr>
+    {% if quotation.taxAmount and quotation.taxAmount > 0 %}
+    <tr>
+      <td class="label">GST ({{ quotation.taxRate }}%)</td>
+      <td class="value">{{ currency }}{{ "{:,.0f}".format(quotation.taxAmount) }}</td>
+    </tr>
+    {% endif %}
+    <tr class="grand-total">
+      <td class="label">TOTAL</td>
+      <td class="value">{{ currency }}{{ "{:,.0f}".format(quotation.grandTotal) }}</td>
+    </tr>
+  </table>
+</div>
+
+{% if settings.termsText %}
+<div class="terms">
+  <h4>TERMS AND CONDITIONS</h4>
+  <ul>
+    {% for line in settings.termsText.split('\n') %}
+    {% if line.strip() %}
+    <li>{{ line }}</li>
+    {% endif %}
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="footer">
+  <div class="signature">
+    <div class="line">Customer Acceptance</div>
+  </div>
+  <div class="signature">
+    <div class="line">For NJ India</div>
+  </div>
+</div>
+
+</body>
+</html>

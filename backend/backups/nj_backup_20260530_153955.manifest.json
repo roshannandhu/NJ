@@ -1,0 +1,24 @@
+{
+  "stem": "nj_backup_20260530_153955",
+  "reason": "shutdown",
+  "created_iso": "2026-05-30T15:39:55+05:30",
+  "db_bytes": 14151680,
+  "rows": {
+    "app_config": 1,
+    "quotations": 1,
+    "warranty_certificates": 3
+  },
+  "sha256": {
+    "db": "42c3bcc7b5196a579b4d0b2de8ae1a0327669855b2c7584eb5bb0abf0a4c0a69",
+    "json": "f8d6d038702548dffa03c21311829dea41c543cfbd83485b3382c31616643bae"
+  },
+  "verify": {
+    "db_integrity": "ok",
+    "db_hash_match": true,
+    "json_parse": true
+  },
+  "targets": {},
+  "ok": false,
+  "uploads_count": 0,
+  "uploads_bytes": 22
+}

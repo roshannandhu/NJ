@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+
+# Build output
+dist/
+frontend/dist/
+dist-ssr/
+
+# Runtime/generated files
+*.log
+logs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local app data and uploads
+backend/*.db
+backend/*.sqlite
+backend/uploads/
+
+# Environment and editor files
+.env
+.env.*
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local assistant/tool state
+.claude/
