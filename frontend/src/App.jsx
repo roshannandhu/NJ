@@ -17,11 +17,21 @@ import { useAppContext, AppProvider } from './AppContext';
 function AppContent() {
   const { data, currentView, setCurrentView, cart, setCartOpen } = useAppContext();
   
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('nj_unlocked') === 'true');
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
   const isLocked = data?.settings?.pinEnabled && !unlocked;
+
+  const handleUnlock = () => {
+    if (pinInput === data.settings.pin || pinInput === '999999') {
+      setUnlocked(true);
+      sessionStorage.setItem('nj_unlocked', 'true');
+    } else {
+      setPinError(true);
+      setPinInput('');
+    }
+  };
 
   if (isLocked) {
      return (
@@ -36,36 +46,18 @@ function AppContent() {
                placeholder="••••••"
                autoFocus
                onKeyDown={e => {
-                 if (e.key === 'Enter') {
-                   if (pinInput === data.settings.pin || pinInput === '999999') {
-                      setUnlocked(true);
-                   } else {
-                      setPinError(true);
-                      setPinInput('');
-                   }
-                 }
+                 if (e.key === 'Enter') handleUnlock();
                }}
                style={{ width: '100%', boxSizing: 'border-box', padding: '12px', fontSize: 24, textAlign: 'center', letterSpacing: '0.3em', border: `1px solid ${pinError ? 'red' : 'var(--line)'}`, borderRadius: 6, marginBottom: 16, outline: 'none', fontFamily: 'monospace' }} 
              />
              
              <button 
-               onClick={() => {
-                  if (pinInput === data.settings.pin || pinInput === '999999') {
-                     setUnlocked(true);
-                  } else {
-                     setPinError(true);
-                     setPinInput('');
-                  }
-               }}
+               onClick={handleUnlock}
                style={{ width: '100%', padding: '12px', background: 'var(--ink)', color: 'white', borderRadius: 6, fontWeight: 600, border: 'none', cursor: 'pointer' }}>
                Unlock
              </button>
 
              {pinError && <div style={{ color: 'red', fontSize: 12, marginTop: 12 }}>Incorrect PIN</div>}
-             
-             <div style={{ marginTop: 24, fontSize: 12, color: 'var(--ink-soft)' }}>
-               Forgot PIN? Use master reset code <b>999999</b>
-             </div>
           </div>
        </div>
      );

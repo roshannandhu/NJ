@@ -3,7 +3,8 @@ import { useAppContext } from '../AppContext';
 import { X, Minus, Plus, Trash2 } from 'lucide-react';
 
 export default function CartDrawer() {
-  const { cart, cartOpen, setCartOpen, updateCartQty, removeFromCart, cartTotal, customer, setCurrentView } = useAppContext();
+  const { cart, cartOpen, setCartOpen, updateCartQty, removeFromCart, cartTotal, customer, setCurrentView, data } = useAppContext();
+  const cur = data?.settings?.currencySymbol || '₹';
 
   const handleGenerate = () => {
     if (!customer.name) {
@@ -60,7 +61,7 @@ export default function CartDrawer() {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '16px', fontWeight: 600 }}>₹{item.price * item.qty}</div>
+                  <div style={{ fontSize: '16px', fontWeight: 600 }}>{cur}{item.price * item.qty}</div>
                   <button onClick={() => removeFromCart(item.cartId)} style={{ color: 'var(--red)', fontSize: '12px', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                     <Trash2 size={12}/> Remove
                   </button>
@@ -72,8 +73,8 @@ export default function CartDrawer() {
 
         <div style={{ padding: '32px', background: 'rgba(0,0,0,0.5)', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '24px' }}>
-            <span style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink-soft)' }}>Grand Total</span>
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 500 }}>₹{cartTotal}</span>
+            <span style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink-soft)' }}>Subtotal (before tax)</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 500 }}>{cur}{cartTotal.toFixed(2)}</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <button onClick={() => setCartOpen(false)} style={{ padding: '14px', borderRadius: 'var(--radius-full)', border: '1px solid rgba(255,255,255,0.2)', color: 'white', fontSize: '14px', fontWeight: 500 }}>

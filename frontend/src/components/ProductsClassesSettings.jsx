@@ -21,6 +21,12 @@ export default function ProductsClassesSettings() {
   const autoSaveTimer = useRef(null);
   const skipAutoSave = useRef(false); // true when state was set by tree selection, not by user
 
+  // "Latest ref" pattern — updated on every render so timer callbacks always
+  // see the current data/editX/selectedNode, never a stale closure.
+  const doSaveClassRef   = useRef(null);
+  const doSaveVarietyRef = useRef(null);
+  const doSaveColorRef   = useRef(null);
+
   // --- Helpers ---
   const imagePreview = (url, fit = 'cover') => (
     url ? `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/${fit} no-repeat` : undefined
@@ -127,13 +133,19 @@ export default function ProductsClassesSettings() {
   const saveVariety = () => { clearTimeout(autoSaveTimer.current); doSaveVariety(false); };
   const saveColor   = () => { clearTimeout(autoSaveTimer.current); doSaveColor(false); };
 
+  // Keep refs pointing to latest functions — runs synchronously on every render
+  // before any timer callback fires, so the callback always gets fresh data.
+  doSaveClassRef.current   = doSaveClass;
+  doSaveVarietyRef.current = doSaveVariety;
+  doSaveColorRef.current   = doSaveColor;
+
   // --- Auto-save effects (debounced 800ms after any field change) ---
   useEffect(() => {
     if (!editClass) return;
     if (skipAutoSave.current) { skipAutoSave.current = false; return; }
     setSaveStatus('pending');
     clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveClass(true), 800);
+    autoSaveTimer.current = setTimeout(() => doSaveClassRef.current(true), 800);
   }, [editClass]);
 
   useEffect(() => {
@@ -141,7 +153,7 @@ export default function ProductsClassesSettings() {
     if (skipAutoSave.current) { skipAutoSave.current = false; return; }
     setSaveStatus('pending');
     clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveVariety(true), 800);
+    autoSaveTimer.current = setTimeout(() => doSaveVarietyRef.current(true), 800);
   }, [editVariety]);
 
   useEffect(() => {
@@ -149,7 +161,7 @@ export default function ProductsClassesSettings() {
     if (skipAutoSave.current) { skipAutoSave.current = false; return; }
     setSaveStatus('pending');
     clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveColor(true), 800);
+    autoSaveTimer.current = setTimeout(() => doSaveColorRef.current(true), 800);
   }, [editColor]);
 
   // Cleanup timer on unmount
@@ -440,10 +452,36 @@ export default function ProductsClassesSettings() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', maxWidth: '800px' }}>
-                  
-                  {/* Variety Image Upload Zone Removed as requested */}
-
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {data.classes.find(c => c.id === editVariety.classId)?.type === 'tools' && (
+                    <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Display Image</label>
+                      <label style={{
+                        width: '240px', height: '240px',
+                        border: '2px dashed var(--line)', borderRadius: 'var(--radius-lg)',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        background: editVariety.image ? imagePreview(editVariety.image, 'cover') : 'var(--bg-warm)',
+                        cursor: 'pointer', transition: 'all 0.2s', position: 'relative', overflow: 'hidden',
+                        flexShrink: 0,
+                      }} className="hover-lift">
+                        {!editVariety.image && (
+                          <>
+                            <ImageIcon size={40} color="var(--ink-soft)" style={{ marginBottom: '16px' }}/>
+                            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Click to upload image</div>
+                            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>PNG, JPG up to 5MB</div>
+                            <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd> to paste
+                            </div>
+                          </>
+                        )}
+                        {editVariety.image && (
+                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s' }} onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0}>
+                            <span style={{ color: 'white', fontWeight: 600 }}>Change Image</span>
+                          </div>
+                        )}
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleImageUpload(e, (url) => setEditVariety({...editVariety, image: url}))} />
+                      </label>
+                    </div>
+                  )}                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Variety Name</label>
                     <input value={editVariety.name} onChange={e => setEditVariety({...editVariety, name: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
                   </div>

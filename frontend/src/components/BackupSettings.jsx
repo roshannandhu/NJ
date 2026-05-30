@@ -109,19 +109,23 @@ export default function BackupSettings() {
   const patchTarget = (name, patch) =>
     setTargets(t => ({ ...t, [name]: { ...t[name], ...patch } }));
 
-  const handleSave = async (silent = false) => {
+  // Patch a destination AND persist immediately with the new value (avoids the
+  // stale-closure bug where handleSave would otherwise save the pre-patch targets).
+  const patchTargetAndSave = (name, patch) => {
+    const next = { ...targets, [name]: { ...targets[name], ...patch } };
+    setTargets(next);
+    handleSave(true, { targets: next });
+  };
+
+  const handleSave = async (silent = false, overrides = {}) => {
     setBusy(true);
     try {
-      await saveBackupSettings({ targets, keep: +keep, interval_days: +intervalDays });
-      if (!silent) showToast('Settings saved'); 
+      await saveBackupSettings({ targets, keep: +keep, interval_days: +intervalDays, ...overrides });
+      if (!silent) showToast('Settings saved');
       await load();
     } catch { showToast('Failed to save settings', 'error'); }
     finally { setBusy(false); }
   };
-
-  useEffect(() => {
-    if (status && targets) handleSave(true);
-  }, [intervalDays, keep]);
 
   const handleBackupNow = async () => {
     setBusy(true);
@@ -146,7 +150,7 @@ export default function BackupSettings() {
   const handleDetectGdrive = async () => {
     try {
       const r = await detectGdrivePath();
-      if (r.found) { patchTarget('gdrive', { path: r.path, enabled: true }); showToast('Google Drive detected'); handleSave(true); }
+      if (r.found) { patchTargetAndSave('gdrive', { path: r.path, enabled: true }); showToast('Google Drive detected'); }
       else showToast('Google Drive not found', 'error');
     } catch { showToast('Detection failed', 'error'); }
   };
@@ -205,7 +209,7 @@ export default function BackupSettings() {
     return <div style={{ padding:40, textAlign:'center', color:'var(--ink-soft)' }}>Loading...</div>;
   }
 
-  const activeCount = ['local','gdrive','usb'].filter(n => targets[n]?.enabled && status.targets[n]?.available).length;
+  const activeCount = ['local','gdrive','usb'].filter(n => targets[n]?.enabled && status.targets?.[n]?.available).length;
   const isHealthy = !status.needs_backup_reminder && activeCount > 0;
   
   const inpStyle = {
@@ -288,7 +292,7 @@ export default function BackupSettings() {
                 {['local','gdrive','usb'].map((name, i) => {
                   const { label, Icon } = DEST[name];
                   const t = targets[name];
-                  const st = status.targets[name];
+                  const st = status.targets?.[name];
                   const isOk = t.enabled && st?.available;
                   const tr = testRes[name];
                   const isExpanded = expandedLoc === name;
@@ -300,7 +304,7 @@ export default function BackupSettings() {
                         style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '10px 12px', borderBottom: i < 2 || isExpanded ? '1px solid var(--line)' : 'none', alignItems: 'center', fontSize: 13, cursor: 'pointer', background: isExpanded ? 'var(--bg)' : 'transparent' }}>
                         
                         <div onClick={e => e.stopPropagation()}>
-                          <input type="checkbox" checked={!!t.enabled} onChange={e => { patchTarget(name, { enabled: e.target.checked }); handleSave(true); }} style={{ margin: 0, cursor: 'pointer' }} />
+                          <input type="checkbox" checked={!!t.enabled} onChange={e => patchTargetAndSave(name, { enabled: e.target.checked })} style={{ margin: 0, cursor: 'pointer' }} />
                         </div>
                         
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: t.enabled ? 'var(--ink)' : 'var(--ink-soft)', fontWeight: 500 }}>
@@ -334,7 +338,7 @@ export default function BackupSettings() {
                           {name === 'usb' && usbList && (
                             <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
                               {usbList.map(d => (
-                                <button key={d.letter} style={{ ...btnStyle, fontSize: 12, padding: '4px 8px' }} onClick={() => { patchTarget('usb', { path: d.path, enabled: true }); setUsbList(null); handleSave(true); }}>
+                                <button key={d.letter} style={{ ...btnStyle, fontSize: 12, padding: '4px 8px' }} onClick={() => { patchTargetAndSave('usb', { path: d.path, enabled: true }); setUsbList(null); }}>
                                   {d.letter} {d.label}
                                 </button>
                               ))}
@@ -365,7 +369,7 @@ export default function BackupSettings() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 16, alignItems: 'center', fontSize: 13, maxWidth: 400 }}>
                   <span style={{ color: 'var(--ink-mid)' }}>Frequency</span>
-                  <select value={intervalDays} onChange={e => setIntervalDays(+e.target.value)} style={{ ...inpStyle, cursor: 'pointer' }}>
+                  <select value={intervalDays} onChange={e => { const v = +e.target.value; setIntervalDays(v); handleSave(true, { interval_days: v }); }} style={{ ...inpStyle, cursor: 'pointer' }}>
                     {INTERVALS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                   

@@ -270,7 +270,7 @@ def restore(body: dict = Body(...)):
 # ── run a backup now ─────────────────────────────────────────────────────────
 @router.post("/api/backup/run")
 def backup_run():
-    manifest = backup_service.make_backup("manual")
+    manifest = backup_service.make_backup("manual", force_catalog=True)
     if not manifest.get("ok"):
         # Still return 200 with the manifest so the UI can show exactly what
         # failed (e.g. no targets enabled, USB unplugged) instead of a blank error.

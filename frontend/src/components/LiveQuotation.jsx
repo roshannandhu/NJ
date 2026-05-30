@@ -3,14 +3,15 @@ import { useAppContext } from '../AppContext';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 
 export default function LiveQuotation() {
-  const { 
-    cart, 
-    updateCartQty, 
-    removeFromCart, 
-    cartTotal, 
-    customer, 
-    setCustomer, 
-    setCurrentView 
+  const {
+    cart,
+    updateCartQty,
+    removeFromCart,
+    cartTotal,
+    customer,
+    setCustomer,
+    setCurrentView,
+    data,
   } = useAppContext();
 
   const [isPulsing, setIsPulsing] = React.useState(false);
@@ -31,7 +32,10 @@ export default function LiveQuotation() {
     setCurrentView('checkout');
   };
 
-  const taxAmount = cartTotal * 0.18; // Mock 18% tax
+  const settings = data?.settings || {};
+  const cur = settings.currencySymbol || '₹';
+  const taxRate = (settings.taxEnabled ?? true) ? (Number(settings.taxRate) || 0) : 0;
+  const taxAmount = Math.round(cartTotal * taxRate) / 100;
   const grandTotal = cartTotal + taxAmount;
 
   return (
@@ -66,7 +70,7 @@ export default function LiveQuotation() {
                     <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--ink)', marginBottom: '4px' }}>{item.name}</div>
                     <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginBottom: '8px' }}>
                       {item.color !== 'Standard' && <span>{item.color} · </span>}
-                      ₹{item.price} / {item.unit}
+                      {cur}{item.price} / {item.unit}
                     </div>
                     <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--line)', borderRadius: '4px' }}>
                       <button onClick={() => updateCartQty(item.cartId, item.qty - 1)} style={{ padding: '4px 8px', background: 'transparent', border: 'none', cursor: 'pointer' }}><Minus size={14} color="var(--ink-mid)"/></button>
@@ -75,7 +79,7 @@ export default function LiveQuotation() {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>₹{item.price * item.qty}</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>{cur}{item.price * item.qty}</div>
                     <button onClick={() => removeFromCart(item.cartId)} style={{ background: 'transparent', border: 'none', color: 'var(--red)', fontSize: '11px', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', cursor: 'pointer' }}>
                       <Trash2 size={12}/> Remove
                     </button>
@@ -90,15 +94,17 @@ export default function LiveQuotation() {
         <div style={{ padding: '24px', borderTop: '1px solid var(--line)', background: 'var(--surface)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: 'var(--ink-mid)' }}>
             <span>Subtotal</span>
-            <span>₹{cartTotal.toFixed(2)}</span>
+            <span>{cur}{cartTotal.toFixed(2)}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '13px', color: 'var(--ink-mid)' }}>
-            <span>Tax (18%)</span>
-            <span>₹{taxAmount.toFixed(2)}</span>
-          </div>
+          {taxRate > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '13px', color: 'var(--ink-mid)' }}>
+              <span>Tax ({taxRate}%)</span>
+              <span>{cur}{taxAmount.toFixed(2)}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '24px', borderTop: '1px solid var(--line)', paddingTop: '16px' }}>
             <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Total</span>
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--ink)' }}>₹{grandTotal.toFixed(2)}</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--ink)' }}>{cur}{grandTotal.toFixed(2)}</span>
           </div>
 
           <button 

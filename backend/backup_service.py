@@ -87,6 +87,8 @@ def default_state():
         "last_backup": {},        # reason -> iso
         "last_success_iso": None,
         "recent": [],             # list of manifest summaries (newest first)
+        "catalog_changed_at": None,     # set whenever config is saved
+        "last_catalog_backup_at": None, # set when uploads ZIP is included in backup
     }
 
 
@@ -102,6 +104,8 @@ def _merge_defaults(state):
     out["recent"] = state.get("recent") or []
     out.setdefault("keep", KEEP_DEFAULT)
     out.setdefault("interval_days", INTERVAL_DAYS_DEFAULT)
+    out.setdefault("catalog_changed_at", None)
+    out.setdefault("last_catalog_backup_at", None)
     return out
 
 
@@ -159,6 +163,14 @@ def update_settings(targets=None, keep=None, interval_days=None):
                 pass
         set_state(state)
         return state
+
+
+def mark_catalog_changed():
+    """Call whenever catalog config is saved — triggers uploads ZIP on next backup."""
+    with _state_lock:
+        state = get_state()
+        state["catalog_changed_at"] = _now_iso()
+        set_state(state)
 
 
 # ── payload (the JSON export — same shape as /api/backup & /api/restore) ─────
@@ -264,14 +276,21 @@ def _free_bytes(path):
         return None
 
 
+def _base_stem(name):
+    """Reduce any backup file name to its shared timestamp stem so all files of
+    one set (.db, .json, .uploads.zip, .manifest.json) group together."""
+    for suffix in (".manifest.json", ".uploads.zip"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name.rsplit(".", 1)[0]
+
+
 def _rotate(directory, keep, prefix=PREFIX):
     """Keep only the newest `keep` backup sets in `directory`; delete the rest."""
     try:
         d = Path(directory)
         stems = sorted(
-            {f.name[: -len(".manifest.json")] if f.name.endswith(".manifest.json")
-             else f.stem
-             for f in d.glob(prefix + "*")},
+            {_base_stem(f.name) for f in d.glob(prefix + "*")},
             reverse=True,
         )
         for stem in stems[keep:]:
@@ -329,9 +348,13 @@ def restore_uploads_from_zip(zip_path):
 
 
 # ── the main backup operation ────────────────────────────────────────────────
-def make_backup(reason="manual"):
+def make_backup(reason="manual", force_catalog=False):
     """Create + verify a backup set and copy it to every enabled, writable
-    target. Never raises: returns a manifest dict (with ``ok`` flag)."""
+    target. Never raises: returns a manifest dict (with ``ok`` flag).
+
+    force_catalog=True always includes the uploads ZIP (used for manual backups).
+    When False, uploads are only zipped if catalog changed since last catalog backup.
+    """
     with _backup_lock:
         state = get_state()
         keep = int(state.get("keep", KEEP_DEFAULT))
@@ -361,7 +384,20 @@ def make_backup(reason="manual"):
             tmp_json.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            uploads_count, uploads_bytes = _zip_uploads(tmp_uploads)
+
+            # Only zip uploads when catalog changed since last catalog backup,
+            # or when forced (manual backup).
+            cat_changed = state.get("catalog_changed_at")
+            last_cat_bk = state.get("last_catalog_backup_at")
+            catalog_needs_backup = force_catalog or (
+                cat_changed is None or
+                last_cat_bk is None or
+                cat_changed > last_cat_bk
+            )
+            if catalog_needs_backup:
+                uploads_count, uploads_bytes = _zip_uploads(tmp_uploads)
+            else:
+                uploads_count, uploads_bytes = 0, 0
 
             manifest["rows"] = _row_counts()
             manifest["db_bytes"] = tmp_db.stat().st_size
@@ -431,6 +467,8 @@ def make_backup(reason="manual"):
                 latest["last_backup"][reason] = manifest["created_iso"]
                 if manifest["ok"]:
                     latest["last_success_iso"] = manifest["created_iso"]
+                    if catalog_needs_backup and uploads_count > 0:
+                        latest["last_catalog_backup_at"] = manifest["created_iso"]
                 latest["recent"] = ([summary] + latest.get("recent", []))[:20]
                 set_state(latest)
             return manifest
@@ -486,16 +524,16 @@ def restore_from_payload(payload):
 
     db = SessionLocal()
     try:
-        # Only overwrite config when it is explicitly present in the payload.
+        # Only overwrite config when it is explicitly present AND non-empty.
         # History-only backups have no "config" key — skipping prevents wiping
-        # classes, varieties and image paths when restoring history.
-        if "config" in payload:
-            cfg = payload["config"] or {}
+        # classes, varieties and image paths. An empty {} config (corrupted
+        # or old-format backup) is also rejected to prevent data loss.
+        if "config" in payload and payload["config"]:
             cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
             if cfg_row is None:
                 cfg_row = AppConfig(id=1)
                 db.add(cfg_row)
-            cfg_row.data = json.dumps(cfg)
+            cfg_row.data = json.dumps(payload["config"])
 
         db.query(Quotation).delete()
         for q in quotations:

@@ -45,6 +45,14 @@ export function AppProvider({ children }) {
   const [backupStatus, setBackupStatus] = useState(null);
   const [reminderDismissed, setReminderDismissed] = useState(false);
 
+  const showToast = (message, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  };
+
   const refreshBackupStatus = async () => {
     try {
       setBackupStatus(await getBackupStatus());
@@ -99,14 +107,6 @@ export function AppProvider({ children }) {
     } catch {
       showToast("Failed to save config to server", "error");
     }
-  };
-
-  const showToast = (message, type = 'success') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
   };
 
   const addToCart = (item) => {

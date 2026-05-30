@@ -45,6 +45,7 @@ const matchesSearch = (item, cls, search) => {
 
 export default function QuotationDesk() {
   const { data, addToCart } = useAppContext();
+  const cur = data?.settings?.currencySymbol || '₹';
   const productListRef = React.useRef(null);
   const toolsSectionRef = React.useRef(null);
   const tileClasses = React.useMemo(
@@ -172,7 +173,7 @@ export default function QuotationDesk() {
       >
         <div
           className={`qd-variety-image ${activeImage ? 'has-image' : ''}`}
-          style={activeImage ? { background: imageBackground(activeImage) } : undefined}
+          style={activeImage ? { background: isTool ? imageBackground(activeImage, null, 'contain') : imageBackground(activeImage) } : undefined}
         >
           {!activeImage && (
             <div className="qd-fallback-mark">
@@ -181,7 +182,7 @@ export default function QuotationDesk() {
             </div>
           )}
           
-          {!isTool && (
+          {!isTool && item.colors?.length > 0 && (
             <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, zIndex: 2, backdropFilter: 'blur(4px)' }}>
               {selectedColor}
             </div>
@@ -195,7 +196,7 @@ export default function QuotationDesk() {
               <p>{item.description || cls.name || 'Ready to add to quotation'}</p>
             </div>
             <div className="qd-price">
-              <strong>Rs. {price}</strong>
+              <strong>{cur} {price}</strong>
               <span>/ {item.unit}</span>
             </div>
           </div>
