@@ -1,7 +1,8 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, MapPin, FileType2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, MapPin, FileType2, Share2 } from 'lucide-react';
 import { downloadWarrantyDocx } from '../api';
+import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName } from '../share';
 
 export default function QuotationDocument() {
   const { 
@@ -30,6 +31,8 @@ export default function QuotationDocument() {
   const settings = data.settings || {};
   const company  = data.company  || {};
   const [isDownloading, setIsDownloading] = React.useState(false);
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const [isSharing, setIsSharing] = React.useState(false);
 
   const startNew = () => {
     setCart([]);
@@ -161,6 +164,47 @@ export default function QuotationDocument() {
 
   const activeTabId = activeTab || 'quotation';
   const activeCert = bundledWarranties.find(w => (w.warrantyNo || w.id) === activeTabId);
+
+  // ── Share ───────────────────────────────────────────────────────────────
+  const custName = generatedDoc.customer?.name || 'Customer';
+  const _wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const shareItemStyle = { display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--line-soft)', fontSize: '14px', fontWeight: 500, color: 'var(--ink)', cursor: 'pointer' };
+
+  const shareCurrent = async () => {
+    setShareOpen(false); setIsSharing(true);
+    try {
+      let file;
+      if (activeTabId === 'quotation') {
+        file = await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName), { multiPage: true });
+      } else {
+        file = await elementToPdfFile(document.getElementById('warrantyDoc'), warrantyFileName(activeCert || { id: activeTabId }, custName));
+      }
+      const r = await shareFiles([file], { title: `NJ India — ${custName}`, text: 'Document from NJ India' });
+      showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
+    } catch { showToast('Share failed', 'error'); }
+    finally { setIsSharing(false); }
+  };
+
+  const shareFullSet = async () => {
+    setShareOpen(false); setIsSharing(true);
+    const prev = activeTabId;
+    try {
+      const files = [];
+      setActiveTab('quotation'); await _wait(450);
+      files.push(await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName), { multiPage: true }));
+      for (const w of bundledWarranties) {
+        try {
+          setActiveTab(w.warrantyNo || w.id); await _wait(450);
+          const el = document.getElementById('warrantyDoc');
+          if (el) files.push(await elementToPdfFile(el, warrantyFileName(w, custName)));
+        } catch { /* skip a warranty that fails to render; keep the rest */ }
+      }
+      setActiveTab(prev); await _wait(50);
+      const r = await shareFiles(files, { title: `NJ India — ${custName}`, text: 'Quotation & warranties' });
+      showToast(r === 'downloaded' ? `Saved ${files.length} files — attach them in WhatsApp/Email` : r === 'cancelled' ? 'Share cancelled' : `Shared ${files.length} files`);
+    } catch { setActiveTab(prev); showToast('Share failed', 'error'); }
+    finally { setIsSharing(false); }
+  };
 
   const updateCertField = (field, value) => {
     if (!activeCert) return;
@@ -696,6 +740,19 @@ export default function QuotationDocument() {
                 }}>
                 <Download size={18} /> {isDownloading ? 'Downloading...' : 'Download PDF'}
               </button>
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer', opacity: isSharing ? 0.7 : 1 }}>
+                  <Share2 size={18} /> {isSharing ? 'Preparing…' : 'Share'}
+                </button>
+                {shareOpen && (<>
+                  <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />
+                  <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)', minWidth: 270, overflow: 'hidden' }}>
+                    <button style={shareItemStyle} onClick={shareCurrent}>Share this quotation</button>
+                    <button style={{ ...shareItemStyle, borderBottom: 'none' }} onClick={shareFullSet}>Share full set (quotation + all warranties)</button>
+                  </div>
+                </>)}
+              </div>
               <button onClick={startNew} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <RotateCcw size={18} /> Start New
@@ -725,6 +782,19 @@ export default function QuotationDocument() {
                 }}>
                 <Download size={18} /> {isDownloading ? 'Downloading...' : 'Download PDF'}
               </button>
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer', opacity: isSharing ? 0.7 : 1 }}>
+                  <Share2 size={18} /> {isSharing ? 'Preparing…' : 'Share'}
+                </button>
+                {shareOpen && (<>
+                  <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />
+                  <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 30, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)', minWidth: 270, overflow: 'hidden' }}>
+                    <button style={shareItemStyle} onClick={shareCurrent}>Share this warranty</button>
+                    <button style={{ ...shareItemStyle, borderBottom: 'none' }} onClick={shareFullSet}>Share full set (quotation + all warranties)</button>
+                  </div>
+                </>)}
+              </div>
               {activeCert && (
                 <button onClick={() => downloadWarrantyDocx(activeCert.warrantyNo || activeCert.id, activeCert, `NJ_Warranty_${activeCert.warrantyNo || 'NJ-W-0001'}_${(activeCert.customer?.name || 'Customer').replace(/\s+/g,'_')}.docx`).catch(e => showToast && showToast('Word download failed: ' + e.message, 'error'))} className="hover-lift"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#2d6a4f', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>

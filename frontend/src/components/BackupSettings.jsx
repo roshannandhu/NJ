@@ -2,17 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, HardDrive, Cloud, Usb,
   Download, RefreshCw, ChevronDown, ChevronRight,
-  Database, Trash2, Search, Zap, Wifi, RotateCcw, Upload,
+  Database, Trash2, Search, Zap, Wifi, RotateCcw, Upload, Share2,
 } from 'lucide-react';
 import { useAppContext } from '../AppContext';
 import {
   getBackupStatus, getBackupHealth, getBackupSettings, saveBackupSettings,
   runBackup, restoreFromFile, restoreFromPath,
-  downloadBackup, downloadCatalogBackup, downloadHistoryBackup,
+  downloadBackup, downloadCatalogBackup, downloadHistoryBackup, fetchBackupBlob,
   getUploadsInfo, restoreCatalogFromFile,
   detectGdrivePath, detectUsbDrives, testConnection, listBackupFiles,
   clearQuotations, clearWarranties,
 } from '../api';
+import { shareFiles, blobToFile } from '../share';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -514,6 +515,16 @@ export default function BackupSettings() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadBackup}>
                 <Download size={14} /> Export Full Backup (Both)
+              </button>
+              <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
+                onClick={async () => {
+                  try {
+                    const { blob, filename } = await fetchBackupBlob();
+                    const r = await shareFiles([blobToFile(blob, filename, 'application/zip')], { title: 'NJ India — full backup', text: 'All quotations, warranties & catalog' });
+                    showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
+                  } catch { showToast('Share failed', 'error'); }
+                }}>
+                <Share2 size={14} /> Share Full Backup (everything)
               </button>
               <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadCatalogBackup}>
                 <Download size={14} /> Export Catalog

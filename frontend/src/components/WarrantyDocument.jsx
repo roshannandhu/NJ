@@ -1,7 +1,8 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
 import { downloadWarrantyDocx } from '../api';
+import { elementToPdfFile, shareFiles, warrantyFileName } from '../share';
 
 // ── Inline-Editable Cell ───────────────────────────────────────────────────
 function EditableCell({ value, onSave, multiline = false, style = {}, renderValue, hideIcon }) {
@@ -249,6 +250,17 @@ export default function WarrantyDocument() {
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const shareWarranty = async () => {
+    setIsDownloading(true);
+    try {
+      const el = document.getElementById('warrantyDoc');
+      const file = await elementToPdfFile(el, warrantyFileName(doc, customer.name));
+      const r = await shareFiles([file], { title: `NJ India Warranty — ${customer.name || 'Customer'}`, text: 'Warranty certificate from NJ India' });
+      if (showToast) showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared', r === 'downloaded' ? 'success' : 'info');
+    } catch { if (showToast) showToast('Share failed', 'error'); }
+    finally { setIsDownloading(false); }
   };
 
   const startNew = () => {
@@ -502,6 +514,10 @@ export default function WarrantyDocument() {
             <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
               <Download size={15}/> {isDownloading ? 'Generating…' : 'Download PDF'}
+            </button>
+            <button onClick={shareWarranty} disabled={isDownloading} className="hover-lift"
+              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
+              <Share2 size={15}/> Share
             </button>
             <button onClick={() => downloadWarrantyDocx(doc.warrantyNo || doc.id, { ...doc, template }, `NJ_Warranty_${doc.warrantyNo || 'NJ-W-0001'}_${(customer.name || 'Customer').replace(/\s+/g,'_')}.docx`).catch(e => showToast && showToast('Word download failed: ' + e.message, 'error'))} className="hover-lift"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#2d6a4f', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>

@@ -120,6 +120,16 @@ export async function downloadBackup() {
   return _downloadFromEndpoint("/api/backup", "nj_backup");
 }
 
+// Fetch the full backup as a Blob (for the Share feature). Returns { blob, filename }.
+export async function fetchBackupBlob() {
+  const res = await fetch(`${BASE}/api/backup`);
+  if (!res.ok) throw new Error(`Backup failed: ${res.status}`);
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  return { blob, filename: match ? match[1] : `nj_backup_${Date.now()}.zip` };
+}
+
 export async function downloadCatalogBackup() {
   return _downloadFromEndpoint("/api/backup/catalog", "nj_catalog");
 }
