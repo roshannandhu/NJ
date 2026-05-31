@@ -1,9 +1,9 @@
 @echo off
 title NJ India System  (keep this window open while using the app)
 
-REM Store the database and uploaded images in a per-user writable folder so the
-REM app works even though it is installed in the read-only Program Files folder.
-set "NJ_DATA_DIR=%LOCALAPPDATA%\NJ India"
+REM Store the database and uploaded images in a per-user folder that is SEPARATE
+REM from the program folder, so reinstalling never deletes the seller's data.
+set "NJ_DATA_DIR=%LOCALAPPDATA%\NJ India Data"
 
 REM This .bat lives in {install}\app ; the bundled Python is in {install}\python
 cd /d "%~dp0"

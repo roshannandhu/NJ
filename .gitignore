@@ -25,6 +25,12 @@ __pycache__/
 backend/*.db
 backend/*.sqlite
 backend/uploads/
+backend/backups/
+
+# Scratch / packaged artifacts
+scratch_docx*
+/NJ India - Portable.zip
+/NJ India Setup.exe
 
 # Environment and editor files
 .env
