@@ -16,7 +16,42 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import Response
 
 from database import get_db
-from models import WarrantyCertificate
+from models import WarrantyCertificate, AppConfig
+
+
+def _resolve_template(cert):
+    """Return a template dict with `sections`. The warranty cert's `template`
+    field may be a full object (sent from WarrantyDocument) OR a string id /
+    object-without-sections (sent from QuotationDocument). In the latter cases,
+    look the real template up from the saved config's `warranties` array."""
+    tpl = cert.get("template")
+    if isinstance(tpl, dict) and tpl.get("sections"):
+        return tpl
+
+    # Load configured warranty templates
+    db = next(get_db())
+    try:
+        row = db.query(AppConfig).filter(AppConfig.id == 1).first()
+        warranties = (json.loads(row.data).get("warranties") or []) if row else []
+    finally:
+        db.close()
+
+    target_id = tpl if isinstance(tpl, str) else (tpl.get("id") if isinstance(tpl, dict) else None)
+    matched = next((w for w in warranties if w.get("id") == target_id), None)
+
+    # Fallback: match by the first item's class name
+    if not matched:
+        items = cert.get("items") or []
+        cls_name = items[0].get("className", "") if items else ""
+        if cls_name:
+            matched = next((w for w in warranties if w.get("title", "").lower() in cls_name.lower()
+                            or cls_name.lower() in w.get("title", "").lower()), None)
+
+    if matched:
+        base = tpl if isinstance(tpl, dict) else {}
+        return {**matched, **base, "sections": matched.get("sections", []), "opening": matched.get("opening", "")}
+
+    return tpl if isinstance(tpl, dict) else {}
 
 router = APIRouter()
 
@@ -262,7 +297,7 @@ def _cert_details_common(doc, cert_data, customer, template_id="default"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _gen_dynamic_warranty(doc, cert_data, customer, template, cert):
-    sections = template.get("sections", [])
+    sections = template.get("sections", []) if isinstance(template, dict) else []
 
     # Create a 2-column borderless table
     tbl = doc.add_table(rows=1, cols=2)
@@ -406,7 +441,7 @@ def warranty_docx(wid: str, body: dict = Body(...)):
         finally:
             db.close()
 
-    template    = cert.get("template", {})
+    template    = _resolve_template(cert)
     cert_data   = cert.get("certData", {})
     customer    = cert.get("customer", {})
     warranty_no = cert.get("warrantyNo") or cert.get("id") or wid

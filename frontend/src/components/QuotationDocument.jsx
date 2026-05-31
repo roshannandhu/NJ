@@ -99,8 +99,41 @@ export default function QuotationDocument() {
       setIsDownloading(false);
     }
   };
+  const warrantyInnerRef = React.useRef(null);
+  React.useLayoutEffect(() => {
+    const inner = warrantyInnerRef.current;
+    if (!inner) return;
+    const wrapper = inner.parentElement;
+    const AVAIL_H = wrapper.clientHeight;
+    const AVAIL_W = wrapper.clientWidth; // Typically 690px
 
-  // Auto-scale the on-screen preview to fit A4 height so preview = PDF
+    inner.style.transform = 'none';
+    inner.style.width = AVAIL_W + 'px';
+    
+    let best_s = 1;
+    inner.style.transform = 'none';
+    inner.style.width = AVAIL_W + 'px';
+    
+    if (inner.offsetHeight > AVAIL_H) {
+      let low = 0.4, high = 1.0;
+      for (let i = 0; i < 15; i++) {
+        let mid = (low + high) / 2;
+        inner.style.width = (AVAIL_W / mid) + 'px';
+        inner.style.transform = `scale(${mid})`;
+        if (inner.offsetHeight * mid <= AVAIL_H) {
+          best_s = mid;
+          low = mid;
+        } else {
+          high = mid;
+        }
+      }
+    }
+    
+    inner.style.width = (AVAIL_W / best_s) + 'px';
+    inner.style.transform = `scale(${best_s})`;
+  });
+
+
   const quotationSheetRef = React.useRef(null);
   React.useEffect(() => {
     if (!quotationSheetRef.current) return;
@@ -191,23 +224,10 @@ export default function QuotationDocument() {
       const imgData = canvas.toDataURL('image/png');
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const pw = pdf.internal.pageSize.getWidth();
-      const ph = (canvas.height * pw) / canvas.width;
-
-      if (ph > 297) {
-        const pageH = (297 * canvas.width) / pw;
-        let y = 0;
-        while (y < canvas.height) {
-          if (y > 0) pdf.addPage();
-          const c2 = document.createElement('canvas');
-          c2.width = canvas.width; c2.height = Math.min(pageH, canvas.height - y);
-          c2.getContext('2d').drawImage(canvas, 0, y, c2.width, c2.height, 0, 0, c2.width, c2.height);
-          pdf.addImage(c2.toDataURL('image/png'), 'PNG', 0, 0, pw, (c2.height * pw) / canvas.width);
-          y += pageH;
-        }
-      } else {
-        pdf.addImage(imgData, 'PNG', 0, 0, pw, ph);
-      }
+      const pw = pdf.internal.pageSize.getWidth();    // 210mm
+      const phMax = pdf.internal.pageSize.getHeight(); // 297mm
+      // The certificate is auto-fitted to exactly one A4 page → one full page.
+      pdf.addImage(imgData, 'PNG', 0, 0, pw, phMax);
 
       pdf.save(`NJ_Warranty_${activeCert.warrantyNo || activeCert.id || 'NJ-W-0001'}_${activeCert.customer?.name.replace(/\s+/g, '_')}.pdf`);
       showToast("Warranty PDF downloaded successfully!", "success");
@@ -451,16 +471,43 @@ export default function QuotationDocument() {
 
         .warranty-doc {
           background: #fff;
-          width: 794px; min-height: 1123px;
+          width: 794px; max-width: 794px;
+          height: 1123px;
           padding: 36px 52px 32px;
           margin: 0 auto;
           font-family: 'Times New Roman', Times, Georgia, serif;
-          color: #111; font-size: 10.5pt; line-height: 1.6;
-          box-sizing: border-box; text-align: left;
+          color: #111;
+          font-size: 11pt;
+          line-height: 1.35;
+          box-sizing: border-box;
+          position: relative;
+          overflow: hidden;
           border: 1px solid #ccc;
           box-shadow: 0 4px 32px rgba(0,0,0,0.10);
-          position: relative; overflow: hidden;
+          display: flex;
+          flex-direction: column;
         }
+        .warranty-doc .wd-header { text-align: center; padding-bottom: 7px; margin-bottom: 0; border-bottom: 2px solid #111; flex-shrink: 0; }
+        .warranty-doc .wd-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: flex-end; flex-shrink: 0; margin-top: auto; }
+
+        .warranty-doc.is-dense .wd-opening { font-size: 8pt; line-height: 1.15; margin-bottom: 6px; }
+        .warranty-doc.is-dense .wd-section { margin-bottom: 2px; }
+        .warranty-doc.is-dense .wd-section-head { font-size: 8pt; margin-bottom: 1px; padding-bottom: 1px; }
+        .warranty-doc.is-dense .wd-body { font-size: 8pt; line-height: 1.15; }
+        .warranty-doc.is-dense .wd-body p { margin-bottom: 1px; }
+        .warranty-doc.is-dense .wd-body li { font-size: 7.5pt; line-height: 1.1; margin-bottom: 0; }
+        .warranty-doc.is-dense .wd-body ul { margin: 1px 0 0; padding-left: 12px; }
+        .warranty-doc.is-dense .wd-two-col { gap: 8px; margin-bottom: 6px; }
+        .warranty-doc.is-dense .wd-banner { font-size: 10pt; padding: 4px 0; margin: 5px 0 7px; }
+        .warranty-doc.is-dense .wd-duration { padding: 4px 10px; margin: 4px 0 6px; }
+        .warranty-doc.is-dense .wd-table { font-size: 7.5pt; }
+        .warranty-doc.is-dense .wd-table th { padding: 2px 5px; font-size: 7pt; }
+        .warranty-doc.is-dense .wd-table td { padding: 2px 5px; }
+        .warranty-doc.is-dense .wd-cert-block { margin-top: 4px; padding-top: 4px; }
+        .warranty-doc.is-dense .wd-cert-title { margin-bottom: 2px; padding-bottom: 1px; }
+        .warranty-doc.is-dense .wd-cert-row { font-size: 8.5pt; padding: 1px 0; }
+        .warranty-doc.is-dense .wd-cert-lbl { font-size: 8pt; min-width: 160px; }
+
         .warranty-doc .wd-wm {
           position: absolute; top: 50%; left: 50%;
           transform: translate(-50%,-50%) rotate(-30deg);
@@ -468,112 +515,72 @@ export default function QuotationDocument() {
           color: rgba(0,0,0,0.028); white-space: nowrap; letter-spacing: 0.1em;
           font-family: 'Times New Roman', serif;
         }
-        .warranty-doc .wd-header {
-          text-align: center; padding-bottom: 10px; border-bottom: 2px solid #111; margin-bottom: 0;
-        }
+
         .warranty-doc .wd-logo {
           font-family: 'Playfair Display', Georgia, serif;
-          font-size: 48pt; font-weight: 900; letter-spacing: 0.04em;
-          color: #111; margin: 0; line-height: 1.1;
+          font-size: 82pt;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+          color: #111;
+          margin: 0;
+          line-height: 1.1;
         }
         .warranty-doc .wd-logo-sub {
-          font-size: 8pt; letter-spacing: 0.28em; text-transform: uppercase;
-          color: #444; font-weight: 700; margin: 3px 0 0; font-family: Arial, sans-serif;
+          font-size: 9.5pt;
+          letter-spacing: 0.28em;
+          text-transform: uppercase;
+          color: #444;
+          font-weight: 700;
+          margin: 3px 0 0;
+          font-family: 'Times New Roman', Times, Georgia, serif;
         }
+
         .warranty-doc .wd-banner {
           text-align: center; font-size: 11.5pt; letter-spacing: 0.28em;
-          font-weight: 700; padding: 7px 0;
+          font-weight: 700; padding: 6px 0;
           border-top: 2px solid #111; border-bottom: 2px solid #111;
-          margin: 10px 0 14px; text-transform: uppercase; color: #111;
-          font-family: Arial, sans-serif;
+          margin: 8px 0 10px; text-transform: uppercase; color: #111;
+          font-family: 'Times New Roman', Times, Georgia, serif;
         }
-        .warranty-doc .wd-opening {
-          font-size: 10.5pt; line-height: 1.65; margin-bottom: 12px; text-align: justify;
-        }
-        .warranty-doc .wd-opening em {
-          font-style: italic; display: block; margin-bottom: 4px; font-size: 11pt;
-        }
-        .warranty-doc .wd-section { margin-bottom: 10px; page-break-inside: avoid; }
-        .warranty-doc .wd-section-head {
-          font-size: 8.5pt; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
-          color: #111; margin: 0 0 5px; padding-bottom: 3px; border-bottom: 1.5px solid #aaa;
-          display: flex; align-items: center; gap: 7px; font-family: Arial, sans-serif;
-        }
-        .warranty-doc .wd-num {
-          display: inline-flex; width: 17px; height: 17px;
-          align-items: center; justify-content: center;
-          background: #111; color: #fff; border-radius: 3px;
-          font-size: 8pt; font-weight: 900; flex-shrink: 0;
-          font-family: Arial, sans-serif; letter-spacing: 0;
-        }
-        .warranty-doc .wd-body { font-size: 10pt; line-height: 1.65; color: #222; }
-        .warranty-doc .wd-body p { margin: 0 0 5px; text-align: justify; }
-        .warranty-doc .wd-body ul { margin: 3px 0 0; padding-left: 14px; }
-        .warranty-doc .wd-body li { margin-bottom: 2px; font-size: 9.5pt; text-align: justify; line-height: 1.55; }
-        .warranty-doc .wd-duration {
-          border: 1.5px solid #8b1a1a; border-left: 5px solid #8b1a1a;
-          padding: 7px 14px; margin: 8px 0 12px; background: #fef9f9;
-        }
-        .warranty-doc .wd-duration .micro {
-          font-size: 7.5pt; letter-spacing: 0.18em; text-transform: uppercase;
-          color: #8b1a1a; font-weight: 700; display: block; margin-bottom: 2px; font-family: Arial, sans-serif;
-        }
-        .warranty-doc .wd-duration .val {
-          font-size: 12pt; font-weight: 700; color: #8b1a1a;
-          font-family: 'Playfair Display', Georgia, serif;
-        }
-        .warranty-doc .wd-table {
-          width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 9.5pt;
-        }
-        .warranty-doc .wd-table th {
-          background: #111; color: #fff;
-          padding: 5px 10px; text-align: left;
-          font-size: 8pt; letter-spacing: 0.1em; text-transform: uppercase;
-          font-family: Arial, sans-serif; border: 1px solid #111;
-        }
-        .warranty-doc .wd-table td { padding: 5px 10px; border: 1px solid #ddd; vertical-align: middle; }
+
+        /* ── Opening ── */
+        .warranty-doc .wd-opening { font-size: 11.5pt; line-height: 1.5; margin-bottom: 12px; text-align: justify; }
+        .warranty-doc .wd-opening em { font-style: italic; display: block; margin-bottom: 6px; font-size: 12pt; }
+        /* ── Sections ── */
+        .warranty-doc .wd-section { margin-bottom: 8px; page-break-inside: avoid; }
+        .warranty-doc .wd-section-head { font-size: 10.5pt; font-weight: 700; letter-spacing: 0.06em; color: #111; margin: 0 0 4px; padding-bottom: 2px; border-bottom: 1.5px solid #aaa; font-family: 'Times New Roman', Times, Georgia, serif; }
+        .warranty-doc .wd-num { display: inline-flex; width: 17px; height: 17px; align-items: center; justify-content: center; background: #111; color: #fff; border-radius: 3px; font-size: 8pt; font-weight: 900; flex-shrink: 0; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0; }
+        .warranty-doc .wd-body { font-size: 11pt; line-height: 1.4; color: #222; }
+        .warranty-doc .wd-body p { margin: 0 0 4px; text-align: justify; }
+        .warranty-doc .wd-body ul { margin: 4px 0 0; padding-left: 18px; }
+        .warranty-doc .wd-body li { margin-bottom: 3px; font-size: 10.5pt; text-align: justify; line-height: 1.35; }
+        /* ── Duration callout ── */
+        .warranty-doc .wd-duration { border: 1.5px solid #8b1a1a; border-left: 5px solid #8b1a1a; padding: 5px 14px; margin: 6px 0 8px; background: #fef9f9; }
+        .warranty-doc .wd-duration-label { font-size: 8.5pt; letter-spacing: 0.08em; color: #8b1a1a; font-weight: 700; display: block; margin-bottom: 2px; font-family: 'Times New Roman', Times, Georgia, serif; }
+        .warranty-doc .wd-duration-value { font-size: 13pt; font-weight: 700; color: #8b1a1a; font-family: 'Playfair Display', Georgia, serif; }
+        /* ── Series / Liability table ── */
+        .warranty-doc .wd-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9.5pt; }
+        .warranty-doc .wd-table th { background: #111; color: #fff; padding: 5px 8px; text-align: left; font-size: 9pt; letter-spacing: 0.04em; font-family: 'Times New Roman', Times, Georgia, serif; border: 1px solid #111; }
+        .warranty-doc .wd-table td { padding: 5px 8px; border: 1px solid #ddd; vertical-align: middle; }
         .warranty-doc .wd-table tr:nth-child(odd) td { background: #fafafa; }
-        .warranty-doc .wd-table .dur { font-weight: 700; color: #8b1a1a; text-align: center; }
-        .warranty-doc .wd-table .pct { font-weight: 700; color: #8b1a1a; text-align: center; min-width: 80px; }
-        .warranty-doc .wd-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 10px; }
+        .warranty-doc .td-dur { font-weight: 700; color: #8b1a1a; text-align: center; }
+        .warranty-doc .td-pct { font-weight: 700; color: #8b1a1a; text-align: center; min-width: 80px; }
+        .warranty-doc .wd-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
         .warranty-doc .wd-iso-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-        .warranty-doc .wd-iso-badge {
-          border: 1.5px solid #111; border-radius: 4px; padding: 3px 8px;
-          font-size: 8pt; font-weight: 700; letter-spacing: 0.06em;
-          font-family: Arial, sans-serif; color: #111; background: #f8f8f8;
-        }
-        .warranty-doc .wd-cert-block {
-          margin-top: 16px; padding-top: 12px; border-top: 2px solid #111;
-        }
-        .warranty-doc .wd-cert-title {
-          font-size: 8.5pt; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
-          margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1.5px solid #aaa;
-          font-family: Arial, sans-serif; color: #111;
-        }
-        .warranty-doc .wd-cert-row {
-          display: flex; align-items: baseline; padding: 4px 0;
-          border-bottom: 1px dotted #ccc; font-size: 10pt; gap: 8px;
-        }
-        .warranty-doc .wd-cert-lbl {
-          min-width: 185px; color: #444; font-weight: 600; font-size: 9.5pt; flex-shrink: 0;
-        }
-        .warranty-doc .wd-cert-val {
-          font-weight: 700; color: #111; flex: 1;
-          border-bottom: 1px solid #999; min-height: 18px; padding: 0 4px 1px;
-        }
-        .warranty-doc .wd-cert-val-static {
-          font-weight: 700; color: #111; flex: 1; padding: 0 4px 1px; border-bottom: 1px solid #ddd;
-        }
-        .warranty-doc .wd-footer {
-          margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr;
-          gap: 40px; align-items: flex-end;
-        }
-        .warranty-doc .wd-sig-block { text-align: center; font-size: 9pt; color: #555; }
-        .warranty-doc .wd-sig-line { height: 50px; border-bottom: 1px solid #111; width: 160px; margin: 0 auto 4px; }
-        .warranty-doc .wd-sig-name {
-          color: #111; font-weight: 700; font-size: 9.5pt; padding-top: 3px;
-          font-family: Arial, sans-serif; letter-spacing: 0.05em; text-transform: uppercase;
-        }
+        .warranty-doc .wd-iso-badge { border: 1.5px solid #111; border-radius: 4px; padding: 3px 8px; font-size: 8pt; font-weight: 700; letter-spacing: 0.06em; font-family: 'Times New Roman', Times, Georgia, serif; color: #111; background: #f8f8f8; }
+        /* ── Certificate details (fill-in style) ── */
+        .warranty-doc .wd-cert-block { margin-top: 8px; padding-top: 8px; border-top: 2px solid #111; }
+        .warranty-doc .wd-cert-title { font-size: 11pt; font-weight: 700; letter-spacing: 0.06em; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #aaa; font-family: 'Times New Roman', Times, Georgia, serif; color: #111; }
+        .warranty-doc .wd-cert-row { display: flex; align-items: baseline; padding: 4px 0; border-bottom: 1px dotted #ccc; font-size: 11.5pt; gap: 10px; }
+        .warranty-doc .wd-cert-lbl { min-width: 210px; color: #444; font-weight: 600; font-size: 11pt; flex-shrink: 0; }
+        .warranty-doc .wd-cert-lbl::after { content: ':'; }
+        .warranty-doc .wd-cert-val { font-weight: 700; color: #111; flex: 1; border-bottom: 1px solid #999; min-height: 20px; padding: 0 4px 1px; }
+        .warranty-doc .wd-cert-val-static { font-weight: 700; color: #111; flex: 1; padding: 0 4px 1px; border-bottom: 1px solid #ddd; }
+        
+        .warranty-doc .wd-sig-block { text-align: center; font-size: 10pt; color: #555; }
+        .warranty-doc .wd-sig-line { height: 80px; border-bottom: 1px solid #111; width: 200px; margin: 0 auto 4px; }
+        .warranty-doc .wd-sig-name { color: #111; font-weight: 700; font-size: 10.5pt; padding-top: 3px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
+        .warranty-doc .wd-seal-svg { display: block; margin: 0 auto 4px; width: 140px; height: 140px; }
 
         @media (max-width: 1220px) {
           .document-hub-layout {
@@ -1010,7 +1017,29 @@ export default function QuotationDocument() {
             })()
           ) : (() => {
             /* ── VIEW B: WARRANTY CERTIFICATE (numbered sections matching physical PDF) ── */
-            const tmpl = activeCert.template || {};
+            // Resolve template from current config so structural fields (the
+            // warranty-period series table, heatout table) are never missing on
+            // older saved certificates. Content (sections) prefers the saved cert.
+            const _stored = (activeCert.template && typeof activeCert.template === 'object') ? activeCert.template : {};
+            const _tid = (typeof activeCert.template === 'string') ? activeCert.template : _stored.id;
+            let _matched = data.warranties?.find(w => w.id === _tid);
+            if (!_matched) {
+              const _n = (((activeCert.items && activeCert.items.length > 0) ? activeCert.items[0].className : '') || '').toLowerCase();
+              let _fb = 'nj_laminated';
+              if (_n.includes('stone') || _n.includes('metal')) _fb = 'stone_coated';
+              else if (_n.includes('heat') || _n.includes('ceiling')) _fb = 'heatout';
+              else if (_n.includes('ceramic') || _n.includes('clay')) _fb = 'ceramic';
+              else if (_n.includes('pie') || _n.includes('bitumen') || _n.includes('docke')) _fb = 'docke';
+              _matched = data.warranties?.find(w => w.id === _fb);
+            }
+            const tmpl = _matched ? { ..._matched, ..._stored } : { ..._stored };
+            if (_matched) {
+              if (!tmpl.sections || tmpl.sections.length === 0) { tmpl.sections = _matched.sections; tmpl.opening = tmpl.opening || _matched.opening; }
+              tmpl.showSeriesTable = _matched.showSeriesTable;
+              tmpl.seriesTable = (_matched.seriesTable && _matched.seriesTable.length) ? _matched.seriesTable : (tmpl.seriesTable || []);
+              if (_matched.heatoutTable !== undefined) tmpl.heatoutTable = _matched.heatoutTable;
+              if (!tmpl.id) tmpl.id = _matched.id;
+            }
             const cd = activeCert.certData || {};
             const isStoneCoated = tmpl.id === 'stone_coated';
             const isHeatout     = tmpl.id === 'heatout';
@@ -1027,19 +1056,19 @@ export default function QuotationDocument() {
             const rightSections = sections.slice(half);
 
             return (
-            <div className="warranty-doc" id="warrantyDoc">
+            <div className={`warranty-doc${(isHeatout || isStoneCoated) ? ' is-dense' : ''}`} id="warrantyDoc">
 
               <div className="wd-wm">WARRANTY</div>
 
               <div className="wd-header">
                 {tmpl.logo && tmpl.logo.startsWith('data:image/') ? (
                   <>
-                    <img src={tmpl.logo} alt="Logo" style={{ maxHeight: '120px', maxWidth: '440px', objectFit: 'contain', margin: '0 auto 4px', display: 'block' }} />
+                    <img src={tmpl.logo} alt="Logo" style={{ height: '130px', width: 'auto', maxWidth: '600px', objectFit: 'contain', margin: '0 auto 4px', display: 'block' }} />
                     <p className="wd-logo-sub">{tmpl.title || 'Warranty Certificate'}</p>
                   </>
                 ) : isDocke ? (
                   <>
-                    <p className="wd-logo" style={{ fontStyle: 'italic' }}>Döcke</p>
+                    <p className="wd-logo" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontStyle: 'italic' }}>Döcke</p>
                     <p className="wd-logo-sub">PIE — Bitumen Shingles</p>
                   </>
                 ) : (
@@ -1049,6 +1078,9 @@ export default function QuotationDocument() {
                   </>
                 )}
               </div>
+
+              <div style={{ flex: 1, position: 'relative', width: '100%', marginTop: '6px', marginBottom: '16px', minHeight: 0 }}>
+                <div ref={warrantyInnerRef} style={{ width: '100%', transformOrigin: 'top left' }}>
 
               <div className="wd-banner">Warranty Certificate</div>
 
@@ -1212,33 +1244,51 @@ export default function QuotationDocument() {
                 )}
               </div>
 
-              {/* Footer */}
+                </div>
+              </div>
+
+              {/* ══ FOOTER ══ */}
               <div className="wd-footer">
                 <div className="wd-sig-block">
                   {tmpl.signImage
-                    ? <img src={tmpl.signImage} alt="Signature" style={{maxHeight:'50px',maxWidth:'180px',objectFit:'contain',margin:'0 auto 4px',display:'block'}} />
+                    ? <img src={tmpl.signImage} alt="Signature" style={{ height: '80px', width: 'auto', objectFit: 'contain', margin: '0 auto 4px', display: 'block' }} />
                     : <div className="wd-sig-line" />}
                   <div className="wd-sig-name">Seller's Signature</div>
                 </div>
                 <div className="wd-sig-block">
                   {tmpl.sealImage
-                    ? <img src={tmpl.sealImage} alt="Stamp" style={{width:'80px',height:'80px',objectFit:'contain',margin:'0 auto 4px',display:'block'}} />
+                    ? <img src={tmpl.sealImage} alt="Stamp" style={{ width: '140px', height: '140px', objectFit: 'contain', margin: '0 auto 4px', display: 'block' }} />
                     : (
-                      <svg width="82" height="82" viewBox="0 0 82 82" style={{display:'block',margin:'0 auto 4px'}}>
+                      <svg className="wd-seal-svg" viewBox="0 0 82 82">
+                        {/* Outer double ring */}
                         <circle cx="41" cy="41" r="39" fill="none" stroke="#8b1a1a" strokeWidth="2"/>
                         <circle cx="41" cy="41" r="34" fill="none" stroke="#8b1a1a" strokeWidth="1"/>
+                        {/* Inner fill */}
                         <circle cx="41" cy="41" r="33" fill="#fef9f9"/>
-                        <path id="qd-topArc" d="M 9,41 A 32,32 0 0,1 73,41" fill="none"/>
-                        <text fontSize="5.2" fontFamily="Arial,sans-serif" fontWeight="900" fill="#8b1a1a" letterSpacing="0.5">
-                          <textPath href="#qd-topArc" startOffset="50%" textAnchor="middle">NOUFAL &amp; JABBAR INTERNATIONAL LLP</textPath>
+                        {/* Top arc text: NOUFAL & JABBAR INTERNATIONAL LLP */}
+                        <path id="topArc" d="M 9,41 A 32,32 0 0,1 73,41" fill="none"/>
+                        <text fontSize="5.2" fontFamily="Arial, sans-serif" fontWeight="900" fill="#8b1a1a" letterSpacing="0.5">
+                          <textPath href="#topArc" startOffset="50%" textAnchor="middle">
+                            NOUFAL &amp; JABBAR INTERNATIONAL LLP
+                          </textPath>
                         </text>
-                        <path id="qd-botArc" d="M 9,41 A 32,32 0 0,0 73,41" fill="none"/>
-                        <text fontSize="5" fontFamily="Arial,sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">
-                          <textPath href="#qd-botArc" startOffset="50%" textAnchor="middle">Bypass Road · Ramanattukara</textPath>
+                        {/* Bottom arc text: Bypass Road Ramanattukara */}
+                        <path id="botArc" d="M 9,41 A 32,32 0 0,0 73,41" fill="none"/>
+                        <text fontSize="5" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">
+                          <textPath href="#botArc" startOffset="50%" textAnchor="middle">
+                            Bypass Road · Ramanattukara
+                          </textPath>
                         </text>
-                        <text x="41" y="37" textAnchor="middle" fontSize="9" fontFamily="'Times New Roman',serif" fontWeight="900" fill="#8b1a1a">NJ</text>
-                        <text x="41" y="46" textAnchor="middle" fontSize="4.5" fontFamily="Arial,sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.5">INDIA</text>
-                        <text x="41" y="54" textAnchor="middle" fontSize="4" fontFamily="Arial,sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">NJINDIA.IN</text>
+                        {/* Center NJ INDIA text */}
+                        <text x="41" y="37" textAnchor="middle" fontSize="9" fontFamily="'Times New Roman', serif" fontWeight="900" fill="#8b1a1a">
+                          NJ
+                        </text>
+                        <text x="41" y="46" textAnchor="middle" fontSize="4.5" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.5">
+                          INDIA
+                        </text>
+                        <text x="41" y="54" textAnchor="middle" fontSize="4" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">
+                          NJINDIA.IN
+                        </text>
                       </svg>
                     )}
                   <div className="wd-sig-name">Authorized Stamp</div>

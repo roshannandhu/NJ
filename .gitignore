@@ -8,6 +8,11 @@ dist/
 frontend/dist/
 dist-ssr/
 
+# Installer build artifacts
+dist_build/
+backend/dist/
+*.exe
+
 # Runtime/generated files
 *.log
 logs/

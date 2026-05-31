@@ -50,6 +50,16 @@ const fmtNext = (iso, days) => {
   return `In ${d} days`;
 };
 
+// Build a human message from a merge-restore result.
+const restoreMsg = (r) => {
+  const a = r?.added || {};
+  const s = r?.skipped_duplicates || {};
+  const skip = (s.quotations || 0) + (s.warranty_certificates || 0);
+  let msg = `Added ${a.quotations || 0} quotations, ${a.warranty_certificates || 0} warranties`;
+  if (skip > 0) msg += ` (${skip} already present, skipped)`;
+  return msg;
+};
+
 const INTERVALS = [
   { value: 1,  label: 'Daily' },
   { value: 3,  label: 'Every 3 Days' },
@@ -174,24 +184,24 @@ export default function BackupSettings() {
   };
 
   const handleRestoreFromPath = async (path, name) => {
-    if (!window.confirm(`Restore from "${name}"?\nReplaces all current data.`)) return;
+    if (!window.confirm(`Restore from "${name}"?\nThis adds any missing quotations/warranties from the backup. Nothing is deleted and duplicates are skipped.`)) return;
     setRestoringP(path);
     try {
       const r = await restoreFromPath(path);
-      showToast(`Restored. Reloading...`);
-      setTimeout(() => window.location.reload(), 1200);
+      showToast(`${restoreMsg(r)}. Reloading...`);
+      setTimeout(() => window.location.reload(), 1400);
     } catch (e) { showToast(e.message || 'Restore failed', 'error'); setRestoringP(null); }
   };
 
   const handleRestoreFile = async (e) => {
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
-    if (!window.confirm(`Restore from "${file.name}"?\nReplaces all data.`)) return;
+    if (!window.confirm(`Restore from "${file.name}"?\nThis adds any missing records from the backup. Nothing is deleted and duplicates are skipped.`)) return;
     setBusy(true);
     try {
       const r = await restoreFromFile(file);
-      showToast(`Restored. Reloading...`);
-      setTimeout(() => window.location.reload(), 1200);
+      showToast(`${restoreMsg(r)}. Reloading...`);
+      setTimeout(() => window.location.reload(), 1400);
     } catch (e) { showToast(e.message || 'Restore failed', 'error'); setBusy(false); }
   };
 
@@ -521,11 +531,11 @@ export default function BackupSettings() {
                 onChange={async (e) => {
                   const file = e.target.files?.[0]; e.target.value = '';
                   if (!file) return;
-                  if (!window.confirm(`Restore catalog from "${file.name}"?\nRestores classes, varieties, tools, settings and all images.`)) return;
+                  if (!window.confirm(`Restore catalog from "${file.name}"?\nRestores classes, varieties, tools, settings and all images. History records are merged (no duplicates, nothing deleted).`)) return;
                   setBusy(true);
                   try {
                     const r = await restoreCatalogFromFile(file);
-                    showToast(`Catalog restored. ${r.restored_images ?? 0} images restored. Reloading...`);
+                    showToast(`Catalog restored, ${r.restored_images ?? 0} images. ${restoreMsg(r)}. Reloading...`);
                     setTimeout(() => window.location.reload(), 1400);
                   } catch (err) { showToast(err.message || 'Restore failed', 'error'); setBusy(false); }
                 }}

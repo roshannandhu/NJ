@@ -70,11 +70,24 @@ export function AppProvider({ children }) {
 
         if (cfg && cfg.warranties) {
           cfg.warranties = cfg.warranties.map(w => {
-            if (!w.sections || w.sections.length === 0) {
-              const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
-              if (def) return { ...w, sections: def.sections, opening: def.opening || w.opening };
+            const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
+            if (!def) return w; // custom warranty added by the user — leave as-is
+            const merged = { ...w };
+            // Backfill editable content only when empty (preserve user edits)
+            if (!merged.sections || merged.sections.length === 0) {
+              merged.sections = def.sections;
+              merged.opening = merged.opening || def.opening;
             }
-            return w;
+            if (!merged.seriesTable || merged.seriesTable.length === 0) {
+              merged.seriesTable = def.seriesTable || [];
+            }
+            // Structural display flags are defined by warranty type (no UI to
+            // toggle them), so always take them from the current definition.
+            // This fixes the warranty-period table going missing on older saved
+            // configs (e.g. Docke, Ceramic).
+            merged.showSeriesTable = def.showSeriesTable;
+            if (def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
+            return merged;
           });
         }
 

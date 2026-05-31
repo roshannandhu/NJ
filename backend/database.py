@@ -4,15 +4,21 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# The SQLite file that holds ALL app data. Location is fixed next to this file
-# (backend/nj_india.db) so it does not depend on the current working directory.
-# NJ_DB_PATH lets tests / tooling point at a throwaway copy without touching the
-# real database.
+# DATA_DIR holds all writable app data (database + uploaded images). In
+# development it defaults to the backend/ folder. When installed under Program
+# Files (read-only), the launcher sets NJ_DATA_DIR to a per-user writable folder
+# (e.g. %LOCALAPPDATA%\NJ India) so the app can still write its data.
+_data = os.environ.get("NJ_DATA_DIR")
+DATA_DIR = Path(_data).resolve() if _data else Path(__file__).resolve().parent
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# The SQLite file that holds ALL app data. NJ_DB_PATH lets tests / tooling point
+# at a throwaway copy without touching the real database.
 _env_db = os.environ.get("NJ_DB_PATH")
 if _env_db:
     DB_PATH = Path(_env_db).resolve()
 else:
-    DB_PATH = (Path(__file__).resolve().parent / "nj_india.db")
+    DB_PATH = DATA_DIR / "nj_india.db"
 
 engine = create_engine(
     f"sqlite:///{DB_PATH.as_posix()}",

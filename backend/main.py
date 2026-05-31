@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from database import Base, engine
+from database import Base, engine, DATA_DIR
 import models
 import backup_service
-from routers import backup, config, pdf, quotations, uploads, warranties, warranty_docx
+from routers import backup, config, quotations, uploads, warranties, warranty_docx
 
 # Create tables before anything tries to read them (backup engine reads state).
 Base.metadata.create_all(bind=engine)
@@ -36,12 +36,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOADS_DIR = Path(__file__).parent / "uploads"
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = DATA_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 app.include_router(config.router)
-app.include_router(pdf.router)
 app.include_router(quotations.router)
 app.include_router(uploads.router)
 app.include_router(warranties.router)
@@ -55,7 +54,11 @@ def health():
 
 
 # ── SPA mount — MUST be last (after all /api routes) ──
-DIST = Path(__file__).parent.parent / "frontend" / "dist"
+# Prefer a "dist" folder bundled next to the backend (installer layout);
+# fall back to ../frontend/dist for local development.
+_bundled_dist = Path(__file__).parent / "dist"
+_dev_dist = Path(__file__).parent.parent / "frontend" / "dist"
+DIST = _bundled_dist if _bundled_dist.exists() else _dev_dist
 if DIST.exists():
     app.mount("/", StaticFiles(directory=str(DIST), html=True), name="spa")
 

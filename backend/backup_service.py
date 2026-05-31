@@ -28,10 +28,10 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from database import DB_PATH, SessionLocal
+from database import DB_PATH, DATA_DIR, SessionLocal
 from models import AppConfig, BackupState, Quotation, WarrantyCertificate
 
-UPLOADS_DIR = Path(DB_PATH).resolve().parent / "uploads"
+UPLOADS_DIR = DATA_DIR / "uploads"
 
 # ── tunables ──────────────────────────────────────────────────────────────
 KEEP_DEFAULT = 30                 # backup sets to retain per target
@@ -511,8 +511,14 @@ def snapshot_pre_restore():
 
 
 def restore_from_payload(payload):
-    """Replace all data from a backup payload. Snapshots first, validates, and
-    only commits if every insert succeeds. Returns a summary dict."""
+    """Restore data from a backup payload by MERGING history (never deletes,
+    never duplicates). Config is replaced when present. Snapshots first and only
+    commits if every insert succeeds. Returns added/skipped counts.
+
+    History (quotations + warranties) is merged by ID: records already present
+    are skipped, so importing an old backup adds back any missing records
+    without removing newer ones and without creating duplicates.
+    """
     if not isinstance(payload, dict):
         raise ValueError("Backup payload must be a JSON object")
     quotations = payload.get("quotations", [])
@@ -524,10 +530,9 @@ def restore_from_payload(payload):
 
     db = SessionLocal()
     try:
-        # Only overwrite config when it is explicitly present AND non-empty.
-        # History-only backups have no "config" key — skipping prevents wiping
-        # classes, varieties and image paths. An empty {} config (corrupted
-        # or old-format backup) is also rejected to prevent data loss.
+        # Config: replace only when explicitly present AND non-empty. History-only
+        # backups have no "config" key; an empty {} is rejected — both prevent
+        # wiping classes, varieties and image paths.
         if "config" in payload and payload["config"]:
             cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
             if cfg_row is None:
@@ -535,33 +540,53 @@ def restore_from_payload(payload):
                 db.add(cfg_row)
             cfg_row.data = json.dumps(payload["config"])
 
-        db.query(Quotation).delete()
+        # Quotations: MERGE by id — add only those not already present.
+        existing_q = {row[0] for row in db.query(Quotation.id).all()}
+        added_q = skipped_q = 0
         for q in quotations:
+            qid = q.get("id", "")
+            if not qid or qid in existing_q:
+                skipped_q += 1
+                continue
             db.add(Quotation(
-                id=q.get("id", ""),
+                id=qid,
                 customer_name=(q.get("customer") or {}).get("name", ""),
                 grand_total=q.get("grandTotal", 0),
                 date=q.get("date", ""),
                 data=json.dumps(q),
             ))
+            existing_q.add(qid)
+            added_q += 1
 
-        db.query(WarrantyCertificate).delete()
+        # Warranties: MERGE by id — add only those not already present.
+        existing_w = {row[0] for row in db.query(WarrantyCertificate.id).all()}
+        added_w = skipped_w = 0
         for w in warranties:
+            wid = w.get("id", "")
+            if not wid or wid in existing_w:
+                skipped_w += 1
+                continue
             db.add(WarrantyCertificate(
-                id=w.get("id", ""),
+                id=wid,
                 quotation_id=w.get("quotationId", ""),
                 customer_name=(w.get("customer") or {}).get("name", ""),
                 date=w.get("date", ""),
                 data=json.dumps(w),
             ))
+            existing_w.add(wid)
+            added_w += 1
 
         db.commit()
         return {
             "status": "restored",
             "pre_restore_snapshot": snap,
-            "counts": {
-                "quotations": len(quotations),
-                "warranty_certificates": len(warranties),
+            "added": {
+                "quotations": added_q,
+                "warranty_certificates": added_w,
+            },
+            "skipped_duplicates": {
+                "quotations": skipped_q,
+                "warranty_certificates": skipped_w,
             },
         }
     except Exception:
