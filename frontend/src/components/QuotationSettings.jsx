@@ -3,7 +3,7 @@ import { useAppContext } from '../AppContext';
 import {
   DollarSign, FileText, Sliders, ChevronDown, ChevronUp,
   CheckCircle, AlertCircle, Info, Edit3, Tag, Layers,
-  ToggleLeft, ToggleRight, Save, Image as ImageIcon, X
+  ToggleLeft, ToggleRight, Save, Image as ImageIcon, X, Trash2
 } from 'lucide-react';
 
 // ─── Default per-class Terms from the original NJ PDFs ───────────────────────
@@ -130,8 +130,8 @@ function Toggle({ checked, onChange, label, desc }) {
   );
 }
 
-// Expandable class T&C block
-function ClassTermsBlock({ classKey, label, color, value, onChange, specValue, onSpecChange }) {
+// Expandable per-class "Class Description" block (shown in Table 1 of the quotation).
+function ClassDescriptionBlock({ label, color, specValue, onSpecChange }) {
   const [open, setOpen] = useState(false);
 
   const inputStyle = {
@@ -140,6 +140,8 @@ function ClassTermsBlock({ classKey, label, color, value, onChange, specValue, o
     background: 'var(--bg)', color: 'var(--ink)', width: '100%', boxSizing: 'border-box',
     transition: 'border-color 0.2s',
   };
+
+  const lineCount = (specValue || '').split('\n').filter(l => l.trim()).length;
 
   return (
     <div style={{
@@ -167,7 +169,7 @@ function ClassTermsBlock({ classKey, label, color, value, onChange, specValue, o
             fontSize: '11px', fontWeight: 600, color, background: `${color}15`,
             padding: '3px 8px', borderRadius: '20px',
           }}>
-            {value.split('\n').filter(l => l.trim()).length} terms
+            {lineCount} line{lineCount === 1 ? '' : 's'}
           </span>
         </div>
         {open ? <ChevronUp size={18} color="var(--ink-soft)" /> : <ChevronDown size={18} color="var(--ink-soft)" />}
@@ -176,55 +178,140 @@ function ClassTermsBlock({ classKey, label, color, value, onChange, specValue, o
       {/* Expanded body */}
       {open && (
         <div style={{ padding: '20px', borderTop: `1px solid var(--line)`, background: 'var(--surface)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            {/* Product Spec Label */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Table 1 — Product Spec Label
-              </label>
-              <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginBottom: '6px' }}>
-                Text shown in the "Product Details" table on the printed quotation. Each line = one line in the cell.
-              </div>
-              <textarea
-                rows={4}
-                value={specValue}
-                onChange={e => onSpecChange(e.target.value)}
-                style={inputStyle}
-                placeholder="Product name on first line, then specs..."
-              />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Class Description
+            </label>
+            <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginBottom: '6px' }}>
+              Text shown in the "Product Details" table on the printed quotation. First line is the
+              product title; each following line = one line in the cell.
             </div>
-
-            {/* Terms & Conditions */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '11px', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Terms &amp; Conditions (one per line)
-              </label>
-              <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginBottom: '6px' }}>
-                Applied automatically when this product class is in the quotation. Each line = numbered bullet.
-              </div>
-              <textarea
-                rows={8}
-                value={value}
-                onChange={e => onChange(e.target.value)}
-                style={{ ...inputStyle, minHeight: '130px' }}
-                placeholder="One term per line..."
-              />
-            </div>
-          </div>
-
-          {/* Preview */}
-          <div style={{ marginTop: '16px', padding: '14px 18px', background: 'var(--bg-warm)', borderRadius: 'var(--radius)', border: '1px dashed var(--line)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Live Preview → Terms will appear as:
-            </div>
-            <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', lineHeight: '1.8', color: 'var(--ink)' }}>
-              {value.split('\n').filter(l => l.trim()).map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ol>
+            <textarea
+              rows={4}
+              value={specValue}
+              onChange={e => onSpecChange(e.target.value)}
+              style={inputStyle}
+              placeholder="Product name on first line, then specs..."
+            />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// A single editable bank-account card (CHANGE 4).
+function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage }) {
+  const fieldStyle = {
+    padding: '10px 12px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)',
+    fontSize: '13px', background: 'var(--bg)', color: 'var(--ink)', width: '100%',
+    boxSizing: 'border-box', transition: 'border-color 0.2s',
+  };
+  const labelStyle = { fontSize: '10px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.05em' };
+  const fields = [
+    { key: 'bankName', label: 'Bank Name', ph: 'e.g. HDFC Bank' },
+    { key: 'accountName', label: 'Account Name', ph: 'e.g. NJ India Trading Pvt Ltd' },
+    { key: 'accountNumber', label: 'Account Number', ph: 'e.g. 50200012345678' },
+    { key: 'ifsc', label: 'IFSC / SWIFT', ph: 'e.g. HDFC0001234' },
+    { key: 'branch', label: 'Branch', ph: 'e.g. Ramanattukara' },
+    { key: 'upiId', label: 'UPI ID', ph: 'e.g. njindia@hdfcbank' },
+  ];
+
+  const renderImageSlot = (field, label) => (
+    <div key={field} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={labelStyle}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <label
+          className="hover-lift"
+          style={{
+            width: '72px', height: '72px', borderRadius: 'var(--radius)', cursor: 'pointer',
+            border: '1.5px dashed var(--line)', boxSizing: 'border-box',
+            background: bank[field] ? `url(${bank[field]}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-soft)',
+          }}
+        >
+          {!bank[field] && <ImageIcon size={18} />}
+          <input type="file" accept="image/*" onChange={e => onImage(field, e)} style={{ display: 'none' }} />
+        </label>
+        {bank[field] && (
+          <button
+            type="button"
+            onClick={() => onChange(field, '')}
+            style={{ background: 'transparent', border: 'none', color: 'var(--red)', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{
+      border: `1.5px solid ${bank.active ? 'var(--line)' : 'var(--line-soft)'}`,
+      borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+      opacity: bank.active ? 1 : 0.7, background: 'var(--surface)',
+    }}>
+      {/* Card header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Tag size={15} color="#7C3AED" />
+          <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>
+            {bank.bankName || `Bank ${index + 1}`}
+          </span>
+          {!bank.active && (
+            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid var(--line)', borderRadius: '20px', padding: '2px 8px' }}>
+              Inactive
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button onClick={() => onMove(-1)} disabled={index === 0}
+            style={{ background: 'transparent', border: 'none', cursor: index === 0 ? 'not-allowed' : 'pointer', color: 'var(--ink-soft)', opacity: index === 0 ? 0.4 : 1, fontSize: '14px', padding: '2px 6px' }} title="Move up">↑</button>
+          <button onClick={() => onMove(1)} disabled={index === total - 1}
+            style={{ background: 'transparent', border: 'none', cursor: index === total - 1 ? 'not-allowed' : 'pointer', color: 'var(--ink-soft)', opacity: index === total - 1 ? 0.4 : 1, fontSize: '14px', padding: '2px 6px' }} title="Move down">↓</button>
+          <button onClick={onRemove}
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', color: 'var(--red)', fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '2px 6px' }} title="Remove bank">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Card body */}
+      <div style={{ padding: '18px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+          {fields.map(f => (
+            <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={labelStyle}>{f.label}</span>
+              <input
+                value={bank[f.key] || ''}
+                onChange={e => onChange(f.key, e.target.value)}
+                style={fieldStyle}
+                placeholder={f.ph}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', marginTop: '18px', flexWrap: 'wrap' }}>
+          {renderImageSlot('logo', 'Bank Logo')}
+          {renderImageSlot('qr', 'QR Image (optional)')}
+          <div
+            onClick={() => onChange('active', !bank.active)}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginLeft: 'auto', paddingBottom: '4px' }}
+          >
+            {bank.active
+              ? <ToggleRight size={28} color="var(--accent)" strokeWidth={2} />
+              : <ToggleLeft size={28} color="var(--ink-soft)" strokeWidth={2} />}
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}>
+              {bank.active ? 'Active' : 'Inactive'}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -235,6 +322,36 @@ export default function QuotationSettings() {
 
   const initSettings = data.settings || {};
   const initCompany  = data.company  || {};
+
+  // Maps a class name to the legacy keyword key — used ONLY to seed defaults and
+  // to backfill existing keyword-keyed configs when migrating to id-keying.
+  const keywordKey = (name) => {
+    const n = (name || '').toLowerCase();
+    if (n.includes('laminated') || n.includes('asphalt')) return 'laminated';
+    if (n.includes('stone') || n.includes('metal')) return 'stone_coated';
+    if (n.includes('heat') || n.includes('ceiling')) return 'heatout';
+    if (n.includes('ceramic') || n.includes('clay')) return 'ceramic';
+    if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return 'docke';
+    return 'default';
+  };
+
+  // Per-class blocks are derived from the live class list (keyed by stable
+  // class.id) so any class added in Products & Catalog shows up here automatically,
+  // plus a synthetic Default/fallback block. Tools & Accessories classes are excluded
+  // (they carry no product spec / class description on the quotation).
+  const isToolsClass = (c) => c.type === 'tools' || /tool|accessor/i.test(c.name || '');
+  const classBlocks = [
+    ...(data.classes || [])
+      .filter(c => !isToolsClass(c))
+      .map(c => ({ key: c.id, label: c.name, color: c.color || '#8a857a', name: c.name })),
+    { key: 'default', label: 'Default / Mixed Orders (Fallback)', color: '#8a857a', name: '' },
+  ];
+
+  // Seed a block's value: saved-by-id → saved-by-keyword → keyword default → generic default.
+  const seedTerms = (key, name) =>
+    initSettings.classTerms?.[key] ?? initSettings.classTerms?.[keywordKey(name)] ?? DEFAULT_CLASS_TERMS[keywordKey(name)] ?? DEFAULT_CLASS_TERMS.default;
+  const seedSpecs = (key, name) =>
+    initSettings.classSpecs?.[key] ?? initSettings.classSpecs?.[keywordKey(name)] ?? DEFAULT_CLASS_SPECS[keywordKey(name)] ?? DEFAULT_CLASS_SPECS.default;
 
   // Financial settings
   const [settings, setSettings] = useState({
@@ -252,26 +369,33 @@ export default function QuotationSettings() {
     showProductImage:  initSettings.showProductImage  ?? true,
     showClassSpecBox:  initSettings.showClassSpecBox  ?? true,
     quotationLogo:     initSettings.quotationLogo     ?? '',
+    // Single common Terms & Conditions applied to every NEW quotation. Seeded from any
+    // existing default-class terms (or the PDF default) so it is never empty on first load.
+    commonTerms:       initSettings.commonTerms       ?? initSettings.classTerms?.default ?? DEFAULT_CLASS_TERMS.default,
   });
 
-  // Per-class T&C
-  const [classTerms, setClassTerms] = useState({
-    laminated:    initSettings.classTerms?.laminated    ?? DEFAULT_CLASS_TERMS.laminated,
-    stone_coated: initSettings.classTerms?.stone_coated ?? DEFAULT_CLASS_TERMS.stone_coated,
-    heatout:      initSettings.classTerms?.heatout      ?? DEFAULT_CLASS_TERMS.heatout,
-    ceramic:      initSettings.classTerms?.ceramic      ?? DEFAULT_CLASS_TERMS.ceramic,
-    docke:        initSettings.classTerms?.docke        ?? DEFAULT_CLASS_TERMS.docke,
-    default:      initSettings.classTerms?.default      ?? DEFAULT_CLASS_TERMS.default,
+  // Multiple bank accounts (CHANGE 4). Each: { id, bankName, accountName, accountNumber,
+  // ifsc, branch, upiId, logo, qr, order, active }. Defaults to [] for older configs.
+  const [banks, setBanks] = useState(() =>
+    Array.isArray(initSettings.banks)
+      ? [...initSettings.banks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      : []
+  );
+
+  // Per-class T&C — kept in storage for backward compatibility with old quotations.
+  // No longer edited in the UI (replaced by the single Common Terms & Conditions field),
+  // but preserved on save so previously generated quotations still render their terms.
+  const [classTerms] = useState(() => {
+    const obj = {};
+    classBlocks.forEach(b => { obj[b.key] = seedTerms(b.key, b.name); });
+    return obj;
   });
 
-  // Per-class product spec labels
-  const [classSpecs, setClassSpecs] = useState({
-    laminated:    initSettings.classSpecs?.laminated    ?? DEFAULT_CLASS_SPECS.laminated,
-    stone_coated: initSettings.classSpecs?.stone_coated ?? DEFAULT_CLASS_SPECS.stone_coated,
-    heatout:      initSettings.classSpecs?.heatout      ?? DEFAULT_CLASS_SPECS.heatout,
-    ceramic:      initSettings.classSpecs?.ceramic      ?? DEFAULT_CLASS_SPECS.ceramic,
-    docke:        initSettings.classSpecs?.docke        ?? DEFAULT_CLASS_SPECS.docke,
-    default:      initSettings.classSpecs?.default      ?? DEFAULT_CLASS_SPECS.default,
+  // Per-class product spec labels — keyed by class.id (+ 'default').
+  const [classSpecs, setClassSpecs] = useState(() => {
+    const obj = {};
+    classBlocks.forEach(b => { obj[b.key] = seedSpecs(b.key, b.name); });
+    return obj;
   });
 
   const [saved, setSaved] = useState(false);
@@ -286,26 +410,57 @@ export default function QuotationSettings() {
   };
 
   const handleSave = () => {
+    // Re-number bank display order from the current list order before saving.
+    const orderedBanks = banks.map((b, i) => ({ ...b, order: i }));
     const nextData = {
       ...data,
       settings: {
         ...data.settings,
         ...settings,
-        classTerms,
+        classTerms,   // preserved unchanged for old-quotation backward compatibility
         classSpecs,
+        banks: orderedBanks,
       },
     };
     setData(nextData);
     persistConfig(nextData);
+    setBanks(orderedBanks);
     setSaved(true);
     showToast('Quotation settings saved ✓');
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const handleReset = (classKey) => {
-    setClassTerms(prev => ({ ...prev, [classKey]: DEFAULT_CLASS_TERMS[classKey] }));
-    setClassSpecs(prev => ({ ...prev, [classKey]: DEFAULT_CLASS_SPECS[classKey] }));
-    showToast(`Reset ${classKey} to PDF defaults`);
+  const handleResetSpec = (classKey, name) => {
+    const kk = keywordKey(name);
+    setClassSpecs(prev => ({ ...prev, [classKey]: DEFAULT_CLASS_SPECS[kk] ?? DEFAULT_CLASS_SPECS.default }));
+    showToast(`Reset ${name || classKey} description to default`);
+  };
+
+  // ── Bank account handlers (CHANGE 4) ──────────────────────────────────────
+  const blankBank = () => ({
+    id: 'bank_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    bankName: '', accountName: '', accountNumber: '', ifsc: '', branch: '',
+    upiId: '', logo: '', qr: '', order: banks.length, active: true,
+  });
+  const addBank = () => setBanks(prev => [...prev, blankBank()]);
+  const updateBank = (id, field, value) =>
+    setBanks(prev => prev.map(b => (b.id === id ? { ...b, [field]: value } : b)));
+  const removeBank = (id) => setBanks(prev => prev.filter(b => b.id !== id));
+  const moveBank = (id, dir) => setBanks(prev => {
+    const i = prev.findIndex(b => b.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= prev.length) return prev;
+    const next = [...prev];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const handleBankImageUpload = (id, field, e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => updateBank(id, field, reader.result);
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const inputStyle = {
@@ -313,15 +468,6 @@ export default function QuotationSettings() {
     fontSize: '14px', background: 'var(--bg)', color: 'var(--ink)', width: '100%',
     boxSizing: 'border-box', transition: 'border-color 0.2s',
   };
-
-  const classBlocks = [
-    { key: 'laminated',    label: 'NJ Premium Laminated (Asphalt Shingles)', color: '#6e3f32' },
-    { key: 'stone_coated', label: 'NJ Stone Coated (Metal Tiles)',            color: '#4b4b4b' },
-    { key: 'heatout',      label: 'Heatout (Insulated Ceilings)',             color: '#4f755a' },
-    { key: 'ceramic',      label: 'NJ Premium Ceramic (Clay Tiles)',          color: '#b95c3a' },
-    { key: 'docke',        label: 'Docke PIE (Bitumen Shingles)',             color: '#3a506b' },
-    { key: 'default',      label: 'Default / Mixed Orders (Fallback)',        color: '#8a857a' },
-  ];
 
   return (
     <div className="animate-fade-up" style={{ maxWidth: '900px', margin: '0 auto' }}>
@@ -532,23 +678,114 @@ export default function QuotationSettings() {
               placeholder="e.g. Generated via NJ Quotation System"
             />
           </Field>
-          <Field label="Bank Details &amp; Payment Instructions" hint="Optional — will be shown below the totals table if filled">
-            <textarea
-              rows={3}
-              value={settings.bankDetails}
-              onChange={e => setSettings(s => ({ ...s, bankDetails: e.target.value }))}
-              style={{ ...inputStyle, resize: 'vertical', fontFamily: 'var(--font-mono)', lineHeight: '1.7' }}
-              placeholder="Account Name: NJ India Trading Pvt Ltd&#10;Account No: XXXXXXXXXX&#10;IFSC: XXXXXXXX"
-            />
-          </Field>
         </div>
       </Section>
 
-      {/* ── Section 3: Per-Class T&C + Spec Labels ── */}
+      {/* ── Section: Common Terms & Conditions (CHANGE 2) ── */}
       <Section
         icon={<FileText size={20} />}
-        title="Per-Class Terms, Conditions &amp; Product Specs"
-        subtitle="Each product class has its own Terms &amp; Conditions pulled from the original NJ quotation PDFs. Edit or expand them here. The matching class's T&C is auto-selected when generating a quotation."
+        title="Common Terms &amp; Conditions"
+        subtitle="One central Terms &amp; Conditions list applied to every new quotation. Edit here and all future quotations use the latest version."
+        accent="#0284C7"
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Terms &amp; Conditions (one per line)
+            </label>
+            <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginBottom: '4px' }}>
+              Each line becomes one numbered term on the quotation. Applied to all new quotations; each
+              quotation can still be fine-tuned individually from its editor.
+            </div>
+            <textarea
+              rows={12}
+              value={settings.commonTerms}
+              onChange={e => setSettings(s => ({ ...s, commonTerms: e.target.value }))}
+              style={{
+                padding: '12px 14px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)',
+                fontSize: '13px', fontFamily: 'var(--font-mono)', lineHeight: '1.7', resize: 'vertical',
+                background: 'var(--bg)', color: 'var(--ink)', width: '100%', boxSizing: 'border-box',
+                minHeight: '220px',
+              }}
+              placeholder="One term per line..."
+            />
+            <div style={{ textAlign: 'right' }}>
+              <button
+                onClick={() => setSettings(s => ({ ...s, commonTerms: DEFAULT_CLASS_TERMS.default }))}
+                style={{
+                  background: 'none', border: 'none', color: '#0284C7', fontSize: '11px',
+                  fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: '2px 4px',
+                }}
+              >
+                ↺ Reset to default terms
+              </button>
+            </div>
+          </div>
+
+          {/* Live preview */}
+          <div style={{ padding: '16px 18px', background: 'var(--bg-warm)', borderRadius: 'var(--radius)', border: '1px dashed var(--line)' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Live Preview → Terms will appear as:
+            </div>
+            <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', lineHeight: '1.8', color: 'var(--ink)' }}>
+              {(settings.commonTerms || '').split('\n').filter(l => l.trim()).map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Section: Bank Accounts (CHANGE 4) ── */}
+      <Section
+        icon={<Layers size={20} />}
+        title="Bank Accounts"
+        subtitle="Manage the bank accounts available when generating a quotation. Pick one per quotation at checkout."
+        accent="#7C3AED"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {banks.length === 0 && (
+            <div style={{
+              padding: '20px', textAlign: 'center', color: 'var(--ink-soft)', fontSize: '13px',
+              border: '1px dashed var(--line)', borderRadius: 'var(--radius)', background: 'var(--bg-warm)',
+            }}>
+              No bank accounts yet. Add one to offer it at checkout.
+            </div>
+          )}
+
+          {banks.map((bank, idx) => (
+            <BankCard
+              key={bank.id}
+              bank={bank}
+              index={idx}
+              total={banks.length}
+              onChange={(field, value) => updateBank(bank.id, field, value)}
+              onRemove={() => removeBank(bank.id)}
+              onMove={(dir) => moveBank(bank.id, dir)}
+              onImage={(field, e) => handleBankImageUpload(bank.id, field, e)}
+            />
+          ))}
+
+          <button
+            onClick={addBank}
+            className="hover-lift"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              padding: '14px', border: '1.5px dashed var(--line)', borderRadius: 'var(--radius)',
+              background: 'var(--bg)', color: '#7C3AED', fontSize: '13px', fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            + Add Bank Account
+          </button>
+        </div>
+      </Section>
+
+      {/* ── Section 3: Per-Class Class Descriptions ── */}
+      <Section
+        icon={<FileText size={20} />}
+        title="Per-Class Class Descriptions"
+        subtitle="Each product class has its own description shown in the &quot;Product Details&quot; table (Table 1) of the printed quotation."
         accent="#059669"
       >
         {/* Info box */}
@@ -560,26 +797,27 @@ export default function QuotationSettings() {
         }}>
           <Info size={16} color="#0284C7" style={{ flexShrink: 0, marginTop: '1px' }} />
           <div>
-            <strong>How class matching works:</strong> When generating a quotation, the system checks each product's class. If items from <em>Laminated</em> class are present → uses Laminated terms. If <em>Stone Coated</em> is present → Stone Coated terms take priority for mixed orders with heatout. If no match, falls back to the <strong>Default</strong> block below.
+            <strong>How it works:</strong> Every product class below — including any class you add in
+            <em> Products &amp; Catalog</em> — has its own Class Description. When a quotation is generated,
+            the matching class's description appears in the product details table. Any unmatched item falls
+            back to the <strong>Default</strong> block. Terms &amp; Conditions are now managed once in the
+            <strong> Common Terms &amp; Conditions</strong> section above.
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {classBlocks.map(({ key, label, color }) => (
+          {classBlocks.map(({ key, label, color, name }) => (
             <div key={key}>
-              <ClassTermsBlock
-                classKey={key}
+              <ClassDescriptionBlock
                 label={label}
                 color={color}
-                value={classTerms[key]}
-                onChange={val => setClassTerms(prev => ({ ...prev, [key]: val }))}
                 specValue={classSpecs[key]}
                 onSpecChange={val => setClassSpecs(prev => ({ ...prev, [key]: val }))}
               />
-              {/* Reset to PDF defaults link */}
+              {/* Reset to default link */}
               <div style={{ textAlign: 'right', marginTop: '4px' }}>
                 <button
-                  onClick={() => handleReset(key)}
+                  onClick={() => handleResetSpec(key, name)}
                   style={{
                     background: 'none', border: 'none', color: color,
                     fontSize: '11px', fontWeight: 600, cursor: 'pointer',
@@ -587,7 +825,7 @@ export default function QuotationSettings() {
                     opacity: 0.8,
                   }}
                 >
-                  ↺ Reset to original PDF defaults
+                  ↺ Reset to default description
                 </button>
               </div>
             </div>

@@ -65,6 +65,21 @@ export default function QuotationDesk() {
   const [search, setSearch] = React.useState('');
   const [selections, setSelections] = React.useState({});
   const [addedItems, setAddedItems] = React.useState({});
+  const [brandFilter, setBrandFilter] = React.useState('all');
+
+  // Parent Brands available as a filter (active only), plus a brand resolver.
+  const brands = React.useMemo(
+    () => (data.brands || []).filter(b => b.active !== false).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [data.brands]
+  );
+  const fallbackBrandId = (data.brands || [])[0]?.id;
+  const brandOf = (cls) => ((data.brands || []).some(b => b.id === cls?.brandId) ? cls.brandId : fallbackBrandId);
+  const brandById = (id) => (data.brands || []).find(b => b.id === id);
+  // Classes shown for the current brand filter (tiles only; tools have their own tab).
+  const visibleClasses = React.useMemo(
+    () => tileClasses.filter(c => brandFilter === 'all' || brandOf(c) === brandFilter),
+    [tileClasses, brandFilter, data.brands]
+  );
   const normalizedSearch = search.trim().toLowerCase();
   const toolsActive = catalogView === TOOLS_SECTION_ID;
   const resolvedActiveStrip = tileClasses.some(c => c.id === activeStrip)
@@ -110,11 +125,16 @@ export default function QuotationDesk() {
     const qty = getSelectedQty(item);
     const price = getItemPrice(item);
     const isTool = cls?.type === 'tools' || item.classId === 'cls_tools';
+    const brandId = brandOf(cls);
+    const brand = brandById(brandId);
 
     addToCart({
       id: `${item.id}-${color}`,
       name: item.name,
       className: isTool ? 'Tools & Accessories' : cls?.name || 'Products',
+      // Brand snapshot for historical accuracy (rename-proof on the quotation).
+      brandId,
+      brandName: brand?.name || '',
       price,
       qty,
       unit: item.unit,
@@ -421,7 +441,50 @@ export default function QuotationDesk() {
 
           {!toolsActive ? (
             <div className="qd-strip-list" ref={productListRef}>
-              {tileClasses.map(renderClassStrip)}
+              {brands.length > 1 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setBrandFilter('all')}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
+                      border: `1.5px solid ${brandFilter === 'all' ? 'var(--accent)' : 'var(--line)'}`,
+                      background: brandFilter === 'all' ? 'var(--accent)' : 'var(--surface)',
+                      color: brandFilter === 'all' ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+                    }}
+                  >
+                    All Brands
+                  </button>
+                  {brands.map(b => {
+                    const active = brandFilter === b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBrandFilter(b.id)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
+                          border: `1.5px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
+                          background: active ? 'var(--accent)' : 'var(--surface)',
+                          color: active ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+                        }}
+                      >
+                        {b.logo && <img src={mediaUrl(b.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '36px', objectFit: 'contain', filter: active ? 'brightness(0) invert(1)' : 'none' }} />}
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {visibleClasses.length === 0 ? (
+                <div className="qd-empty">
+                  <Layers size={30} />
+                  <strong>No classes for this brand</strong>
+                  <span>Pick another brand or add classes in Settings.</span>
+                </div>
+              ) : (
+                visibleClasses.map(renderClassStrip)
+              )}
             </div>
           ) : (
             <section className="qd-tools-section qd-tools-cards-only" ref={toolsSectionRef} aria-label="Tools and accessories quick add">

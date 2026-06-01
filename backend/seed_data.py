@@ -16,6 +16,16 @@ DEFAULT_DATA = {
         "termsText": "1. All payments must be made in advance.\n2. Goods once sold will not be taken back.\n3. Subject to Kozhikode jurisdiction.",
         "currencySymbol": "\u20b9",
     },
+    "brands": [
+        {
+            "id": "nj",
+            "name": "NJ",
+            "logo": "",
+            "description": "NJ India in-house roofing brand.",
+            "order": 0,
+            "active": True,
+        },
+    ],
     "classes": [
         {
             "id": "c1",
@@ -25,6 +35,7 @@ DEFAULT_DATA = {
             "warrantyId": "nj_laminated",
             "color": "#6e3f32",
             "type": "tiles",
+            "brandId": "nj",
         },
         {
             "id": "c2",
@@ -34,6 +45,7 @@ DEFAULT_DATA = {
             "warrantyId": "docke",
             "color": "#3a506b",
             "type": "tiles",
+            "brandId": "nj",
         },
         {
             "id": "c3",
@@ -43,6 +55,7 @@ DEFAULT_DATA = {
             "warrantyId": "ceramic",
             "color": "#b95c3a",
             "type": "tiles",
+            "brandId": "nj",
         },
         {
             "id": "c4",
@@ -52,6 +65,7 @@ DEFAULT_DATA = {
             "warrantyId": "stone_coated",
             "color": "#4b4b4b",
             "type": "tiles",
+            "brandId": "nj",
         },
         {
             "id": "c5",
@@ -61,6 +75,7 @@ DEFAULT_DATA = {
             "warrantyId": "heatout",
             "color": "#4f755a",
             "type": "tiles",
+            "brandId": "nj",
         },
         {
             "id": "cls_tools",
@@ -70,6 +85,7 @@ DEFAULT_DATA = {
             "warrantyId": None,
             "color": "#8a857a",
             "type": "tools",
+            "brandId": "nj",
         },
     ],
     "varieties": [

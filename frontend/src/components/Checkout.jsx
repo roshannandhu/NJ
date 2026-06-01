@@ -14,8 +14,27 @@ export default function Checkout() {
   const [discountType, setDiscountType] = React.useState(settings.discountType || 'percent');
   const [discountValue, setDiscountValue] = React.useState(settings.discountRate || 0);
 
+  // Active bank accounts available for this quotation (CHANGE 5), ordered for display.
+  const activeBanks = React.useMemo(
+    () => (settings.banks || []).filter(b => b.active).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [settings.banks]
+  );
+  const [selectedBankId, setSelectedBankId] = React.useState('');
+
+  // ── Offer-price helpers ──────────────────────────────────────────────────
+  // An "offer" exists only when the effective price was lowered below the
+  // immutable actual (Settings) price. Items without actualPrice (legacy carts
+  // or custom lines with actualPrice 0) never count as offers.
+  const hasOffer = (item) => item.actualPrice != null && item.actualPrice > 0 && item.price < item.actualPrice;
+  // Per-row actual unit price used for the "Actual Total" — for non-offer rows
+  // this is just the effective price, so it never inflates the savings figure.
+  const rowActualUnit = (item) => (hasOffer(item) ? item.actualPrice : item.price);
+
   const taxRate = taxEnabled ? (settings.taxRate || 0) : 0;
-  const subtotal = cartTotal;
+  const subtotal = cartTotal; // effective (offer) subtotal — the charged amount
+  const actualSubtotal = cart.reduce((sum, item) => sum + (rowActualUnit(item) * item.qty), 0);
+  const productSavings = Math.max(0, Math.round((actualSubtotal - subtotal) * 100) / 100);
+  const hasOffers = cart.some(hasOffer);
   const discountAmount = discountEnabled
     ? (discountType === 'percent' ? Math.round(subtotal * discountValue) / 100 : Math.min(discountValue, subtotal))
     : 0;
@@ -69,12 +88,21 @@ export default function Checkout() {
     
     // Generate a unique quotation ID
     const qNo = `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
-    
+
+    // Snapshot the chosen bank so the quotation is audit-safe (immune to later settings edits).
+    const selectedBank = activeBanks.find(b => b.id === selectedBankId) || null;
+    // Copy the latest common Terms & Conditions onto the quotation; editable per-quotation later.
+    const commonTerms = (settings.commonTerms || '')
+      .split('\n').map(t => t.trim()).filter(Boolean);
+
     const snapshot = {
       id: qNo,
       items: [...cart],
       customer: { ...customer },
       subtotal,
+      actualSubtotal,
+      productSavings,
+      hasOffers,
       taxEnabled,
       taxRate,
       taxAmount,
@@ -83,6 +111,14 @@ export default function Checkout() {
       discountValue,
       discountAmount,
       grandTotal,
+      // Editable, per-quotation fields (CHANGE 2, 3, 5)
+      bank: selectedBank ? { ...selectedBank } : null,
+      bankId: selectedBankId || '',
+      terms: commonTerms,
+      classDescriptions: {},
+      notes: '',
+      delivery: '',
+      validityDays: settings.validityDays ?? 20,
       date: new Date().toLocaleDateString('en-GB')
     };
     
@@ -226,6 +262,11 @@ export default function Checkout() {
     setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, price: parseFloat(newPrice) || 0 } : item));
   };
 
+  // Restore an overridden line back to its immutable actual (Settings) price.
+  const handleResetPrice = (cartId) => {
+    setCart(prev => prev.map(item => item.cartId === cartId && item.actualPrice != null ? { ...item, price: item.actualPrice } : item));
+  };
+
   const handleNameChange = (cartId, newName) => {
     setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, name: newName } : item));
   };
@@ -245,6 +286,7 @@ export default function Checkout() {
       name: 'Custom Service / Item',
       className: 'Custom',
       price: 0,
+      actualPrice: 0, // custom lines have no master price → never an "offer"
       qty: 1,
       unit: 'nos',
       color: ''
@@ -439,8 +481,10 @@ export default function Checkout() {
 
                 {/* Price Override */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--ink-soft)' }}>Unit Price</div>
-                  <div style={{ 
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--ink-soft)' }}>
+                    {hasOffer(item) ? 'Offer Price' : 'Unit Price'}
+                  </div>
+                  <div style={{
                     position: 'relative', 
                     display: 'flex', 
                     alignItems: 'center',
@@ -467,6 +511,21 @@ export default function Checkout() {
                       }}
                     />
                   </div>
+                  {/* Actual (Settings) price + reset, shown only when an offer is active */}
+                  {hasOffer(item) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                      <span style={{ color: 'var(--ink-soft)', fontWeight: 600 }}>
+                        Actual <span style={{ textDecoration: 'line-through' }}>{settings.currencySymbol || '₹'}{item.actualPrice.toLocaleString('en-IN')}</span>
+                      </span>
+                      <button
+                        onClick={() => handleResetPrice(item.cartId)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: '11px' }}
+                        title="Restore the actual Settings price"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Qty */}
@@ -632,26 +691,61 @@ export default function Checkout() {
               <label htmlFor="customer-address-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Site / Billing Address
               </label>
-              <textarea 
+              <textarea
                 id="customer-address-input"
-                name="address" 
-                value={customer.address || ''} 
-                onChange={e => setCustomer({...customer, address: e.target.value})} 
+                name="address"
+                value={customer.address || ''}
+                onChange={e => setCustomer({...customer, address: e.target.value})}
                 placeholder="Street address, site details, location..."
-                style={{ 
-                  padding: '14px 16px', 
-                  border: '1.5px solid var(--line)', 
-                  borderRadius: 'var(--radius)', 
-                  fontSize: '15px', 
-                  fontWeight: 500, 
-                  background: 'var(--bg)', 
+                style={{
+                  padding: '14px 16px',
+                  border: '1.5px solid var(--line)',
+                  borderRadius: 'var(--radius)',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  background: 'var(--bg)',
                   color: 'var(--ink)',
-                  minHeight: '100px', 
-                  resize: 'none', 
+                  minHeight: '100px',
+                  resize: 'none',
                   outline: 'none',
                   lineHeight: '1.5'
                 }}
               />
+            </div>
+
+            {/* Quotation Bank Account (CHANGE 5) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label htmlFor="quotation-bank-select" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
+                Quotation Bank Account
+              </label>
+              <select
+                id="quotation-bank-select"
+                value={selectedBankId}
+                onChange={e => setSelectedBankId(e.target.value)}
+                style={{
+                  padding: '14px 16px',
+                  border: '1.5px solid var(--line)',
+                  borderRadius: 'var(--radius)',
+                  fontSize: '15px',
+                  fontWeight: 500,
+                  background: 'var(--bg)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="">No bank selected</option>
+                {activeBanks.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.bankName || 'Bank'}{b.accountNumber ? ` · ${b.accountNumber}` : ''}
+                  </option>
+                ))}
+              </select>
+              {activeBanks.length === 0 && (
+                <div style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
+                  Add bank accounts in Settings → Quotation Specs → Bank Accounts.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -873,9 +967,23 @@ export default function Checkout() {
             )}
           </div>
 
+          {/* Actual subtotal + item-offer savings (only when product offers exist) */}
+          {hasOffers && productSavings > 0 && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: 'var(--ink-soft)', fontWeight: 500 }}>
+                <span>Actual Total</span>
+                <span style={{ fontFamily: 'var(--font-mono)', textDecoration: 'line-through' }}>{settings.currencySymbol || '₹'}{actualSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: '#16a34a', fontWeight: 600 }}>
+                <span>Item Offer Savings</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>-{settings.currencySymbol || '₹'}{productSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+            </>
+          )}
+
           {/* Subtotal */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: 'var(--ink-mid)', fontWeight: 500 }}>
-            <span>Subtotal</span>
+            <span>{hasOffers && productSavings > 0 ? 'Offer Subtotal' : 'Subtotal'}</span>
             <span style={{ fontFamily: 'var(--font-mono)' }}>{settings.currencySymbol || '₹'}{subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
 

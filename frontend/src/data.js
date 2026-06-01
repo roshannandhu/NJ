@@ -17,13 +17,16 @@ export const DEFAULT_DATA = {
     pin: "1234",
     termsText: "1. All payments must be made in advance.\n2. Goods once sold will not be taken back.\n3. Subject to Kozhikode jurisdiction."
   },
+  brands: [
+    { id: "nj", name: "NJ", logo: "", description: "NJ India in-house roofing brand.", order: 0, active: true }
+  ],
   classes: [
-    { id: "c1", name: "NJ Premium Laminated", subtitle: "Asphalt Shingles", description: "Premium dual-layer asphalt shingles for dimensional appearance.", warrantyId: "nj_laminated", color: "#6e3f32", type: "tiles" },
-    { id: "c2", name: "Docke PIE", subtitle: "Bitumen Shingles", description: "High-quality European bitumen shingles.", warrantyId: "docke", color: "#3a506b", type: "tiles" },
-    { id: "c3", name: "NJ Premium Ceramic", subtitle: "Ceramic Roof Tiles", description: "Classic clay ceramic roofing.", warrantyId: "ceramic", color: "#b95c3a", type: "tiles" },
-    { id: "c4", name: "NJ Stone Coated", subtitle: "Metal Tiles", description: "Durable metal roofing with natural stone chip coating.", warrantyId: "stone_coated", color: "#4b4b4b", type: "tiles" },
-    { id: "c5", name: "Heatout", subtitle: "Insulated Ceilings", description: "Thermal insulation ceiling panels.", warrantyId: "heatout", color: "#4f755a", type: "tiles" },
-    { id: "cls_tools", name: "Tools & Accessories", subtitle: "Installation Hardware", description: "Screws, silicone, touch-up kits, ridges, gutters and all installation accessories.", warrantyId: null, color: "#8a857a", type: "tools" }
+    { id: "c1", name: "NJ Premium Laminated", subtitle: "Asphalt Shingles", description: "Premium dual-layer asphalt shingles for dimensional appearance.", warrantyId: "nj_laminated", color: "#6e3f32", type: "tiles", brandId: "nj" },
+    { id: "c2", name: "Docke PIE", subtitle: "Bitumen Shingles", description: "High-quality European bitumen shingles.", warrantyId: "docke", color: "#3a506b", type: "tiles", brandId: "nj" },
+    { id: "c3", name: "NJ Premium Ceramic", subtitle: "Ceramic Roof Tiles", description: "Classic clay ceramic roofing.", warrantyId: "ceramic", color: "#b95c3a", type: "tiles", brandId: "nj" },
+    { id: "c4", name: "NJ Stone Coated", subtitle: "Metal Tiles", description: "Durable metal roofing with natural stone chip coating.", warrantyId: "stone_coated", color: "#4b4b4b", type: "tiles", brandId: "nj" },
+    { id: "c5", name: "Heatout", subtitle: "Insulated Ceilings", description: "Thermal insulation ceiling panels.", warrantyId: "heatout", color: "#4f755a", type: "tiles", brandId: "nj" },
+    { id: "cls_tools", name: "Tools & Accessories", subtitle: "Installation Hardware", description: "Screws, silicone, touch-up kits, ridges, gutters and all installation accessories.", warrantyId: null, color: "#8a857a", type: "tools", brandId: "nj" }
   ],
   varieties: [
     { id: "v1", classId: "c1", name: "Laminated Standard", description: "Classic dual-layer", basePrice: 85, unit: "sqft", colors: [{ name: "Autumn Brown", hex: "#6e3f32", offset: 0 }, { name: "Estate Gray", hex: "#5b5b5b", offset: 0 }] },

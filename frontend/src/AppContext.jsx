@@ -74,7 +74,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     (async () => {
       try {
-        const cfg = await getConfig();
+        let cfg = await getConfig();
         const quotations = (await listQuotations()).map(normalizeCartSpelling);
         const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
 
@@ -91,18 +91,45 @@ export function AppProvider({ children }) {
             if (!merged.seriesTable || merged.seriesTable.length === 0) {
               merged.seriesTable = def.seriesTable || [];
             }
-            // Structural display flags are defined by warranty type (no UI to
-            // toggle them), so always take them from the current definition.
-            // This fixes the warranty-period table going missing on older saved
-            // configs (e.g. Docke, Ceramic).
-            merged.showSeriesTable = def.showSeriesTable;
-            if (def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
+            // Structural display flags are now user-customizable in the Warranty
+            // Builder. Preserve an explicit saved choice (true/false); only
+            // backfill from the definition when the flag is absent (legacy
+            // configs), which fixes the warranty-period table going missing on
+            // older saved configs (e.g. Docke, Ceramic).
+            if (merged.showSeriesTable === undefined) merged.showSeriesTable = def.showSeriesTable;
+            if (merged.heatoutTable === undefined && def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
             return merged;
           });
         }
 
+        // ── Parent Brand migration (idempotent, automatic) ──────────────────
+        // Existing catalogs have no brand layer. Ensure a default "NJ" brand
+        // exists and every class is assigned to a brand. Persist only if we
+        // actually changed something, so this runs at most once per catalog.
+        let brandMigrated = false;
+        if (cfg) {
+          let brands = Array.isArray(cfg.brands) ? cfg.brands : [];
+          if (brands.length === 0) {
+            brands = [{ id: 'nj', name: 'NJ', logo: '', description: 'NJ India in-house roofing brand.', order: 0, active: true }];
+            brandMigrated = true;
+          }
+          const defaultBrandId = brands[0].id;
+          const classes = (cfg.classes || []).map(c => {
+            if (!c.brandId) { brandMigrated = true; return { ...c, brandId: defaultBrandId }; }
+            return c;
+          });
+          cfg = { ...cfg, brands, classes };
+        }
+
         setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
         setBackendOffline(false);
+        if (brandMigrated && cfg) {
+          // Save the migrated catalog back so the brand layer is durable.
+          saveConfig({
+            company: cfg.company, settings: cfg.settings, brands: cfg.brands,
+            classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,
+          }).catch(() => { /* will retry on next explicit save */ });
+        }
         refreshBackupStatus();
         // The on-launch auto-backup runs in the background; re-check shortly so
         // the "protected" state shows without needing a manual reload.
@@ -123,6 +150,7 @@ export function AppProvider({ children }) {
       await saveConfig({
         company: nextData.company,
         settings: nextData.settings,
+        brands: nextData.brands,
         classes: nextData.classes,
         varieties: nextData.varieties,
         warranties: nextData.warranties,
@@ -134,15 +162,18 @@ export function AppProvider({ children }) {
 
   const addToCart = (item) => {
     // item needs: id, name, price, qty, unit, color, image
+    // `actualPrice` is the immutable master/Settings price captured at add-time.
+    // `price` stays the effective (chargeable) price; lowering it in Checkout
+    // turns the difference into an "offer" without ever touching actualPrice.
     let updatedExisting = false;
     setCart(prev => {
       const existing = prev.find(cartItem => cartItem.id === item.id);
-      if (!existing) return [...prev, { ...item, cartId: Date.now() }];
+      if (!existing) return [...prev, { ...item, cartId: Date.now(), actualPrice: item.actualPrice ?? item.price }];
 
       updatedExisting = true;
       return prev.map(cartItem =>
         cartItem.id === item.id
-          ? { ...cartItem, qty: cartItem.qty + item.qty, price: item.price, color: item.color }
+          ? { ...cartItem, qty: cartItem.qty + item.qty, price: item.price, color: item.color, actualPrice: cartItem.actualPrice ?? item.price }
           : cartItem
       );
     });

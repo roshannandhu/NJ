@@ -56,6 +56,52 @@ export default function WarrantiesSettings() {
     showToast(`${current.title} saved successfully in local database`, "success");
   };
 
+  // Create a brand-new, fully customizable warranty certificate.
+  const handleAddWarranty = () => {
+    const newId = `custom_${Date.now()}`;
+    const newWarranty = {
+      id: newId,
+      title: 'New Warranty Certificate',
+      logo: 'NJ',
+      duration: '10 Years',
+      opening: 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards.\nWe strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.',
+      sections: [
+        { title: '1. Product Information:', content: '', isBullets: false },
+        { title: '2. Warranty terms and conditions:', content: '', isBullets: false },
+      ],
+      showSeriesTable: false,
+      seriesTable: [],
+      heatoutTable: false,
+      signImage: '',
+      sealImage: '',
+    };
+    // Persist the resolved list (defaults merged) plus the new template.
+    const nextData = { ...data, warranties: [...warranties, newWarranty] };
+    setData(nextData);
+    persistConfig(nextData);
+    setActiveId(newId);
+    setCurrent(newWarranty);
+    showToast('New warranty certificate created — customize and save it', 'success');
+  };
+
+  // Delete the currently-selected warranty certificate.
+  const handleDeleteWarranty = () => {
+    if (warranties.length <= 1) {
+      showToast('At least one warranty certificate must remain', 'error');
+      return;
+    }
+    if (!window.confirm(`Delete "${current.title}"?\n\nAny product class linked to it will fall back to a default warranty. This cannot be undone.`)) {
+      return;
+    }
+    const remaining = warranties.filter(w => w.id !== current.id);
+    const nextData = { ...data, warranties: remaining };
+    setData(nextData);
+    persistConfig(nextData);
+    setActiveId(remaining[0].id);
+    setCurrent(remaining[0]);
+    showToast('Warranty certificate deleted', 'success');
+  };
+
   // Series table operations
   const updateSeriesRow = (index, field, value) => {
     const updatedRows = [...(current.seriesTable || [])];
@@ -79,10 +125,25 @@ export default function WarrantiesSettings() {
       
       {/* Left Pane: Template Selector */}
       <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', paddingRight: '4px' }}>
-        <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, color: 'var(--ink-soft)' }}>
-          WARRANTY CERTIFICATES
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, color: 'var(--ink-soft)' }}>
+            WARRANTY CERTIFICATES
+          </div>
         </div>
-        
+
+        <button
+          onClick={handleAddWarranty}
+          className="hover-lift"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+            padding: '12px 16px', borderRadius: 'var(--radius)', cursor: 'pointer',
+            background: 'var(--accent)', color: 'white', border: 'none',
+            fontSize: '13px', fontWeight: 700, boxShadow: 'var(--shadow-sm)'
+          }}
+        >
+          <Plus size={16} /> Add New Warranty
+        </button>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {warranties.map(w => {
             const isSelected = activeId === w.id;
@@ -145,21 +206,43 @@ export default function WarrantiesSettings() {
               Editing template: <strong>{current.title}</strong>
             </div>
           </div>
-          <button 
-            onClick={handleSave} 
-            className="btn-primary" 
-            style={{ 
-              padding: '12px 24px', 
-              fontSize: '13px', 
-              background: 'var(--accent)', 
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <Save size={16} /> Save Document Template
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={handleDeleteWarranty}
+              className="hover-lift"
+              title="Delete this warranty certificate"
+              style={{
+                padding: '12px 18px',
+                fontSize: '13px',
+                background: 'transparent',
+                color: 'var(--red)',
+                border: '1px solid var(--red)',
+                borderRadius: 'var(--radius-full)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              <Trash2 size={16} /> Delete
+            </button>
+            <button
+              onClick={handleSave}
+              className="btn-primary"
+              style={{
+                padding: '12px 24px',
+                fontSize: '13px',
+                background: 'var(--accent)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <Save size={16} /> Save Document Template
+            </button>
+          </div>
         </div>
 
         {/* The CMS Workspace Scrollable Area */}
@@ -251,6 +334,55 @@ export default function WarrantiesSettings() {
                 </span>
                 <div style={{ fontSize: '11px', fontWeight: 700 }}>{companyName}</div>
               </div>
+            </div>
+
+            {/* OPENING STATEMENT EDITOR */}
+            <div style={{ marginBottom: '28px', borderBottom: '1px solid var(--line)', paddingBottom: '20px' }}>
+              <label style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
+                Opening Statement (Dear Customer…)
+              </label>
+              <p style={{ fontSize: '11.5px', color: 'var(--ink-soft)', margin: '0 0 12px' }}>
+                The introductory paragraph printed under "Dear Customer" at the top of the certificate body.
+              </p>
+              <textarea
+                value={current.opening || ''}
+                onChange={e => setCurrent({ ...current, opening: e.target.value })}
+                placeholder="Congratulations on your purchase…"
+                style={{ width: '100%', minHeight: '90px', padding: '10px', border: '1px dashed var(--line)', background: '#FFFFFF', fontSize: '12px', resize: 'vertical', outline: 'none', fontFamily: 'inherit', lineHeight: '1.5', borderRadius: '8px' }}
+              />
+            </div>
+
+            {/* TABLE / STRUCTURE TOGGLES */}
+            <div style={{ marginBottom: '28px', borderBottom: '1px solid var(--line)', paddingBottom: '20px' }}>
+              <label style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)', display: 'block', marginBottom: '12px' }}>
+                Document Tables
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', marginBottom: '14px', background: '#FFFFFF', border: '1px solid #E5E1D8', borderRadius: '8px', padding: '12px 14px' }}>
+                <input
+                  type="checkbox"
+                  checked={current.showSeriesTable || false}
+                  onChange={e => setCurrent({ ...current, showSeriesTable: e.target.checked })}
+                  style={{ marginTop: '2px' }}
+                />
+                <span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)', display: 'block' }}>Show "Warranty Period by Series" table</span>
+                  <span style={{ fontSize: '11.5px', color: 'var(--ink-soft)' }}>Renders the series/model → coverage-period table you configure below.</span>
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer', background: '#FFFFFF', border: '1px solid #E5E1D8', borderRadius: '8px', padding: '12px 14px' }}>
+                <input
+                  type="checkbox"
+                  checked={current.heatoutTable || false}
+                  onChange={e => setCurrent({ ...current, heatoutTable: e.target.checked })}
+                  style={{ marginTop: '2px' }}
+                />
+                <span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)', display: 'block' }}>Show graduated "Liability Table"</span>
+                  <span style={{ fontSize: '11.5px', color: 'var(--ink-soft)' }}>Renders the years-of-use → % of warrantor liability schedule (Heatout style).</span>
+                </span>
+              </label>
             </div>
 
             {/* DYNAMIC SECTIONS EDITOR */}

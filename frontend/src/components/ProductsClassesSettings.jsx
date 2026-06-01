@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../AppContext';
 import { mediaUrl, uploadImage } from '../api';
-import { Plus, Image as ImageIcon, Trash2, FolderTree, Package, Palette, FileText, CheckCircle2, Loader } from 'lucide-react';
+import { Plus, Image as ImageIcon, Trash2, FolderTree, Package, Palette, FileText, CheckCircle2, Loader, Award } from 'lucide-react';
 
 const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
@@ -15,6 +15,9 @@ export default function ProductsClassesSettings() {
   const [editClass, setEditClass] = useState(null);
   const [editVariety, setEditVariety] = useState(null);
   const [editColor, setEditColor] = useState(null);
+
+  // Catalog tree is grouped by Parent Brand, with an optional brand filter.
+  const [brandFilter, setBrandFilter] = useState('all');
 
   // Auto-save state and refs
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'pending' | 'saved'
@@ -241,7 +244,8 @@ export default function ProductsClassesSettings() {
   // --- Add New Handlers ---
   const handleAddClass = () => {
     const newId = generateId('cls');
-    const newClass = { id: newId, name: 'New Class', type: 'tiles', color: '#E2E8F0', logo: null, warrantyId: null };
+    const firstBrandId = (data.brands || [])[0]?.id || 'nj';
+    const newClass = { id: newId, name: 'New Class', type: 'tiles', color: '#E2E8F0', logo: null, warrantyId: null, brandId: firstBrandId };
     selectClass(newClass);
   };
 
@@ -256,22 +260,51 @@ export default function ProductsClassesSettings() {
     selectColor(newColor, varietyId);
   };
 
+  // --- Brand grouping for the catalog tree ---
+  const sortedBrands = [...(data.brands || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const fallbackBrandId = sortedBrands[0]?.id;
+  // Resolve a class's brand, treating an unknown/missing brandId as the first brand.
+  const brandOf = (cls) => (sortedBrands.some(b => b.id === cls.brandId) ? cls.brandId : fallbackBrandId);
+  const brandGroups = sortedBrands
+    .filter(b => brandFilter === 'all' || b.id === brandFilter)
+    .map(brand => ({ brand, classes: data.classes.filter(c => brandOf(c) === brand.id) }));
+
   return (
     <div className="animate-fade-up" style={{ display: 'flex', height: 'calc(100vh - 200px)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
       
       {/* Left Pane: Tree View */}
       <div style={{ width: '320px', borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', background: 'var(--bg-warm)' }}>
-        <div style={{ padding: '20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)' }}>
-          <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Catalog Hierarchy</div>
-          <button onClick={handleAddClass} style={{ background: 'var(--ink)', color: 'var(--surface)', border: 'none', width: '28px', height: '28px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Plus size={16}/>
-          </button>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--surface)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Catalog Hierarchy</div>
+            <button onClick={handleAddClass} style={{ background: 'var(--ink)', color: 'var(--surface)', border: 'none', width: '28px', height: '28px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Plus size={16}/>
+            </button>
+          </div>
+          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ padding: '8px 10px', border: '1.5px solid var(--line)', borderRadius: '6px', fontSize: '13px', background: 'var(--bg)', color: 'var(--ink)', cursor: 'pointer' }}>
+            <option value="all">All Brands</option>
+            {sortedBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
         </div>
-        
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
           {data.classes.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--ink-soft)', fontSize: '13px' }}>No classes. Add one to begin.</div>}
-          
-          {data.classes.map(cls => (
+
+          {brandGroups.map(group => (
+            <div key={group.brand.id} style={{ marginBottom: '6px' }}>
+              {/* Brand group header */}
+              <div style={{ padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '8px', position: 'sticky', top: 0, background: 'var(--bg-warm)', zIndex: 1 }}>
+                {group.brand.logo
+                  ? <img src={mediaUrl(group.brand.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '40px', objectFit: 'contain' }} />
+                  : <Award size={14} color="#7C3AED" />}
+                <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-soft)' }}>{group.brand.name}</span>
+                <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--ink-soft)' }}>{group.classes.length}</span>
+              </div>
+              {group.classes.length === 0 && (
+                <div style={{ padding: '4px 20px 8px 32px', fontSize: '12px', color: 'var(--ink-soft)', fontStyle: 'italic' }}>No classes yet</div>
+              )}
+
+              {group.classes.map(cls => (
             <div key={cls.id}>
               {/* Class Node */}
               <div 
@@ -324,6 +357,8 @@ export default function ProductsClassesSettings() {
                     </div>
                   ))}
                 </div>
+              ))}
+            </div>
               ))}
             </div>
           ))}
@@ -399,7 +434,17 @@ export default function ProductsClassesSettings() {
                     <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Class Name</label>
                     <input value={editClass.name} onChange={e => setEditClass({...editClass, name: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
                   </div>
-                  
+
+                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Parent Brand</label>
+                    <select value={editClass.brandId || (data.brands || [])[0]?.id || 'nj'} onChange={e => setEditClass({...editClass, brandId: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', background: 'var(--surface)' }}>
+                      {(data.brands || []).map(b => (
+                        <option key={b.id} value={b.id}>{b.name}{b.active === false ? ' (inactive)' : ''}</option>
+                      ))}
+                    </select>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>The brand this class belongs to. Manage brands in Settings → Parent Brands.</div>
+                  </div>
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Catalog Type</label>
                     <select value={editClass.type === 'regular' ? 'tiles' : (editClass.type || 'tiles')} onChange={e => setEditClass({...editClass, type: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', background: 'var(--surface)' }}>

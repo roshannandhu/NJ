@@ -1,12 +1,48 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, MapPin, FileType2, Share2 } from 'lucide-react';
-import { downloadWarrantyDocx } from '../api';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
+import { downloadWarrantyDocx, mediaUrl, createQuotation } from '../api';
 import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 
+// ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
+function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+
+  const startEditing = () => { setDraft(value ?? ''); setEditing(true); document.body.setAttribute('data-quotation-editing', 'true'); };
+  const stopEditing  = () => { setEditing(false); document.body.removeAttribute('data-quotation-editing'); };
+  const commit = () => { stopEditing(); if (String(draft) !== String(value ?? '')) onSave(numeric ? (parseFloat(draft) || 0) : draft); };
+
+  if (editing) {
+    const s = {
+      width: '100%', border: 'none', borderBottom: '1.5px solid #8a1856',
+      background: 'rgba(138,24,86,0.05)', padding: '1px 3px',
+      fontSize: 'inherit', fontFamily: 'inherit', fontWeight: 'inherit',
+      color: 'inherit', textAlign: 'inherit', outline: 'none', boxSizing: 'border-box', ...style,
+    };
+    return multiline
+      ? <textarea autoFocus value={draft} style={s}
+          ref={el => { if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; } }}
+          onChange={e => { setDraft(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Escape') { setDraft(value ?? ''); stopEditing(); } }} />
+      : <input autoFocus type={numeric ? 'number' : 'text'} value={draft} style={s}
+          onChange={e => setDraft(e.target.value)} onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value ?? ''); stopEditing(); } }} />;
+  }
+
+  const isEmpty = value == null || value === '';
+  const display = renderValue ? renderValue(value) : (isEmpty ? <span style={{ color: '#bbb', fontStyle: 'italic' }}>{placeholder}</span> : value);
+  return (
+    <span onClick={startEditing} title="Click to edit" className="q-editable" style={{ cursor: 'text', ...style }}>
+      {display}
+    </span>
+  );
+}
+
 export default function QuotationDocument() {
-  const { 
-    activeQuotation: generatedDoc, 
+  const {
+    activeQuotation: generatedDoc,
     data, 
     setData, 
     setCurrentView, 
@@ -33,6 +69,59 @@ export default function QuotationDocument() {
   const [isDownloading, setIsDownloading] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [isSharing, setIsSharing] = React.useState(false);
+
+  // ── In-place quotation editing (CHANGE 3) — warranty-style inline editing ──
+  // The quotation document itself is directly editable: click any field to edit
+  // it on the sheet (see EditableCell). Each commit recomputes totals, updates
+  // the active quotation + registry, and upserts to the backend. Edits affect
+  // ONLY this quotation — master products/settings are never touched.
+  const doc = generatedDoc;
+
+  // Recompute all totals from line items + tax/discount, mirroring Checkout math.
+  const recomputeTotals = (d) => {
+    const items = d.items || [];
+    const isOffer = (it) => it.actualPrice != null && it.actualPrice > 0 && it.price < it.actualPrice;
+    const actualUnit = (it) => (isOffer(it) ? it.actualPrice : it.price);
+    const subtotal = items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+    const actualSubtotal = items.reduce((s, it) => s + actualUnit(it) * (Number(it.qty) || 0), 0);
+    const productSavings = Math.max(0, Math.round((actualSubtotal - subtotal) * 100) / 100);
+    const hasOffers = items.some(isOffer);
+    const discountAmount = d.discountEnabled
+      ? (d.discountType === 'percent' ? Math.round(subtotal * (Number(d.discountValue) || 0)) / 100 : Math.min(Number(d.discountValue) || 0, subtotal))
+      : 0;
+    const taxableAmount = subtotal - discountAmount;
+    const taxRate = d.taxEnabled ? (Number(d.taxRate) || Number(settings.taxRate) || 0) : 0;
+    const taxAmount = Math.round(taxableAmount * taxRate) / 100;
+    const grandTotal = taxableAmount + taxAmount;
+    return { ...d, subtotal, actualSubtotal, productSavings, hasOffers, taxRate, taxAmount, discountAmount, grandTotal };
+  };
+
+  // Persist an updated quotation: context (active + registry) + backend upsert.
+  const persistDoc = (updatedDoc) => {
+    setActiveQuotation(updatedDoc);
+    setData(prev => {
+      const h = prev.quotations || [];
+      const i = h.findIndex(q => q.id === updatedDoc.id);
+      const nh = i !== -1 ? h.map(q => (q.id === updatedDoc.id ? updatedDoc : q)) : [updatedDoc, ...h];
+      return { ...prev, quotations: nh };
+    });
+    createQuotation(updatedDoc).catch(() => {}); // fire-and-forget; local copy already saved
+  };
+  // Apply a top-level patch to the current quotation, recompute, and persist.
+  const commitDoc = (patch) => persistDoc(recomputeTotals({ ...generatedDoc, ...patch }));
+
+  // Field-level editing helpers
+  const updateField     = (field, value) => commitDoc({ [field]: value });
+  const updateCustomer  = (field, value) => commitDoc({ customer: { ...(generatedDoc.customer || {}), [field]: value } });
+  const updateItemField = (cartId, field, value) => commitDoc({ items: generatedDoc.items.map(it => it.cartId === cartId ? { ...it, [field]: value } : it) });
+  const removeItemRow   = (cartId) => commitDoc({ items: generatedDoc.items.filter(it => it.cartId !== cartId) });
+  const addItemRow      = () => commitDoc({ items: [...generatedDoc.items, { cartId: 'custom_' + Date.now(), id: 'custom', name: 'Custom Service / Item', className: 'Custom', price: 0, actualPrice: 0, qty: 1, unit: 'nos', color: '' }] });
+  const updateClassDesc = (key, value) => commitDoc({ classDescriptions: { ...(generatedDoc.classDescriptions || {}), [key]: value } });
+  const updateTerms     = (text) => commitDoc({ terms: text.split('\n') });
+  const updateBankField = (field, value) => commitDoc({ bank: { ...(generatedDoc.bank || {}), [field]: value } });
+  // Set a line's unit price. With no active offers, keep price == actualPrice so the
+  // single "Actual Price" column drives the total; otherwise edit each independently.
+  const setItemUnitPrice = (cartId, v) => commitDoc({ items: generatedDoc.items.map(it => it.cartId === cartId ? { ...it, price: v, actualPrice: v } : it) });
 
   const startNew = () => {
     setCart([]);
@@ -309,7 +398,7 @@ export default function QuotationDocument() {
 
   // Tile classes only (exclude tools/accessories)
   const tileClasses = Array.from(
-    new Set(generatedDoc.items.map(i => i.className))
+    new Set(doc.items.map(i => i.className))
   ).filter(name => name !== 'Custom' && !name.toLowerCase().includes('tool'));
 
   // Class-key resolver (maps class name → settings key)
@@ -323,19 +412,63 @@ export default function QuotationDocument() {
     return 'default';
   };
 
-  // Table 1: Product spec cell (reads from settings.classSpecs if available)
+  // Storage key for a class's description: prefer the stable class.id (matching how
+  // Settings stores classSpecs), falling back to the keyword key for legacy configs.
+  const classDescKey = (className) => {
+    const itemClass = data.classes?.find(c => c.name === className);
+    return itemClass?.id || resolveClassKey(className);
+  };
+
+  // Resolve the Parent Brand for a class on the quotation. Prefers the per-item
+  // brand snapshot (historical accuracy: rename-proof), then the live class→brand
+  // link. Logo comes from the current brand record. Null when no brand info.
+  const getBrandForClass = (className) => {
+    const item = doc.items.find(i => i.className === className && (i.brandId || i.brandName));
+    const itemClass = data.classes?.find(c => c.name === className);
+    const brandId = item?.brandId || itemClass?.brandId;
+    const brand = (data.brands || []).find(b => b.id === brandId);
+    const name = item?.brandName || brand?.name || '';
+    const logo = brand?.logo || '';
+    return (name || logo) ? { name, logo } : null;
+  };
+
+  // Table 1: Class Description cell. Priority: per-quotation override →
+  // settings.classSpecs (string form) → legacy object form → hard fallback.
   const getClassSpecRow = (className) => {
-    const key = resolveClassKey(className);
-    const saved = settings.classSpecs?.[key];
-    
-    if (saved && saved.specs) {
+    const kwKey = resolveClassKey(className);
+    const idKey = data.classes?.find(c => c.name === className)?.id;
+    const override = doc.classDescriptions?.[idKey] ?? doc.classDescriptions?.[kwKey];
+    const savedRaw = settings.classSpecs?.[idKey] ?? settings.classSpecs?.[kwKey];
+    const text = (override != null && override !== '') ? override : savedRaw;
+
+    // Current storage form is a plain string: first line = title, rest = spec lines.
+    if (typeof text === 'string' && text.trim()) {
+      const lines = text.split('\n');
+      const title = lines[0];
+      const rest = lines.slice(1).join('\n');
       return (
         <>
           <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px', textTransform: 'uppercase' }}>
-            {saved.title || className}
+            {title}
+          </div>
+          {rest.trim() && (
+            <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+              {rest}
+            </div>
+          )}
+        </>
+      );
+    }
+
+    // Legacy object form { title, specs }
+    if (text && text.specs) {
+      return (
+        <>
+          <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px', textTransform: 'uppercase' }}>
+            {text.title || className}
           </div>
           <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
-            {saved.specs}
+            {text.specs}
           </div>
         </>
       );
@@ -440,6 +573,27 @@ export default function QuotationDocument() {
   const PLUM = '#8a1856';
   const curr = settings.currencySymbol || '₹';
 
+  // ── Offer-price helpers (backward compatible) ────────────────────────────
+  // Old quotations have items with only `price` (no actualPrice) → no offer,
+  // so the document renders exactly as it always did.
+  const hasOffer = (item) => item.actualPrice != null && item.actualPrice > 0 && item.price < item.actualPrice;
+  const rowActualUnit = (item) => (hasOffer(item) ? item.actualPrice : item.price);
+  const docAnyOffer = doc.hasOffers ?? doc.items.some(hasOffer);
+  const docActualSubtotal = doc.actualSubtotal
+    ?? doc.items.reduce((s, it) => s + (rowActualUnit(it) * it.qty), 0);
+  const docSavings = doc.productSavings
+    ?? Math.max(0, docActualSubtotal - doc.subtotal);
+
+  // Terms source: per-quotation `terms` array (CHANGE 2/3) → legacy per-class merge.
+  // Quotations created after this feature always carry a `terms` array (even if edited
+  // empty); only older quotations without the key fall back to the per-class merge.
+  const quotationTerms = Array.isArray(doc.terms)
+    ? doc.terms.filter(t => t && t.trim())
+    : getTermsAndConditions(doc.items);
+
+  // Resolved bank for this quotation (CHANGE 6-9); null/absent on older quotations.
+  const docBank = doc.bank || null;
+
   // Construct tabs array for unified document viewer
   const documentTabs = [
     { id: 'quotation', label: 'Quotation Sheet', icon: <FileText size={16} /> },
@@ -451,6 +605,10 @@ export default function QuotationDocument() {
       cert: w
     }))
   ];
+
+  // Banks available to switch this quotation to (active + the current one).
+  const switchableBanks = (settings.banks || []).filter(b => b.active);
+  if (doc.bank && doc.bankId && !switchableBanks.some(b => b.id === doc.bankId)) switchableBanks.push(doc.bank);
 
   return (
     <div className="animate-fade-up" style={{ paddingBottom: '100px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -561,6 +719,12 @@ export default function QuotationDocument() {
         .warranty-doc.is-dense .wd-cert-row { font-size: 8.5pt; padding: 1px 0; }
         .warranty-doc.is-dense .wd-cert-lbl { font-size: 8pt; min-width: 160px; }
 
+        /* Inline-editable affordance on the quotation sheet (hover only, so it
+           never appears in the exported PDF / print). */
+        .q-editable { border-radius: 2px; transition: background 0.15s, outline 0.15s; }
+        .q-editable:hover { background: rgba(138,24,86,0.06); outline: 1px dashed rgba(138,24,86,0.4); }
+        body[data-quotation-editing="true"] #quotationSheet { transform: none !important; margin-bottom: 0 !important; }
+
         .warranty-doc .wd-wm {
           position: absolute; top: 50%; left: 50%;
           transform: translate(-50%,-50%) rotate(-30deg);
@@ -655,9 +819,10 @@ export default function QuotationDocument() {
             -webkit-print-color-adjust: exact !important; 
             print-color-adjust: exact !important; 
           }
-          .actions-bar, .sidebar, .topbar, .document-tab-bar, .cert-customizer-sidebar { 
-            display: none !important; 
+          .actions-bar, .sidebar, .topbar, .document-tab-bar, .cert-customizer-sidebar, .q-edit-hint, .q-edit-only {
+            display: none !important;
           }
+          .q-editable { background: transparent !important; outline: none !important; }
           .document-hub-layout {
             padding: 0 !important;
             margin: 0 !important;
@@ -727,22 +892,23 @@ export default function QuotationDocument() {
           {/* Dispatcher Actions Bar */}
           {activeTabId === 'quotation' ? (
             /* ── Actions Bar for Quotation Tab ── */
+            <>
             <div className="actions-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
               <button onClick={() => setCurrentView('checkout')} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                <ArrowLeft size={18} /> Edit Quotation
+                <ArrowLeft size={18} /> Edit in Checkout
               </button>
               <button onClick={downloadQuotationPDF} disabled={isDownloading} className="hover-lift"
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px', 
-                  padding: '12px 24px', 
-                  background: 'var(--accent)', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: 'var(--radius-full)', 
-                  fontWeight: 600, 
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px 24px',
+                  background: 'var(--accent)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 'var(--radius-full)',
+                  fontWeight: 600,
                   cursor: isDownloading ? 'not-allowed' : 'pointer',
                   opacity: isDownloading ? 0.7 : 1,
                   marginLeft: 'auto'
@@ -767,6 +933,12 @@ export default function QuotationDocument() {
                 <RotateCcw size={18} /> Start New
               </button>
             </div>
+
+            {/* Inline-edit hint (hidden in print/PDF) */}
+            <div className="q-edit-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', padding: '10px 14px', background: 'rgba(138,24,86,0.05)', border: '1px solid rgba(138,24,86,0.18)', borderRadius: '8px', fontSize: '12px', color: '#8a1856', fontWeight: 600, width: '100%', maxWidth: '860px' }}>
+              <Edit3 size={13} /> Click any text, price, quantity, or detail on the quotation below to edit it directly. Changes affect only this quotation.
+            </div>
+            </>
           ) : (
             /* ── Actions Bar for Warranty Tab ── */
             <div className="actions-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '794px' }}>
@@ -830,9 +1002,9 @@ export default function QuotationDocument() {
 
           {/* ── Document Dispatcher Render Preview Block ── */}
           {activeTabId === 'quotation' ? (
-            /* ── VIEW A: PRINTABLE QUOTATION SHEET ── */
+            /* ── VIEW A: PRINTABLE QUOTATION SHEET (inline editable) ── */
             (() => {
-              const itemCount = generatedDoc.items.length;
+              const itemCount = doc.items.length;
               // Density tiers: normal ≤4, medium 5-8, compact 9-13, ultra 14+
               const tier = itemCount <= 4 ? 'normal' : itemCount <= 8 ? 'medium' : itemCount <= 13 ? 'compact' : 'ultra';
               const D = {
@@ -900,12 +1072,18 @@ export default function QuotationDocument() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px', fontSize: D.tcFs }}>
                 <div>
                   <span style={{ color: '#555', fontWeight: '600' }}>Quotation To : </span>
-                  <strong style={{ fontSize: D.rowFont }}>{generatedDoc.customer.name}</strong>
-                  {generatedDoc.customer.phone   && <div style={{ color: '#555', marginTop: '1px' }}>Ph: {generatedDoc.customer.phone}</div>}
-                  {generatedDoc.customer.address && <div style={{ color: '#555', marginTop: '1px', maxWidth: '360px' }}>{generatedDoc.customer.address}</div>}
+                  <strong style={{ fontSize: D.rowFont }}>
+                    <EditableCell value={doc.customer.name} onSave={v => updateCustomer('name', v)} placeholder="Customer name" />
+                  </strong>
+                  <div className={doc.customer.phone ? undefined : 'q-edit-only'} {...(doc.customer.phone ? {} : { 'data-html2canvas-ignore': 'true' })} style={{ color: '#555', marginTop: '1px' }}>
+                    Ph: <EditableCell value={doc.customer.phone} onSave={v => updateCustomer('phone', v)} placeholder="add phone" />
+                  </div>
+                  <div className={doc.customer.address ? undefined : 'q-edit-only'} {...(doc.customer.address ? {} : { 'data-html2canvas-ignore': 'true' })} style={{ color: '#555', marginTop: '1px', maxWidth: '360px' }}>
+                    <EditableCell value={doc.customer.address} onSave={v => updateCustomer('address', v)} multiline placeholder="add address" />
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right', fontSize: D.tcFs, fontWeight: '700' }}>
-                  Date: {generatedDoc.date}
+                  Date: <EditableCell value={doc.date} onSave={v => updateField('date', v)} placeholder="date" />
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: D.custMb }}>
@@ -930,6 +1108,11 @@ export default function QuotationDocument() {
                     {tileClasses.map((className, idx) => {
                       const itemClass = data.classes?.find(c => c.name === className);
                       const brandColor = itemClass ? itemClass.color : PLUM;
+                      // Real image: prefer an item in this quotation that carries
+                      // an image, then the class's own category image (logo).
+                      const itemImg = doc.items.find(it => it.className === className && it.image)?.image;
+                      const rawImg = itemImg || itemClass?.logo || '';
+                      const imgSrc = rawImg ? mediaUrl(rawImg) : '';
                       const svgPlaceholder = (
                         <svg viewBox="0 0 100 60" style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'block' }}>
                           <rect width="100" height="60" fill={brandColor} opacity="0.1" />
@@ -939,11 +1122,46 @@ export default function QuotationDocument() {
                       return (
                         <tr key={idx}>
                           <td style={{ ...TB, padding: D.specPad, width: '65%', verticalAlign: 'top' }}>
-                            {getClassSpecRow(className)}
+                            {(() => {
+                              const brand = getBrandForClass(className);
+                              if (!brand) return null;
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '6px' }}>
+                                  {brand.logo && (
+                                    <img src={mediaUrl(brand.logo)} alt={brand.name} crossOrigin="anonymous"
+                                      style={{ height: tier === 'normal' ? '20px' : '16px', width: 'auto', maxWidth: '70px', objectFit: 'contain', display: 'block' }} />
+                                  )}
+                                  {brand.name && (
+                                    <span style={{ fontSize: D.subFont, fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: PLUM }}>
+                                      {brand.name}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                            {(() => {
+                              const key = classDescKey(className);
+                              const raw = (doc.classDescriptions?.[key] != null)
+                                ? doc.classDescriptions[key]
+                                : (settings.classSpecs?.[key] ?? settings.classSpecs?.[resolveClassKey(className)] ?? '');
+                              return (
+                                <EditableCell
+                                  value={raw}
+                                  onSave={v => updateClassDesc(key, v)}
+                                  multiline
+                                  placeholder="click to add class description"
+                                  renderValue={() => getClassSpecRow(className)}
+                                  style={{ display: 'block', width: '100%' }}
+                                />
+                              );
+                            })()}
                           </td>
                           <td style={{ ...TB, padding: '6px', width: '35%', verticalAlign: 'middle', background: '#FAFAFA', textAlign: 'center' }}>
                             <div style={{ width: '100%', height: D.specH, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: '6px', border: '1px solid #E5E7EB' }}>
-                              {svgPlaceholder}
+                              {imgSrc ? (
+                                <img src={imgSrc} alt={className} crossOrigin="anonymous"
+                                  style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+                              ) : svgPlaceholder}
                             </div>
                           </td>
                         </tr>
@@ -953,18 +1171,26 @@ export default function QuotationDocument() {
                 </table>
               )}
 
-              {/* TABLE 2 — ITEMISED ESTIMATE */}
+              {/* TABLE 2 — ITEMISED ESTIMATE (image + actual/offer pricing) */}
+              {(() => {
+                const thumb = tier === 'normal' ? 46 : tier === 'medium' ? 38 : tier === 'compact' ? 30 : 24;
+                // Build columns dynamically; the OFFER PRICE column only appears
+                // when at least one line carries an offer (keeps it uncluttered).
+                const cols = [
+                  { key: 'si',     label: 'SI NO',        align: 'center', w: tier === 'ultra' ? '32px' : '44px' },
+                  { key: 'img',    label: 'IMAGE',        align: 'center', w: `${thumb + 16}px` },
+                  { key: 'prod',   label: 'PRODUCT',      align: 'left',   w: 'auto' },
+                  { key: 'qty',    label: 'QTY',          align: 'center', w: tier === 'ultra' ? '64px' : '84px' },
+                  { key: 'actual', label: 'ACTUAL PRICE', align: 'right',  w: tier === 'ultra' ? '78px' : '98px' },
+                  ...(docAnyOffer ? [{ key: 'offer', label: 'OFFER PRICE', align: 'right', w: tier === 'ultra' ? '78px' : '98px' }] : []),
+                  { key: 'total',  label: 'TOTAL',        align: 'right',  w: tier === 'ultra' ? '86px' : '106px' },
+                ];
+                return (
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb }}>
                 <thead>
                   <tr>
-                    {[
-                      { label: 'SI NO',    align: 'center', w: tier === 'ultra' ? '36px' : '50px'  },
-                      { label: 'PRODUCT',  align: 'left',   w: 'auto'  },
-                      { label: 'QTY',      align: 'center', w: tier === 'ultra' ? '70px' : '90px' },
-                      { label: 'PRICE',    align: 'right',  w: tier === 'ultra' ? '80px' : '100px' },
-                      { label: 'TOTAL',    align: 'right',  w: tier === 'ultra' ? '90px' : '110px' },
-                    ].map(col => (
-                      <th key={col.label} style={{
+                    {cols.map(col => (
+                      <th key={col.key} style={{
                         ...TB, background: PLUM, color: '#FFFFFF',
                         padding: tier === 'normal' ? '11px 10px' : tier === 'medium' ? '8px 8px' : '6px 6px',
                         textAlign: col.align, fontWeight: '800', fontSize: D.subFont,
@@ -976,73 +1202,206 @@ export default function QuotationDocument() {
                   </tr>
                 </thead>
                 <tbody>
-                  {generatedDoc.items.map((item, i) => (
+                  {doc.items.map((item, i) => {
+                    const offer = hasOffer(item);
+                    const actualUnit = rowActualUnit(item);
+                    const itemClass = data.classes?.find(c => c.name === item.className);
+                    const brandColor = itemClass ? itemClass.color : PLUM;
+                    const imgSrc = item.image ? mediaUrl(item.image) : '';
+                    return (
                     <tr key={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
                         {i + 1}
                       </td>
+                      <td style={{ ...TB, padding: '4px', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ width: thumb, height: thumb, margin: '0 auto', borderRadius: '5px', overflow: 'hidden', border: '1px solid #E5E7EB', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {imgSrc ? (
+                            <img src={imgSrc} alt={item.name} crossOrigin="anonymous"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: brandColor, opacity: 0.85, color: '#FFFFFF', fontWeight: '800', fontSize: `${Math.round(thumb / 2.6)}px` }}>
+                              {(item.name || '?').trim().charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td style={{ ...TB, padding: D.rowPad }}>
-                        <div style={{ fontSize: D.rowFont, fontWeight: '700', color: '#1A1A1A' }}>{item.name}</div>
-                        <div style={{ fontSize: D.subFont, color: '#777', fontWeight: '500', marginTop: '1px' }}>
-                          {item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` · ${item.color}` : ''}
+                        <div style={{ fontSize: D.rowFont, fontWeight: '700', color: '#1A1A1A' }}>
+                          <EditableCell value={item.name} onSave={v => updateItemField(item.cartId, 'name', v)} placeholder="item name" style={{ display: 'block', width: '100%' }} />
+                        </div>
+                        <div style={{ fontSize: D.subFont, color: '#777', fontWeight: '500', marginTop: '1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` · ${item.color}` : ''}</span>
+                          <button className="q-edit-only" data-html2canvas-ignore="true" onClick={() => removeItemRow(item.cartId)} title="Remove this line"
+                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0 }}>✕ remove</button>
                         </div>
                       </td>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '700', fontSize: D.rowFont, color: '#1A1A1A' }}>
-                        {item.qty}&nbsp;<span style={{ fontSize: D.subFont, fontWeight: '500', color: '#666' }}>{item.unit}</span>
+                        <EditableCell value={item.qty} numeric onSave={v => updateItemField(item.cartId, 'qty', Math.max(0, v))} style={{ width: '48px', textAlign: 'center' }} />
+                        &nbsp;<span style={{ fontSize: D.subFont, fontWeight: '500', color: '#666' }}>{item.unit}</span>
                       </td>
-                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '500', fontSize: D.rowFont, color: '#333', fontFamily: 'var(--font-mono)' }}>
-                        {curr}{item.price.toLocaleString('en-IN')}
+                      {/* ACTUAL PRICE — struck through when this row has an offer */}
+                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: offer ? '500' : '600', fontSize: D.rowFont, color: offer ? '#999' : '#333', fontFamily: 'var(--font-mono)', textDecoration: offer ? 'line-through' : 'none' }}>
+                        {curr}<EditableCell value={actualUnit} numeric
+                          onSave={v => (docAnyOffer ? updateItemField(item.cartId, 'actualPrice', v) : setItemUnitPrice(item.cartId, v))}
+                          renderValue={() => actualUnit.toLocaleString('en-IN')}
+                          style={{ width: '70px', textAlign: 'right', textDecoration: 'inherit' }} />
                       </td>
+                      {/* OFFER PRICE — only when the column exists */}
+                      {docAnyOffer && (
+                        <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
+                          {offer
+                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN')} style={{ width: '70px', textAlign: 'right' }} /></>
+                            : <EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
+                        </td>
+                      )}
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: '#1A1A1A', fontFamily: 'var(--font-mono)' }}>
                         {curr}{(item.price * item.qty).toLocaleString('en-IN')}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
+                );
+              })()}
 
-              {/* ── TOTALS BLOCK — right-aligned, outside the items table ── */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: D.tblMb }}>
-                <div style={{ minWidth: tier === 'ultra' ? '200px' : '260px', border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
+              {/* Add line item (edit affordance, hidden in print/PDF) */}
+              <div className="q-edit-only" data-html2canvas-ignore="true" style={{ marginTop: `-${D.tblMb}`, marginBottom: D.tblMb }}>
+                <button onClick={addItemRow}
+                  style={{ padding: '6px 12px', border: '1.5px dashed #c9b3c0', borderRadius: '6px', background: 'transparent', color: PLUM, fontWeight: 700, fontSize: D.subFont, cursor: 'pointer' }}>
+                  + Add line item
+                </button>
+              </div>
 
-                  {/* Subtotal */}
+              {/* ── PAYMENT (left) + TOTALS (right) ROW — industry-standard invoice layout ── */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: tier === 'ultra' ? '14px' : '28px', marginBottom: D.tblMb }}>
+
+                {/* Payment block (left). New structured bank → legacy text → picker. */}
+                <div style={{ flex: '1 1 auto', minWidth: 0, alignSelf: 'stretch' }}>
+                  {(() => {
+                    const bankPicker = (settings.banks || []).length > 0 && (
+                      <select className="q-edit-only" data-html2canvas-ignore="true" value={doc.bankId || ''}
+                        onChange={e => { const b = (settings.banks || []).find(x => x.id === e.target.value) || null; commitDoc({ bank: b ? { ...b } : null, bankId: e.target.value || '' }); }}
+                        style={{ marginTop: '6px', fontSize: '11px', padding: '4px 6px', border: '1px solid var(--line)', borderRadius: '4px', background: '#fff', color: '#444', cursor: 'pointer' }}>
+                        <option value="">No bank selected</option>
+                        {switchableBanks.map(b => <option key={b.id} value={b.id}>{b.bankName || 'Bank'}{b.accountNumber ? ` · ${b.accountNumber}` : ''}</option>)}
+                      </select>
+                    );
+                    if (docBank) return (
+                      <div style={{ border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{ background: PLUM, color: '#FFFFFF', padding: tier === 'normal' ? '8px 14px' : '5px 10px', fontWeight: '800', fontSize: D.subFont, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          Payment Details
+                        </div>
+                        <div style={{ display: 'flex', gap: tier === 'ultra' ? '8px' : '14px', padding: tier === 'normal' ? '12px 14px' : '8px 10px', alignItems: 'flex-start' }}>
+                          <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                            {(docBank.logo || docBank.bankName) && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                                {docBank.logo && (
+                                  <img src={docBank.logo} alt="" crossOrigin="anonymous"
+                                    style={{ height: tier === 'normal' ? '26px' : tier === 'medium' ? '22px' : '18px', width: 'auto', maxWidth: '96px', objectFit: 'contain', display: 'block' }} />
+                                )}
+                                <div style={{ fontSize: D.rowFont, fontWeight: '800', color: '#1A1A1A' }}>
+                                  <EditableCell value={docBank.bankName} onSave={v => updateBankField('bankName', v)} placeholder="bank name" />
+                                </div>
+                              </div>
+                            )}
+                            {[
+                              ['accountName', 'Account Name', docBank.accountName],
+                              ['accountNumber', 'A/C No', docBank.accountNumber],
+                              ['ifsc', 'IFSC/SWIFT', docBank.ifsc],
+                              ['branch', 'Branch', docBank.branch],
+                              ['upiId', 'UPI', docBank.upiId],
+                            ].filter(([, , v]) => v).map(([fkey, label, value]) => (
+                              <div key={fkey} style={{ display: 'flex', fontSize: D.tcFs, lineHeight: D.tcLineH }}>
+                                <span style={{ color: '#777', minWidth: tier === 'ultra' ? '64px' : '86px', fontWeight: '600', flexShrink: 0 }}>{label}</span>
+                                <span style={{ color: '#1A1A1A', fontWeight: '700', fontFamily: 'var(--font-mono)', wordBreak: 'break-word', flex: 1 }}>
+                                  <EditableCell value={value} onSave={v => updateBankField(fkey, v)} />
+                                </span>
+                              </div>
+                            ))}
+                            {bankPicker}
+                          </div>
+                          {docBank.qr && (
+                            <img src={docBank.qr} alt="Payment QR" crossOrigin="anonymous"
+                              style={{ width: tier === 'normal' ? '90px' : tier === 'medium' ? '74px' : '58px', height: 'auto', objectFit: 'contain', border: '1px solid #E5E7EB', borderRadius: '4px', flexShrink: 0 }} />
+                          )}
+                        </div>
+                      </div>
+                    );
+                    return (
+                      <>
+                        {settings.bankDetails && (
+                          <div style={{ padding: tier === 'normal' ? '14px 18px' : '8px 12px', background: '#F9F9F9', border: '1px solid #E5E7EB', borderRadius: '6px', fontSize: D.tcFs, color: '#444', lineHeight: D.tcLineH, fontFamily: 'var(--font-mono)' }}>
+                            <div style={{ fontWeight: '700', fontSize: D.subFont, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#1A1A1A', marginBottom: '4px' }}>Bank / Payment Details</div>
+                            {settings.bankDetails.split('\n').map((l, i) => <div key={i}>{l}</div>)}
+                          </div>
+                        )}
+                        {bankPicker && <div className="q-edit-only" data-html2canvas-ignore="true" style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>Attach a bank account: {bankPicker}</div>}
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Totals block (right) */}
+                <div style={{ minWidth: tier === 'ultra' ? '200px' : '260px', flexShrink: 0, border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
+
+                  {/* Actual Total + You Save — only when product offers exist */}
+                  {docAnyOffer && docSavings > 0 && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>Actual Total</span>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#999', fontFamily: 'var(--font-mono)', marginLeft: '24px', textDecoration: 'line-through' }}>{curr}{docActualSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a' }}>You Save</span>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '800', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{docSavings.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Subtotal (labelled "Offer Total" when offers are present) */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
-                    <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>Subtotal</span>
-                    <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{generatedDoc.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>{docAnyOffer && docSavings > 0 ? 'Offer Total' : 'Subtotal'}</span>
+                    <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
                   {/* Discount */}
-                  {generatedDoc.discountEnabled && generatedDoc.discountAmount > 0 && (
+                  {doc.discountEnabled && doc.discountAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
-                      <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#16a34a' }}>Discount {generatedDoc.discountType === 'percent' ? `(${generatedDoc.discountValue}%)` : '(Fixed)'}</span>
-                      <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{generatedDoc.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#16a34a' }}>Discount {doc.discountType === 'percent' ? `(${doc.discountValue}%)` : '(Fixed)'}</span>
+                      <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{doc.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
 
                   {/* GST */}
-                  {(generatedDoc.taxEnabled ?? settings.taxEnabled) && generatedDoc.taxAmount > 0 && (
+                  {(doc.taxEnabled ?? settings.taxEnabled) && doc.taxAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
-                      <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>GST ({generatedDoc.taxRate}%)</span>
-                      <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{generatedDoc.taxAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>GST ({doc.taxRate}%)</span>
+                      <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.taxAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
 
                   {/* Grand Total */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '12px 14px' : '8px 10px', background: PLUM }}>
                     <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>TOTAL</span>
-                    <span style={{ fontSize: tier === 'normal' ? '16px' : D.rowFont, fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{generatedDoc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    <span style={{ fontSize: tier === 'normal' ? '16px' : D.rowFont, fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
                 </div>
               </div>
 
-              {/* Bank details (optional) */}
-              {settings.bankDetails && (
-                <div style={{ marginTop: D.tcMt, padding: tier === 'normal' ? '14px 18px' : '8px 12px', background: '#F9F9F9', border: '1px solid #E5E7EB', borderRadius: '6px', fontSize: D.tcFs, color: '#444', lineHeight: D.tcLineH, fontFamily: 'var(--font-mono)' }}>
-                  <div style={{ fontWeight: '700', fontSize: D.subFont, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#1A1A1A', marginBottom: '4px' }}>Bank / Payment Details</div>
-                  {settings.bankDetails.split('\n').map((l, i) => <div key={i}>{l}</div>)}
+              {/* Delivery / Notes (optional, per-quotation) */}
+              {/* Delivery & Notes — filled rows print; empty rows are edit-only (excluded from PDF) */}
+              <div style={{ marginTop: D.tcMt, fontSize: D.tcFs, color: '#444', lineHeight: D.tcLineH }}>
+                <div className={doc.delivery ? undefined : 'q-edit-only'} {...(doc.delivery ? {} : { 'data-html2canvas-ignore': 'true' })}>
+                  <strong style={{ color: '#1A1A1A' }}>Delivery: </strong>
+                  <EditableCell value={doc.delivery} onSave={v => updateField('delivery', v)} placeholder="add delivery details" />
                 </div>
-              )}
+                <div className={doc.notes ? undefined : 'q-edit-only'} {...(doc.notes ? {} : { 'data-html2canvas-ignore': 'true' })} style={{ whiteSpace: 'pre-line' }}>
+                  <strong style={{ color: '#1A1A1A' }}>Notes: </strong>
+                  <EditableCell value={doc.notes} onSave={v => updateField('notes', v)} multiline placeholder="add notes" />
+                </div>
+              </div>
 
               {/* Terms and Conditions — 2-col for medium+ */}
               <div style={{ marginTop: D.tcMt }}>
@@ -1053,33 +1412,41 @@ export default function QuotationDocument() {
                 }}>
                   Terms and Conditions :
                 </h4>
-                {tier === 'normal' ? (
-                  <ol style={{ margin: 0, paddingLeft: '16px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                    {getTermsAndConditions(generatedDoc.items).map((term, i) => (
-                      <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                    ))}
-                  </ol>
-                ) : (
-                  // Two-column layout for medium/compact/ultra
-                  (() => {
-                    const terms = getTermsAndConditions(generatedDoc.items);
-                    const mid = Math.ceil(terms.length / 2);
-                    return (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
-                        <ol style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                          {terms.slice(0, mid).map((term, i) => (
-                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                          ))}
-                        </ol>
-                        <ol start={mid + 1} style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                          {terms.slice(mid).map((term, i) => (
-                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    );
-                  })()
-                )}
+                <EditableCell
+                  value={quotationTerms.join('\n')}
+                  onSave={v => updateTerms(v)}
+                  multiline
+                  placeholder="click to add terms (one per line)"
+                  style={{ display: 'block', width: '100%' }}
+                  renderValue={() => (
+                    tier === 'normal' ? (
+                      <ol style={{ margin: 0, paddingLeft: '16px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
+                        {quotationTerms.map((term, i) => (
+                          <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      (() => {
+                        const terms = quotationTerms;
+                        const mid = Math.ceil(terms.length / 2);
+                        return (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
+                            <ol style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
+                              {terms.slice(0, mid).map((term, i) => (
+                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                              ))}
+                            </ol>
+                            <ol start={mid + 1} style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
+                              {terms.slice(mid).map((term, i) => (
+                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        );
+                      })()
+                    )
+                  )}
+                />
               </div>
 
               {/* Footer */}
@@ -1087,7 +1454,7 @@ export default function QuotationDocument() {
                 borderTop: '2px solid #1A1A1A', marginTop: D.footMt, paddingTop: tier === 'normal' ? '14px' : '8px',
                 fontSize: D.subFont, color: '#777', display: 'flex', justifyContent: 'space-between', fontWeight: 500,
               }}>
-                <div>Valid for {settings.validityDays || 30} days from date of issue.</div>
+                <div>Valid for <EditableCell value={doc.validityDays ?? settings.validityDays ?? 30} numeric onSave={v => updateField('validityDays', v)} style={{ width: '40px', textAlign: 'center' }} /> days from date of issue.</div>
                 <div>{settings.footerNote || 'NJ Quotation System'}</div>
               </div>
 

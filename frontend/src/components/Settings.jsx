@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../AppContext';
-import { ShieldCheck, Briefcase, FileText, ShoppingBag, ArrowLeft, Grid, Lock, Unlock, Download } from 'lucide-react';
+import { ShieldCheck, Briefcase, FileText, ShoppingBag, ArrowLeft, Grid, Lock, Unlock, Download, Award } from 'lucide-react';
 
 import ProductsClassesSettings from './ProductsClassesSettings';
+import BrandsSettings from './BrandsSettings';
 import WarrantiesSettings from './WarrantiesSettings';
 import QuotationSettings from './QuotationSettings';
 import BackupSettings from './BackupSettings';
@@ -23,8 +24,9 @@ export default function Settings() {
   }, [data.settings]);
 
   const modules = [
+    { id: 'brands', label: 'Parent Brands', desc: 'Manage parent brands (NJ, HighLander, …) that group your product classes.', icon: <Award size={20}/>, count: `${data.brands?.length || 0} Brands` },
     { id: 'products', label: 'Products & Catalog', desc: 'Manage your entire inventory hierarchy, pricing, and tile variations.', icon: <ShoppingBag size={20}/>, count: `${data.classes?.length || 0} Classes` },
-    { id: 'warranties', label: 'Warranty Builder', desc: 'Design and configure your 5 default warranty document templates.', icon: <ShieldCheck size={20}/>, count: `5 Templates` },
+    { id: 'warranties', label: 'Warranty Builder', desc: 'Design, add, and configure your warranty document templates.', icon: <ShieldCheck size={20}/>, count: `${data.warranties?.length || 0} Templates` },
     { id: 'company', label: 'Company Profile', desc: 'Configure global branding, contact details, and platform identity.', icon: <Briefcase size={20}/>, count: company.name ? 'Configured' : 'Needs Setup' },
     { id: 'quotation', label: 'Quotation Specs', desc: 'Set up financial rules, taxes, validities, and default document text.', icon: <FileText size={20}/>, count: settings.taxEnabled ? 'Tax Enabled' : 'No Tax' },
     { id: 'security', label: 'Security & Backup', desc: 'Manage application access PIN and local database backups.', icon: <Lock size={20}/>, count: settings.pinEnabled ? 'PIN Active' : 'Unsecured' }
@@ -280,6 +282,7 @@ export default function Settings() {
           {activeModule === 'company' && renderCompanyModule()}
           {activeModule === 'quotation' && <QuotationSettings />}
           {activeModule === 'security' && renderSecurityModule()}
+          {activeModule === 'brands' && <BrandsSettings />}
           {activeModule === 'products' && <ProductsClassesSettings />}
           {activeModule === 'warranties' && <WarrantiesSettings />}
         </div>
