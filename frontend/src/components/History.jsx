@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../AppContext';
-import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar } from 'lucide-react';
+import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3 } from 'lucide-react';
 import { clearQuotations, clearWarranties } from '../api';
 
 export default function History({ type }) {
-  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, activeTab, setActiveTab, showToast } = useAppContext();
+  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, activeTab, setActiveTab, showToast } = useAppContext();
   const [search, setSearch] = useState('');
 
   const isQuotation = type === 'quotations';
@@ -211,15 +211,35 @@ export default function History({ type }) {
                   {dateVal}
                 </div>
                 
-                {/* View CTA */}
-                <div style={{ textAlign: 'right' }}>
-                  <button 
+                {/* Actions */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  {isQuotation && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); loadQuotationForEdit(row); }}
+                      className="btn-secondary"
+                      title="Edit this quotation (loads it into Checkout)"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                        gap: '6px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'white',
+                        border: '1px solid var(--line)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        color: 'var(--accent)'
+                      }}
+                    >
+                      <Edit3 size={13}/> Edit
+                    </button>
+                  )}
+                  <button
                     onClick={(e) => { e.stopPropagation(); handleView(row); }}
-                    className="btn-secondary" 
-                    style={{ 
-                      padding: '8px 14px', 
-                      fontSize: '12px', 
-                      gap: '6px', 
+                    className="btn-secondary"
+                    style={{
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      gap: '6px',
                       borderRadius: 'var(--radius-sm)',
                       background: 'white',
                       border: '1px solid var(--line)',

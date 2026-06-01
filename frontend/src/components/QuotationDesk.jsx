@@ -17,6 +17,7 @@ import { mediaUrl } from '../api';
 import { useAppContext } from '../AppContext';
 import CustomerCard from './CustomerCard';
 import LiveQuotation from './LiveQuotation';
+import NumberField from './NumberField';
 
 const TOOLS_SECTION_ID = 'tools';
 
@@ -75,14 +76,27 @@ export default function QuotationDesk() {
   const fallbackBrandId = (data.brands || [])[0]?.id;
   const brandOf = (cls) => ((data.brands || []).some(b => b.id === cls?.brandId) ? cls.brandId : fallbackBrandId);
   const brandById = (id) => (data.brands || []).find(b => b.id === id);
-  // Classes shown for the current brand filter (tiles only; tools have their own tab).
+  // Tool/accessory classes — rendered with the SAME class-strip hierarchy as
+  // products (Brand → Class → Variety), just on the "Tools & Accessories" tab.
+  const toolClasses = React.useMemo(
+    () => (data.classes || []).filter(c => c.type === 'tools'),
+    [data.classes]
+  );
+  // Classes shown for the current brand filter, per active tab.
   const visibleClasses = React.useMemo(
     () => tileClasses.filter(c => brandFilter === 'all' || brandOf(c) === brandFilter),
     [tileClasses, brandFilter, data.brands]
   );
+  const visibleToolClasses = React.useMemo(
+    () => toolClasses.filter(c => brandFilter === 'all' || brandOf(c) === brandFilter),
+    [toolClasses, brandFilter, data.brands]
+  );
   const normalizedSearch = search.trim().toLowerCase();
   const toolsActive = catalogView === TOOLS_SECTION_ID;
-  const resolvedActiveStrip = tileClasses.some(c => c.id === activeStrip)
+  // Resolve the expanded strip against ALL classes (products AND tool/accessory
+  // classes). Validating only against tileClasses meant clicking a tool class
+  // (e.g. "Rain Gutter") reset this to null, so its varieties never expanded.
+  const resolvedActiveStrip = (data.classes || []).some(c => c.id === activeStrip)
     ? activeStrip
     : null;
 
@@ -131,7 +145,10 @@ export default function QuotationDesk() {
     addToCart({
       id: `${item.id}-${color}`,
       name: item.name,
-      className: isTool ? 'Tools & Accessories' : cls?.name || 'Products',
+      // Always snapshot the real class name (e.g. "Accessories", "Tools") so
+      // tools follow the same Brand → Class → Variety identity as products and
+      // keep their class colour / grouping in Checkout and on the quotation.
+      className: cls?.name || (isTool ? 'Tools & Accessories' : 'Products'),
       // Brand snapshot for historical accuracy (rename-proof on the quotation).
       brandId,
       brandName: brand?.name || '',
@@ -252,11 +269,11 @@ export default function QuotationDesk() {
               >
                 <Minus size={14} />
               </button>
-              <input
-                type="number"
+              <NumberField
                 value={qty}
-                min="1"
-                onChange={e => setSelection(item.id, { qty: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                min={1}
+                fallback={1}
+                onCommit={n => setSelection(item.id, { qty: n })}
                 aria-label={`${item.name} quantity`}
               />
               <button
@@ -355,6 +372,44 @@ export default function QuotationDesk() {
 
   const visibleTools = getTools();
 
+  // Shared brand-filter pills — used by both the Products and Tools tabs so the
+  // brand → class hierarchy is navigated identically for each.
+  const brandFilterBar = brands.length > 1 ? (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
+      <button
+        type="button"
+        onClick={() => setBrandFilter('all')}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
+          border: `1.5px solid ${brandFilter === 'all' ? 'var(--accent)' : 'var(--line)'}`,
+          background: brandFilter === 'all' ? 'var(--accent)' : 'var(--surface)',
+          color: brandFilter === 'all' ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+        }}
+      >
+        All Brands
+      </button>
+      {brands.map(b => {
+        const active = brandFilter === b.id;
+        return (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => setBrandFilter(b.id)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
+              border: `1.5px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
+              background: active ? 'var(--accent)' : 'var(--surface)',
+              color: active ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+            }}
+          >
+            {b.logo && <img src={mediaUrl(b.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '36px', objectFit: 'contain', filter: active ? 'brightness(0) invert(1)' : 'none' }} />}
+            {b.name}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   return (
     <div className="quotation-desk-shell qd-strip-mode">
       <div className="qd-customer-panel">
@@ -441,41 +496,7 @@ export default function QuotationDesk() {
 
           {!toolsActive ? (
             <div className="qd-strip-list" ref={productListRef}>
-              {brands.length > 1 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => setBrandFilter('all')}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
-                      border: `1.5px solid ${brandFilter === 'all' ? 'var(--accent)' : 'var(--line)'}`,
-                      background: brandFilter === 'all' ? 'var(--accent)' : 'var(--surface)',
-                      color: brandFilter === 'all' ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
-                    }}
-                  >
-                    All Brands
-                  </button>
-                  {brands.map(b => {
-                    const active = brandFilter === b.id;
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => setBrandFilter(b.id)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
-                          border: `1.5px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
-                          background: active ? 'var(--accent)' : 'var(--surface)',
-                          color: active ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
-                        }}
-                      >
-                        {b.logo && <img src={mediaUrl(b.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '36px', objectFit: 'contain', filter: active ? 'brightness(0) invert(1)' : 'none' }} />}
-                        {b.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              {brandFilterBar}
               {visibleClasses.length === 0 ? (
                 <div className="qd-empty">
                   <Layers size={30} />
@@ -487,17 +508,16 @@ export default function QuotationDesk() {
               )}
             </div>
           ) : (
-            <section className="qd-tools-section qd-tools-cards-only" ref={toolsSectionRef} aria-label="Tools and accessories quick add">
-              {visibleTools.length === 0 ? (
+            <section className="qd-strip-list" ref={toolsSectionRef} aria-label="Tools and accessories">
+              {brandFilterBar}
+              {visibleToolClasses.length === 0 ? (
                 <div className="qd-empty">
                   <Wrench size={30} />
-                  <strong>No matching accessories</strong>
-                  <span>Clear search or add tools in Settings.</span>
+                  <strong>No tool or accessory classes</strong>
+                  <span>Add a class of type “Tools &amp; Hardware” in Settings.</span>
                 </div>
               ) : (
-                <div className="qd-variety-grid qd-tool-grid">
-                  {visibleTools.map((item, index) => renderVarietyCard(item, index, true))}
-                </div>
+                visibleToolClasses.map(renderClassStrip)
               )}
             </section>
           )}

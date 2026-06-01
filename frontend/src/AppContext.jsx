@@ -40,6 +40,13 @@ export function AppProvider({ children }) {
   const [activeWarranty,  setActiveWarranty]  = useState(null);
   const [activeTab, setActiveTab] = useState('quotation');
 
+  // Identity of the quotation currently being drafted/edited in this session.
+  // While set, regenerating from Checkout REUSES this id (the backend upserts by
+  // id, so it UPDATES the same history record instead of inserting a duplicate).
+  // Cleared only when the user explicitly starts a new quotation (see startNew
+  // in QuotationDocument / reset in WarrantyDocument).
+  const [activeQuotationId, setActiveQuotationId] = useState(null);
+
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
   const [backupStatus, setBackupStatus] = useState(null);
@@ -190,6 +197,21 @@ export function AppProvider({ children }) {
 
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
+  // Load a saved quotation back into a fully editable session: its line items
+  // into the cart, its customer, and its identity (activeQuotationId) so that
+  // re-finalizing from Checkout UPDATES the same record instead of creating a
+  // duplicate. Single entry point reused by History, Dashboard and the
+  // "Edit in Checkout" action on the Quotation Document.
+  const loadQuotationForEdit = (q) => {
+    if (!q) return;
+    setCart(Array.isArray(q.items) ? q.items.map(it => ({ ...it })) : []);
+    setCustomer({ name: '', phone: '', email: '', address: '', ...(q.customer || {}) });
+    setActiveQuotation(q);
+    setActiveQuotationId(q.id || null);
+    setActiveTab('quotation');
+    setCurrentView('checkout');
+  };
+
   const value = {
     currentView, setCurrentView,
     selectedClassId, setSelectedClassId,
@@ -197,9 +219,11 @@ export function AppProvider({ children }) {
     customer, setCustomer,
     cart, setCart, cartOpen, setCartOpen,
     addToCart, updateCartQty, removeFromCart, cartTotal,
+    loadQuotationForEdit,
     toasts, showToast,
     data, setData, persistConfig,
     activeQuotation, setActiveQuotation,
+    activeQuotationId, setActiveQuotationId,
     activeWarranty,  setActiveWarranty,
     activeTab, setActiveTab,
     backendOffline,

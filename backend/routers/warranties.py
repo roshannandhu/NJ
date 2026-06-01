@@ -74,3 +74,21 @@ def clear_warranties():
         return {"status": "cleared"}
     finally:
         db.close()
+
+
+@router.delete("/api/warranties/{wid}")
+def delete_warranty(wid: str):
+    """Delete a single warranty certificate by id. Used when a quotation is
+    regenerated and a previously auto-generated warranty no longer applies
+    (its product class was removed from the cart)."""
+    db = next(get_db())
+    try:
+        deleted = (
+            db.query(WarrantyCertificate)
+            .filter(WarrantyCertificate.id == wid)
+            .delete()
+        )
+        db.commit()
+        return {"status": "deleted" if deleted else "not_found"}
+    finally:
+        db.close()

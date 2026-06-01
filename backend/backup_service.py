@@ -174,6 +174,13 @@ def mark_catalog_changed():
 
 
 # ── payload (the JSON export — same shape as /api/backup & /api/restore) ─────
+# Every payload carries a "kind" tag so a file is self-describing and a restore
+# endpoint can tell whether it was handed a full / catalog / history backup.
+KIND_FULL = "full"
+KIND_CATALOG = "catalog"
+KIND_HISTORY = "history"
+
+
 def build_payload():
     db = SessionLocal()
     try:
@@ -182,6 +189,7 @@ def build_payload():
         quotations = [json.loads(r.data) for r in db.query(Quotation).all()]
         warranties = [json.loads(r.data) for r in db.query(WarrantyCertificate).all()]
         return {
+            "kind": KIND_FULL,
             "config": config,
             "quotations": quotations,
             "warranty_certificates": warranties,
@@ -191,10 +199,12 @@ def build_payload():
 
 
 def build_catalog_payload():
+    """Config only (company, settings, brands, classes, varieties, warranties).
+    No quotations / warranty certificates — this is the catalogue, not history."""
     db = SessionLocal()
     try:
         cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
-        return {"config": json.loads(cfg_row.data) if cfg_row else {}}
+        return {"kind": KIND_CATALOG, "config": json.loads(cfg_row.data) if cfg_row else {}}
     finally:
         db.close()
 
@@ -204,11 +214,60 @@ def build_history_payload():
     db = SessionLocal()
     try:
         return {
+            "kind": KIND_HISTORY,
             "quotations": [json.loads(r.data) for r in db.query(Quotation).all()],
             "warranty_certificates": [json.loads(r.data) for r in db.query(WarrantyCertificate).all()],
         }
     finally:
         db.close()
+
+
+# ── config merge/replace (shared by full-restore and catalog-restore) ────────
+# The config blob holds five id-keyed lists (brands, classes, varieties,
+# warranties) plus two scalar objects (company, settings). Earlier code merged
+# only classes/varieties/warranties — it silently dropped the `brands` layer and
+# overwrote company/settings wholesale, which could wipe a seller's customised
+# company details when importing an old backup. This helper fixes both.
+_CONFIG_LIST_KEYS = ("brands", "classes", "varieties", "warranties")
+
+
+def _apply_config(cfg_row, new_cfg, mode):
+    """Write new_cfg into cfg_row.data according to ``mode``.
+
+    mode="replace": cfg_row becomes exactly new_cfg.
+    mode="merge":   id-keyed lists are unioned (new overrides matching ids,
+                    existing-only ids are kept); company/settings are shallow-
+                    merged (new keys win, existing-only keys preserved).
+    """
+    if mode == "replace":
+        cfg_row.data = json.dumps(new_cfg)
+        return
+
+    try:
+        old_cfg = json.loads(cfg_row.data) if cfg_row.data else {}
+    except Exception:
+        old_cfg = {}
+
+    for key in _CONFIG_LIST_KEYS:
+        old_list = old_cfg.get(key, []) or []
+        new_list = new_cfg.get(key, []) or []
+        if not new_list:
+            # Nothing to merge for this key — leave the existing list untouched.
+            continue
+        merged = {item.get("id"): item for item in old_list if isinstance(item, dict) and item.get("id")}
+        for item in new_list:
+            if isinstance(item, dict) and item.get("id"):
+                merged[item["id"]] = item
+        old_cfg[key] = list(merged.values())
+
+    for scalar in ("company", "settings"):
+        if scalar in new_cfg and isinstance(new_cfg[scalar], dict):
+            base = old_cfg.get(scalar) if isinstance(old_cfg.get(scalar), dict) else {}
+            old_cfg[scalar] = {**base, **new_cfg[scalar]}
+        elif scalar in new_cfg:
+            old_cfg[scalar] = new_cfg[scalar]
+
+    cfg_row.data = json.dumps(old_cfg)
 
 
 def _row_counts():
@@ -510,19 +569,26 @@ def snapshot_pre_restore():
         return None
 
 
-def restore_from_payload(payload):
-    """Restore data from a backup payload by MERGING history (never deletes,
-    never duplicates). Config is replaced when present. Snapshots first and only
-    commits if every insert succeeds. Returns added/skipped counts.
+def restore_from_payload(payload, mode="merge"):
+    """Restore a full backup payload (config + history). Snapshots first and only
+    commits if every write succeeds. Returns added/updated/skipped counts.
 
-    History (quotations + warranties) is merged by ID: records already present
-    are skipped, so importing an old backup adds back any missing records
-    without removing newer ones and without creating duplicates.
+    mode="merge" (default, non-destructive):
+        * History (quotations + warranties) is upserted by id — missing records
+          are added, matching ids are updated, nothing is ever deleted.
+        * Config lists are unioned by id; company/settings are shallow-merged.
+          (See _apply_config.)
+    mode="replace" (destructive — caller must confirm):
+        * Existing quotations + warranties are deleted, then the payload's
+          records are inserted. Config becomes exactly the payload's config.
+        * A pre-restore snapshot is always taken first, so this is recoverable.
     """
     if not isinstance(payload, dict):
         raise ValueError("Backup payload must be a JSON object")
-    quotations = payload.get("quotations", [])
-    warranties = payload.get("warranty_certificates", [])
+    if mode not in ("merge", "replace"):
+        raise ValueError("mode must be 'merge' or 'replace'")
+    quotations = payload.get("quotations", []) or []
+    warranties = payload.get("warranty_certificates", []) or []
     if not isinstance(quotations, list) or not isinstance(warranties, list):
         raise ValueError("Backup payload is malformed (quotations/warranties must be lists)")
 
@@ -530,85 +596,79 @@ def restore_from_payload(payload):
 
     db = SessionLocal()
     try:
-        # Config: merge arrays by id instead of replacing everything, to avoid
-        # wiping out new classes/varieties when importing an old catalog backup.
+        # ── Config ──
         if "config" in payload and payload["config"]:
             cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
             if cfg_row is None:
                 cfg_row = AppConfig(id=1, data="{}")
                 db.add(cfg_row)
+            _apply_config(cfg_row, payload["config"], mode)
 
-            try:
-                old_cfg = json.loads(cfg_row.data) if cfg_row.data else {}
-            except Exception:
-                old_cfg = {}
-                
-            new_cfg = payload["config"]
-            
-            for key in ["classes", "varieties", "warranties"]:
-                old_list = old_cfg.get(key, [])
-                new_list = new_cfg.get(key, [])
-                merged = {item.get("id"): item for item in old_list if isinstance(item, dict) and item.get("id")}
-                for item in new_list:
-                    if isinstance(item, dict) and item.get("id"):
-                        merged[item["id"]] = item
-                old_cfg[key] = list(merged.values())
-                
-            if "company" in new_cfg:
-                old_cfg["company"] = new_cfg["company"]
-            if "settings" in new_cfg:
-                old_cfg["settings"] = new_cfg["settings"]
-                
-            cfg_row.data = json.dumps(old_cfg)
+        # ── Replace mode: wipe history first so the payload fully defines it ──
+        if mode == "replace":
+            db.query(Quotation).delete()
+            db.query(WarrantyCertificate).delete()
+            db.flush()
 
-        # Quotations: MERGE by id — add only those not already present.
-        existing_q = {row[0] for row in db.query(Quotation.id).all()}
-        added_q = skipped_q = 0
+        # ── Quotations: upsert by id (merge) / insert (replace, table is empty) ──
+        existing_q = {row[0]: row[1] for row in db.query(Quotation.id, Quotation).all()} if mode == "merge" else {}
+        added_q = updated_q = 0
         for q in quotations:
             qid = q.get("id", "")
-            if not qid or qid in existing_q:
-                skipped_q += 1
+            if not qid:
                 continue
-            db.add(Quotation(
-                id=qid,
-                customer_name=(q.get("customer") or {}).get("name", ""),
-                grand_total=q.get("grandTotal", 0),
-                date=q.get("date", ""),
-                data=json.dumps(q),
-            ))
-            existing_q.add(qid)
-            added_q += 1
+            row = existing_q.get(qid)
+            if row is not None:
+                row.customer_name = (q.get("customer") or {}).get("name", "")
+                row.grand_total = q.get("grandTotal", 0)
+                row.date = q.get("date", "")
+                row.data = json.dumps(q)
+                updated_q += 1
+            else:
+                new_row = Quotation(
+                    id=qid,
+                    customer_name=(q.get("customer") or {}).get("name", ""),
+                    grand_total=q.get("grandTotal", 0),
+                    date=q.get("date", ""),
+                    data=json.dumps(q),
+                )
+                db.add(new_row)
+                existing_q[qid] = new_row
+                added_q += 1
 
-        # Warranties: MERGE by id — add only those not already present.
-        existing_w = {row[0] for row in db.query(WarrantyCertificate.id).all()}
-        added_w = skipped_w = 0
+        # ── Warranties: upsert by id (merge) / insert (replace) ──
+        existing_w = {row[0]: row[1] for row in db.query(WarrantyCertificate.id, WarrantyCertificate).all()} if mode == "merge" else {}
+        added_w = updated_w = 0
         for w in warranties:
             wid = w.get("id", "")
-            if not wid or wid in existing_w:
-                skipped_w += 1
+            if not wid:
                 continue
-            db.add(WarrantyCertificate(
-                id=wid,
-                quotation_id=w.get("quotationId", ""),
-                customer_name=(w.get("customer") or {}).get("name", ""),
-                date=w.get("date", ""),
-                data=json.dumps(w),
-            ))
-            existing_w.add(wid)
-            added_w += 1
+            row = existing_w.get(wid)
+            if row is not None:
+                row.quotation_id = w.get("quotationId", "")
+                row.customer_name = (w.get("customer") or {}).get("name", "")
+                row.date = w.get("date", "")
+                row.data = json.dumps(w)
+                updated_w += 1
+            else:
+                new_row = WarrantyCertificate(
+                    id=wid,
+                    quotation_id=w.get("quotationId", ""),
+                    customer_name=(w.get("customer") or {}).get("name", ""),
+                    date=w.get("date", ""),
+                    data=json.dumps(w),
+                )
+                db.add(new_row)
+                existing_w[wid] = new_row
+                added_w += 1
 
         db.commit()
         return {
             "status": "restored",
+            "mode": mode,
             "pre_restore_snapshot": snap,
-            "added": {
-                "quotations": added_q,
-                "warranty_certificates": added_w,
-            },
-            "skipped_duplicates": {
-                "quotations": skipped_q,
-                "warranty_certificates": skipped_w,
-            },
+            "added": {"quotations": added_q, "warranty_certificates": added_w},
+            "updated": {"quotations": updated_q, "warranty_certificates": updated_w},
         }
     except Exception:
         db.rollback()
@@ -617,11 +677,19 @@ def restore_from_payload(payload):
         db.close()
 
 
-def restore_catalog_payload(payload):
-    """Restore only the config (classes, varieties, tools, settings) from a
-    catalog backup payload. Quotations and warranties are NOT touched."""
+def restore_catalog_payload(payload, mode="merge"):
+    """Restore ONLY the config (company, settings, brands, classes, varieties,
+    warranties) from a catalog backup. Quotations and warranties are never
+    touched, so a catalogue restore can never delete history (and vice-versa).
+
+    mode="merge" (default): union config lists by id, shallow-merge scalars.
+    mode="replace" (destructive — caller must confirm): config becomes exactly
+    the payload's config.
+    """
     if not isinstance(payload, dict):
         raise ValueError("Catalog backup must be a JSON object")
+    if mode not in ("merge", "replace"):
+        raise ValueError("mode must be 'merge' or 'replace'")
     cfg = payload.get("config")
     if cfg is None:
         raise ValueError("Invalid catalog backup: 'config' key missing")
@@ -634,32 +702,9 @@ def restore_catalog_payload(payload):
         if cfg_row is None:
             cfg_row = AppConfig(id=1, data="{}")
             db.add(cfg_row)
-        
-        try:
-            old_cfg = json.loads(cfg_row.data) if cfg_row.data else {}
-        except Exception:
-            old_cfg = {}
-            
-        for key in ["classes", "varieties", "warranties"]:
-            old_list = old_cfg.get(key, [])
-            new_list = cfg.get(key, [])
-            merged = {item.get("id"): item for item in old_list if isinstance(item, dict) and item.get("id")}
-            for item in new_list:
-                if isinstance(item, dict) and item.get("id"):
-                    merged[item["id"]] = item
-            old_cfg[key] = list(merged.values())
-            
-        if "company" in cfg:
-            old_cfg["company"] = cfg["company"]
-        if "settings" in cfg:
-            old_cfg["settings"] = cfg["settings"]
-            
-        cfg_row.data = json.dumps(old_cfg)
+        _apply_config(cfg_row, cfg, mode)
         db.commit()
-        return {
-            "status": "catalog_restored",
-            "pre_restore_snapshot": snap,
-        }
+        return {"status": "catalog_restored", "mode": mode, "pre_restore_snapshot": snap}
     except Exception:
         db.rollback()
         raise

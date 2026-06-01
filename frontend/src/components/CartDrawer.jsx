@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { X, Minus, Plus, Trash2 } from 'lucide-react';
+import NumberField from './NumberField';
 
 export default function CartDrawer() {
   const { cart, cartOpen, setCartOpen, updateCartQty, removeFromCart, cartTotal, customer, setCurrentView, data } = useAppContext();
@@ -56,7 +57,7 @@ export default function CartDrawer() {
                   
                   <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px' }}>
                     <button onClick={() => updateCartQty(item.cartId, item.qty - 1)} style={{ padding: '4px 8px', color: 'white' }}><Minus size={14}/></button>
-                    <input type="number" value={item.qty} onChange={e => updateCartQty(item.cartId, parseInt(e.target.value)||1)} style={{ width: '40px', background: 'transparent', color: 'white', border: 'none', textAlign: 'center', fontSize: '13px' }} />
+                    <NumberField value={item.qty} min={1} fallback={1} onCommit={n => updateCartQty(item.cartId, n)} style={{ width: '40px', background: 'transparent', color: 'white', border: 'none', textAlign: 'center', fontSize: '13px' }} />
                     <button onClick={() => updateCartQty(item.cartId, item.qty + 1)} style={{ padding: '4px 8px', color: 'white' }}><Plus size={14}/></button>
                   </div>
                 </div>

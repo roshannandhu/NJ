@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart3,
   CalendarDays,
+  Edit3,
   Eye,
   FileText,
   Package,
@@ -239,6 +240,7 @@ export default function Dashboard() {
     setActiveQuotation,
     setActiveWarranty,
     setActiveTab,
+    loadQuotationForEdit,
   } = useAppContext();
 
   const [prefs, setPrefs] = React.useState(loadPreferences);
@@ -513,11 +515,14 @@ export default function Dashboard() {
             ) : (
               <div className="dash-record-list">
                 {dashboard.recentQuotations.map(quotation => (
-                  <button
-                    type="button"
+                  <div
                     className="dash-record-row"
                     key={quotation.id}
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'pointer' }}
                     onClick={() => openQuotation(quotation)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openQuotation(quotation); } }}
                   >
                     <div>
                       <strong>{quotation.id}</strong>
@@ -527,8 +532,15 @@ export default function Dashboard() {
                       <strong>{formatCurrency(getQuotationValue(quotation))}</strong>
                       <span>{quotation.date || 'No date'}</span>
                     </div>
-                    <Eye size={15} />
-                  </button>
+                    <button
+                      type="button"
+                      title="Edit this quotation"
+                      onClick={(e) => { e.stopPropagation(); loadQuotationForEdit(quotation); }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--accent)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

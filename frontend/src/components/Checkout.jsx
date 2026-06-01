@@ -1,25 +1,39 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent } from 'lucide-react';
-import { createQuotation, createWarranty } from '../api';
+import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3 } from 'lucide-react';
+import { createQuotation, createWarranty, deleteWarranty } from '../api';
+import NumberField from './NumberField';
 
 export default function Checkout() {
-  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab } = useAppContext();
+  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId } = useAppContext();
 
   const settings = data.settings || {};
 
-  // Per-checkout overrides (start from global defaults)
-  const [taxEnabled, setTaxEnabled] = React.useState(settings.taxEnabled ?? true);
-  const [discountEnabled, setDiscountEnabled] = React.useState(false);
-  const [discountType, setDiscountType] = React.useState(settings.discountType || 'percent');
-  const [discountValue, setDiscountValue] = React.useState(settings.discountRate || 0);
+  // Are we editing an existing quotation (entered via "Edit in Checkout" /
+  // History → Edit), or creating a new one? When editing, the per-checkout
+  // overrides start from the quotation being edited so re-finalizing preserves
+  // its tax/discount/bank instead of silently resetting to global defaults.
+  // (Checkout remounts each time it's opened, so these lazy initialisers re-run
+  // with the right source.)
+  const editingExisting = !!(activeQuotation && activeQuotation.id === activeQuotationId);
+
+  // Per-checkout overrides (from the edited quotation, else global defaults)
+  const [taxEnabled, setTaxEnabled] = React.useState(() =>
+    editingExisting && activeQuotation.taxEnabled != null ? activeQuotation.taxEnabled : (settings.taxEnabled ?? true));
+  const [discountEnabled, setDiscountEnabled] = React.useState(() =>
+    editingExisting ? !!activeQuotation.discountEnabled : false);
+  const [discountType, setDiscountType] = React.useState(() =>
+    editingExisting && activeQuotation.discountType ? activeQuotation.discountType : (settings.discountType || 'percent'));
+  const [discountValue, setDiscountValue] = React.useState(() =>
+    editingExisting && activeQuotation.discountValue != null ? activeQuotation.discountValue : (settings.discountRate || 0));
 
   // Active bank accounts available for this quotation (CHANGE 5), ordered for display.
   const activeBanks = React.useMemo(
     () => (settings.banks || []).filter(b => b.active).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [settings.banks]
   );
-  const [selectedBankId, setSelectedBankId] = React.useState('');
+  const [selectedBankId, setSelectedBankId] = React.useState(() =>
+    editingExisting ? (activeQuotation.bankId || '') : '');
 
   // ── Offer-price helpers ──────────────────────────────────────────────────
   // An "offer" exists only when the effective price was lowered below the
@@ -85,17 +99,30 @@ export default function Checkout() {
     }
 
     // Batch Number is optional — no validation required
-    
-    // Generate a unique quotation ID
-    const qNo = `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
+
+    // Reuse the current draft's id if we're still editing the same session, so
+    // the backend (which upserts by id) UPDATES the existing quotation instead
+    // of inserting a duplicate. A brand-new id is only minted for a fresh draft
+    // (activeQuotationId is null until the first generate; cleared by "New").
+    const qNo = activeQuotationId || `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
+    const isRegenerate = !!activeQuotationId;
+    setActiveQuotationId(qNo);
+
+    // When updating an existing quotation, build ON TOP of it so per-quotation
+    // edits (terms, notes, delivery, class descriptions, original date, bank)
+    // are preserved instead of being reset to fresh defaults.
+    const base = isRegenerate && activeQuotation ? activeQuotation : {};
+    const today = new Date().toLocaleDateString('en-GB');
 
     // Snapshot the chosen bank so the quotation is audit-safe (immune to later settings edits).
     const selectedBank = activeBanks.find(b => b.id === selectedBankId) || null;
+    const bankChanged = (selectedBankId || '') !== (base.bankId || '');
     // Copy the latest common Terms & Conditions onto the quotation; editable per-quotation later.
     const commonTerms = (settings.commonTerms || '')
       .split('\n').map(t => t.trim()).filter(Boolean);
 
     const snapshot = {
+      ...base,
       id: qNo,
       items: [...cart],
       customer: { ...customer },
@@ -111,25 +138,33 @@ export default function Checkout() {
       discountValue,
       discountAmount,
       grandTotal,
-      // Editable, per-quotation fields (CHANGE 2, 3, 5)
-      bank: selectedBank ? { ...selectedBank } : null,
+      // Bank: honour a changed selection; otherwise keep the snapshotted bank
+      // (audit-safe even if that bank was later removed from Settings).
+      bank: selectedBank ? { ...selectedBank } : (!bankChanged ? (base.bank ?? null) : null),
       bankId: selectedBankId || '',
-      terms: commonTerms,
-      classDescriptions: {},
-      notes: '',
-      delivery: '',
-      validityDays: settings.validityDays ?? 20,
-      date: new Date().toLocaleDateString('en-GB')
+      // Editable, per-quotation fields: preserve on update, seed fresh on create.
+      terms: isRegenerate ? (base.terms ?? commonTerms) : commonTerms,
+      classDescriptions: isRegenerate ? (base.classDescriptions ?? {}) : {},
+      notes: isRegenerate ? (base.notes ?? '') : '',
+      delivery: isRegenerate ? (base.delivery ?? '') : '',
+      validityDays: base.validityDays ?? settings.validityDays ?? 20,
+      // Keep the original issue date when updating; stamp today only for new ones.
+      date: isRegenerate ? (base.date || today) : today,
     };
     
-    // Auto-generate matching warranties in the background!
-    const generatedCerts = [];
-    availableWarrantyTemplates.forEach((tmpl, index) => {
+    // Auto-generate matching warranties. Each warranty id is DETERMINISTIC —
+    // derived from the quotation id + the warranty template id — so regenerating
+    // the same quotation reuses the same ids (backend upserts → updates, never
+    // duplicates). Use suffix of the quotation no. for a tidy, human warranty no.
+    const qSuffix = qNo.replace(/^.*?-/, '');
+    const wPrefix = settings.warrantyPrefix || 'NJ-W';
+    const certIdFor = (tmpl) => `${wPrefix}-${qSuffix}-${String(tmpl.id).replace(/[^a-zA-Z0-9]+/g, '').slice(0, 12)}`;
+
+    const generatedCerts = availableWarrantyTemplates.map((tmpl) => {
       const matchingItems = cart.filter(item => item.className === tmpl.forClass);
       const selectedItem = matchingItems.length > 0 ? matchingItems[0] : (cart[0] || null);
-      
-      const wNo = `${settings.warrantyPrefix || 'NJ-W'}-${Date.now().toString().slice(-6)}-${index + 1}`;
-      const warrantySnapshot = {
+      const wNo = certIdFor(tmpl);
+      return {
         id: wNo,
         quotationId: qNo,
         items:     [...cart],
@@ -149,37 +184,48 @@ export default function Checkout() {
           selectedCartId: selectedItem?.cartId || ''
         }
       };
-      generatedCerts.push(warrantySnapshot);
     });
+
+    // On regenerate, drop any previously-generated warranties for THIS quotation
+    // whose product class is no longer in the cart, so history stays in sync.
+    const newCertIds = new Set(generatedCerts.map(c => c.id));
+    const obsoleteCerts = isRegenerate
+      ? (data.warranty_certificates || []).filter(c => c.quotationId === qNo && !newCertIds.has(c.id))
+      : [];
 
     try {
       await createQuotation(snapshot);
       for (const cert of generatedCerts) {
         await createWarranty(cert);
       }
+      for (const cert of obsoleteCerts) {
+        await deleteWarranty(cert.id);
+      }
     } catch {
       showToast("Saved locally, backend sync failed", "error");
     }
 
-    // Save both quotation and auto-generated certificates to local storage registry!
+    // Update the local registry: upsert this quotation by id, and replace this
+    // quotation's warranty set (removing obsolete ones) — never blindly prepend.
     setData(prev => {
-      const history = prev.quotations || [];
-      const certHistory = prev.warranty_certificates || [];
+      const quotations = [snapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)];
+      const otherCerts = (prev.warranty_certificates || []).filter(c => c.quotationId !== qNo);
       return {
         ...prev,
-        quotations: [snapshot, ...history],
-        warranty_certificates: [...generatedCerts, ...certHistory]
+        quotations,
+        warranty_certificates: [...generatedCerts, ...otherCerts],
       };
     });
 
     if (setActiveTab) setActiveTab('quotation');
     setActiveQuotation(snapshot);
     setCurrentView('quotation_document');
-    
+
+    const verb = isRegenerate ? 'updated' : 'generated';
     if (generatedCerts.length > 0) {
-      showToast(`Quotation & ${generatedCerts.length} Warranties generated!`, "success");
+      showToast(`Quotation & ${generatedCerts.length} Warranties ${verb}!`, "success");
     } else {
-      showToast("Quotation generated!", "success");
+      showToast(`Quotation ${verb}!`, "success");
     }
   };
 
@@ -191,9 +237,12 @@ export default function Checkout() {
       return;
     }
 
-    const matchingItems = tmpl 
+    const matchingItems = tmpl
       ? cart.filter(item => item.className === tmpl.forClass)
-      : cart.filter(i => !i.className?.toLowerCase().includes('tool'));
+      // No specific template: pick warrantable product lines (their class has a
+      // linked warranty). Tool/accessory classes have no warrantyId, so they're
+      // naturally excluded — no brittle name matching on "tool".
+      : cart.filter(i => data.classes?.find(cl => cl.name === i.className)?.warrantyId);
 
     const selectedItem = matchingItems.length > 0 ? matchingItems[0] : (cart[0] || null);
 
@@ -279,20 +328,13 @@ export default function Checkout() {
     setCart(prev => prev.filter(item => item.cartId !== cartId));
   };
 
-  const handleAddCustomItem = () => {
-    const customItem = {
-      cartId: 'custom_' + Date.now(),
-      id: 'custom',
-      name: 'Custom Service / Item',
-      className: 'Custom',
-      price: 0,
-      actualPrice: 0, // custom lines have no master price → never an "offer"
-      qty: 1,
-      unit: 'nos',
-      color: ''
-    };
-    setCart(prev => [...prev, customItem]);
-    showToast("Added custom line item");
+  // "Add Item" sends the user back to the Quotation Desk to pick catalog
+  // products — the single, consistent product-selection workflow. The cart
+  // persists across views, so anything selected there returns to this Checkout.
+  // (Genuine non-catalog lines, e.g. labour/freight, are still added from the
+  // generated Quotation Document via its "Add Row" action.)
+  const handleAddItem = () => {
+    setCurrentView('quotation_desk');
   };
 
   if (cart.length === 0) {
@@ -363,14 +405,27 @@ export default function Checkout() {
           <ArrowLeft size={16} /> Back to Desk
         </button>
 
+        {/* Editing-an-existing-quotation banner */}
+        {editingExisting && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px',
+            padding: '12px 16px', borderRadius: 'var(--radius)',
+            background: 'rgba(138,24,86,0.06)', border: '1px solid rgba(138,24,86,0.2)',
+            color: '#8a1856', fontSize: '13px', fontWeight: 600,
+          }}>
+            <Edit3 size={15} />
+            Editing quotation <strong>{activeQuotation.id}</strong> — changes update this existing record (same number &amp; date).
+          </div>
+        )}
+
         {/* Section Title */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
           <div>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '36px', fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.02em', margin: 0 }}>Review Order</h1>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '36px', fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.02em', margin: 0 }}>{editingExisting ? 'Edit Order' : 'Review Order'}</h1>
             <p style={{ color: 'var(--ink-soft)', fontSize: '15px', marginTop: '8px' }}>Adjust quantities, apply overrides, and finalize item details.</p>
           </div>
-          <button 
-            onClick={handleAddCustomItem} 
+          <button
+            onClick={handleAddItem}
             className="hover-lift"
             style={{ 
               display: 'flex', 
@@ -396,7 +451,7 @@ export default function Checkout() {
               e.currentTarget.style.background = 'var(--surface)';
             }}
           >
-            <Plus size={16} /> Custom Line Item
+            <Plus size={16} /> Add Item
           </button>
         </div>
 
@@ -496,16 +551,20 @@ export default function Checkout() {
                   onBlurCapture={(e) => e.currentTarget.style.borderColor = 'var(--line)'}
                   >
                     <span style={{ color: 'var(--accent-deep)', fontSize: '15px', fontWeight: 600, marginRight: '2px' }}>{settings.currencySymbol || '₹'}</span>
-                    <input 
-                      type="number" 
-                      value={item.price} 
-                      onChange={e => handlePriceChange(item.cartId, e.target.value)}
-                      style={{ 
-                        width: '100%', 
-                        border: 'none', 
-                        fontSize: '16px', 
-                        fontWeight: 600, 
-                        background: 'transparent', 
+                    <NumberField
+                      value={item.price}
+                      min={0}
+                      step="any"
+                      allowFloat
+                      fallback={0}
+                      onCommit={n => handlePriceChange(item.cartId, n)}
+                      aria-label={`${item.name} unit price`}
+                      style={{
+                        width: '100%',
+                        border: 'none',
+                        fontSize: '16px',
+                        fontWeight: 600,
+                        background: 'transparent',
                         outline: 'none',
                         color: 'var(--ink)'
                       }}
@@ -541,17 +600,19 @@ export default function Checkout() {
                   onFocusCapture={(e) => e.currentTarget.style.borderColor = 'var(--accent)'}
                   onBlurCapture={(e) => e.currentTarget.style.borderColor = 'var(--line)'}
                   >
-                    <input 
-                      type="number" 
-                      value={item.qty} 
-                      onChange={e => handleQtyChange(item.cartId, e.target.value)}
-                      style={{ 
-                        width: '100%', 
-                        border: 'none', 
-                        fontSize: '16px', 
-                        fontWeight: 600, 
-                        textAlign: 'left', 
-                        background: 'transparent', 
+                    <NumberField
+                      value={item.qty}
+                      min={1}
+                      fallback={1}
+                      onCommit={n => handleQtyChange(item.cartId, n)}
+                      aria-label={`${item.name} quantity`}
+                      style={{
+                        width: '100%',
+                        border: 'none',
+                        fontSize: '16px',
+                        fontWeight: 600,
+                        textAlign: 'left',
+                        background: 'transparent',
                         outline: 'none',
                         color: 'var(--ink)'
                       }}
@@ -939,11 +1000,14 @@ export default function Checkout() {
                         {settings.currencySymbol || '₹'}
                       </span>
                     )}
-                    <input
-                      type="number" min="0"
+                    <NumberField
+                      min={0}
                       max={discountType === 'percent' ? 100 : undefined}
+                      step="any"
+                      allowFloat
+                      fallback={0}
                       value={discountValue}
-                      onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
+                      onCommit={n => setDiscountValue(n)}
                       placeholder={discountType === 'percent' ? 'e.g. 10' : 'e.g. 500'}
                       style={{
                         width: '100%', padding: discountType === 'fixed' ? '9px 12px 9px 28px' : '9px 12px',
@@ -1056,7 +1120,7 @@ export default function Checkout() {
               e.currentTarget.style.boxShadow = 'var(--shadow-md)';
             }}
           >
-            <FileText size={18}/> Finalize &amp; Generate Quotation
+            <FileText size={18}/> {editingExisting ? 'Update Quotation' : 'Finalize & Generate Quotation'}
           </button>
           
         </div>

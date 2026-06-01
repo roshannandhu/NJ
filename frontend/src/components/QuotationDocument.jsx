@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
-import { downloadWarrantyDocx, mediaUrl, createQuotation } from '../api';
+import { downloadWarrantyDocx, mediaUrl, createQuotation, createWarranty } from '../api';
 import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 
 // ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
@@ -48,11 +48,13 @@ export default function QuotationDocument() {
     setCurrentView, 
     setCart, 
     setCustomer, 
-    setActiveQuotation, 
-    setActiveWarranty, 
-    activeTab, 
-    setActiveTab, 
-    showToast 
+    setActiveQuotation,
+    setActiveWarranty,
+    setActiveQuotationId,
+    loadQuotationForEdit,
+    activeTab,
+    setActiveTab,
+    showToast
   } = useAppContext();
 
   if (!generatedDoc) {
@@ -96,16 +98,52 @@ export default function QuotationDocument() {
     return { ...d, subtotal, actualSubtotal, productSavings, hasOffers, taxRate, taxAmount, discountAmount, grandTotal };
   };
 
-  // Persist an updated quotation: context (active + registry) + backend upsert.
+  // Refresh a linked warranty's snapshot from the edited quotation, WITHOUT
+  // changing its id/template (so certificate numbers never churn). Customer and
+  // line items are re-synced; the product the warranty points at is preserved
+  // (selectedCartId) when that line still exists, otherwise re-derived. Any
+  // field the user can't reach from the quotation (sellerName, batchNo, …) is
+  // left untouched.
+  const syncCertToQuotation = (cert, updatedDoc) => {
+    const items = updatedDoc.items || [];
+    let sel = items.find(it => it.cartId === cert.certData?.selectedCartId);
+    if (!sel) sel = items.find(it => it.className === cert.template?.forClass) || items[0] || null;
+    return {
+      ...cert,
+      customer: { ...(updatedDoc.customer || {}) },
+      items: items.map(it => ({ ...it })),
+      certData: {
+        ...cert.certData,
+        siteAddress: (updatedDoc.customer || {}).address ?? cert.certData?.siteAddress ?? '',
+        productName: sel?.name ?? cert.certData?.productName,
+        productColor: sel?.color ?? cert.certData?.productColor,
+        productQty: sel?.qty ?? cert.certData?.productQty,
+        productUnit: sel?.unit ?? cert.certData?.productUnit,
+        selectedCartId: sel?.cartId ?? cert.certData?.selectedCartId ?? '',
+      },
+    };
+  };
+
+  // Persist an updated quotation: context (active + registry) + backend upsert,
+  // and keep its bundled warranties in sync so they never show stale customer
+  // or line-item details after an inline edit.
   const persistDoc = (updatedDoc) => {
+    const linked = (data.warranty_certificates || []).filter(w => w.quotationId === updatedDoc.id);
+    const updatedCerts = linked.map(c => syncCertToQuotation(c, updatedDoc));
+    const certById = new Map(updatedCerts.map(c => [c.id, c]));
+
     setActiveQuotation(updatedDoc);
     setData(prev => {
       const h = prev.quotations || [];
       const i = h.findIndex(q => q.id === updatedDoc.id);
       const nh = i !== -1 ? h.map(q => (q.id === updatedDoc.id ? updatedDoc : q)) : [updatedDoc, ...h];
-      return { ...prev, quotations: nh };
+      const certs = updatedCerts.length
+        ? (prev.warranty_certificates || []).map(c => certById.get(c.id) || c)
+        : prev.warranty_certificates;
+      return { ...prev, quotations: nh, warranty_certificates: certs };
     });
     createQuotation(updatedDoc).catch(() => {}); // fire-and-forget; local copy already saved
+    updatedCerts.forEach(c => createWarranty(c).catch(() => {}));
   };
   // Apply a top-level patch to the current quotation, recompute, and persist.
   const commitDoc = (patch) => persistDoc(recomputeTotals({ ...generatedDoc, ...patch }));
@@ -128,6 +166,7 @@ export default function QuotationDocument() {
     setCustomer({ name: '', phone: '', email: '', address: '' });
     setActiveQuotation(null);
     setActiveWarranty(null);
+    setActiveQuotationId?.(null); // end the draft session → next generate mints a fresh id
     if (setActiveTab) setActiveTab('quotation');
     setCurrentView('quotation_desk');
   };
@@ -894,7 +933,7 @@ export default function QuotationDocument() {
             /* ── Actions Bar for Quotation Tab ── */
             <>
             <div className="actions-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
-              <button onClick={() => setCurrentView('checkout')} className="hover-lift"
+              <button onClick={() => loadQuotationForEdit(generatedDoc)} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <ArrowLeft size={18} /> Edit in Checkout
               </button>

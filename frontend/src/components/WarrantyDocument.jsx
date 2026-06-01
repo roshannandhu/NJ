@@ -82,7 +82,7 @@ function parseHeatoutLiability(text) {
 export default function WarrantyDocument() {
   const {
     activeWarranty: doc, data, setData, setCurrentView,
-    setCart, setCustomer, setActiveWarranty, setActiveQuotation, showToast
+    setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, showToast
   } = useAppContext();
 
   const [isDownloading, setIsDownloading] = React.useState(false);
@@ -271,7 +271,8 @@ export default function WarrantyDocument() {
 
   const startNew = () => {
     setCart([]); setCustomer({ name: '', phone: '', email: '', address: '' });
-    setActiveWarranty(null); setActiveQuotation(null); setCurrentView('quotation_desk');
+    setActiveWarranty(null); setActiveQuotation(null); setActiveQuotationId?.(null);
+    setCurrentView('quotation_desk');
   };
 
   // ── Template type flags ──────────────────────────────────────────────────

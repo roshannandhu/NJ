@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, FileResponse
 
 import backup_service
@@ -36,11 +36,12 @@ def backup():
 # ── catalog + images (complete ZIP backup) ───────────────────────────────────
 @router.get("/api/backup/catalog")
 def backup_catalog():
-    """Full backup ZIP: all data (config + quotations + warranties) + all images."""
+    """Catalogue-only backup ZIP: config (company, settings, brands, classes,
+    varieties, warranty templates) + all catalog images. NO history records."""
     import io, zipfile as zf
     ts = backup_service._ts_stem().replace("nj_backup_", "nj_catalog_")
-    # Use full payload so quotations and warranties are included
-    payload = backup_service.build_payload()
+    # Catalogue payload only — quotations/warranties are intentionally excluded.
+    payload = backup_service.build_catalog_payload()
 
     buf = io.BytesIO()
     with zf.ZipFile(buf, "w", zf.ZIP_DEFLATED, compresslevel=6) as z:
@@ -59,8 +60,10 @@ def backup_catalog():
 
 
 @router.post("/api/backup/restore-catalog")
-async def restore_catalog(file: UploadFile = File(...)):
-    """Restore from a catalog backup — ZIP (data + images) or plain JSON."""
+async def restore_catalog(file: UploadFile = File(...), mode: str = Form("merge")):
+    """Restore the CATALOGUE only — ZIP (config + images) or plain JSON. History
+    records (quotations/warranties) in the file are ignored, so this can never
+    delete or alter history. mode = 'merge' (default) | 'replace'."""
     import io, zipfile as zf
     raw = await file.read()
 
@@ -84,7 +87,7 @@ async def restore_catalog(file: UploadFile = File(...)):
                     raise HTTPException(status_code=400, detail="Invalid backup ZIP: no backup.json found inside.")
 
                 data = json.loads(z.read(json_name).decode("utf-8"))
-                result = backup_service.restore_from_payload(data)
+                result = backup_service.restore_catalog_payload(data, mode=mode)
 
                 udir = backup_service.UPLOADS_DIR
                 udir.mkdir(parents=True, exist_ok=True)
@@ -104,11 +107,13 @@ async def restore_catalog(file: UploadFile = File(...)):
                 data = json.loads(raw.decode("utf-8"))
             except Exception:
                 raise HTTPException(status_code=400, detail="File is not a valid ZIP or JSON backup.")
-            result = backup_service.restore_from_payload(data)
+            result = backup_service.restore_catalog_payload(data, mode=mode)
             return {**result, "restored_images": 0}
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Restore failed: {e}")
 
@@ -206,12 +211,13 @@ def list_backup_files():
 @router.post("/api/backup/restore-path")
 def restore_path(body: dict = Body(...)):
     path = body.get("path", "")
+    mode = body.get("mode", "merge")
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not read file: {e}")
     try:
-        return backup_service.restore_from_payload(payload)
+        return backup_service.restore_from_payload(payload, mode=mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -259,8 +265,9 @@ def usb_drives():
 # ── restore from a posted payload (used by the old import path) ──────────────
 @router.post("/api/restore")
 def restore(body: dict = Body(...)):
+    mode = body.get("mode", "merge") if isinstance(body, dict) else "merge"
     try:
-        return backup_service.restore_from_payload(body)
+        return backup_service.restore_from_payload(body, mode=mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -310,7 +317,7 @@ def put_backup_settings(body: dict = Body(...)):
 
 # ── restore from an uploaded backup file (ZIP or JSON) ───────────────────────
 @router.post("/api/backup/restore-file")
-async def restore_file(file: UploadFile = File(...)):
+async def restore_file(file: UploadFile = File(...), mode: str = Form("merge")):
     import io, zipfile as zf
     raw = await file.read()
     is_zip = raw[:4] == b"PK\x03\x04"
@@ -332,7 +339,7 @@ async def restore_file(file: UploadFile = File(...)):
                     raise HTTPException(status_code=400, detail="Invalid backup ZIP: no backup.json found inside.")
 
                 payload = json.loads(z.read(json_name).decode("utf-8"))
-                result = backup_service.restore_from_payload(payload)
+                result = backup_service.restore_from_payload(payload, mode=mode)
 
                 # Restore images from uploads/ folder inside the ZIP
                 udir = backup_service.UPLOADS_DIR
@@ -353,7 +360,7 @@ async def restore_file(file: UploadFile = File(...)):
                 payload = json.loads(raw.decode("utf-8"))
             except Exception:
                 raise HTTPException(status_code=400, detail="File is not a valid ZIP or JSON backup.")
-            result = backup_service.restore_from_payload(payload)
+            result = backup_service.restore_from_payload(payload, mode=mode)
             return {**result, "restored_images": 0}
 
     except HTTPException:

@@ -51,13 +51,14 @@ const fmtNext = (iso, days) => {
   return `In ${d} days`;
 };
 
-// Build a human message from a merge-restore result.
+// Build a human message from a restore result (merge or replace).
 const restoreMsg = (r) => {
   const a = r?.added || {};
-  const s = r?.skipped_duplicates || {};
-  const skip = (s.quotations || 0) + (s.warranty_certificates || 0);
+  const u = r?.updated || {};
+  const upd = (u.quotations || 0) + (u.warranty_certificates || 0);
   let msg = `Added ${a.quotations || 0} quotations, ${a.warranty_certificates || 0} warranties`;
-  if (skip > 0) msg += ` (${skip} already present, skipped)`;
+  if (upd > 0) msg += ` (${upd} existing updated)`;
+  if (r?.mode === 'replace') msg = `Replaced everything — ${msg.toLowerCase()}`;
   return msg;
 };
 
@@ -93,6 +94,8 @@ export default function BackupSettings() {
   const [expandedLoc, setExpandedLoc] = useState(null);
 
   const [showRestore, setShowRestore] = useState(false);
+  // Import mode: 'merge' (default, non-destructive) | 'replace' (full overwrite).
+  const [restoreMode, setRestoreMode] = useState('merge');
   const [files, setFiles] = useState([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [restoringP, setRestoringP] = useState(null);
@@ -184,11 +187,23 @@ export default function BackupSettings() {
     }
   };
 
+  // Confirm an import. Merge is a simple OK/Cancel; Replace demands a typed
+  // confirmation because it deletes existing records before importing.
+  const confirmImport = (srcName) => {
+    if (restoreMode === 'replace') {
+      const typed = window.prompt(
+        `REPLACE import from "${srcName}".\n\nThis DELETES all current records in scope and replaces them with the backup's contents (a safety snapshot is taken first).\n\nType REPLACE to confirm:`
+      );
+      return typed === 'REPLACE';
+    }
+    return window.confirm(`Merge import from "${srcName}"?\nExisting records are kept, new ones added, and matching ones updated. Nothing is deleted.`);
+  };
+
   const handleRestoreFromPath = async (path, name) => {
-    if (!window.confirm(`Restore from "${name}"?\nThis adds any missing quotations/warranties from the backup. Nothing is deleted and duplicates are skipped.`)) return;
+    if (!confirmImport(name)) return;
     setRestoringP(path);
     try {
-      const r = await restoreFromPath(path);
+      const r = await restoreFromPath(path, restoreMode);
       showToast(`${restoreMsg(r)}. Reloading...`);
       setTimeout(() => window.location.reload(), 1400);
     } catch (e) { showToast(e.message || 'Restore failed', 'error'); setRestoringP(null); }
@@ -197,10 +212,10 @@ export default function BackupSettings() {
   const handleRestoreFile = async (e) => {
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
-    if (!window.confirm(`Restore from "${file.name}"?\nThis adds any missing records from the backup. Nothing is deleted and duplicates are skipped.`)) return;
+    if (!confirmImport(file.name)) return;
     setBusy(true);
     try {
-      const r = await restoreFromFile(file);
+      const r = await restoreFromFile(file, restoreMode);
       showToast(`${restoreMsg(r)}. Reloading...`);
       setTimeout(() => window.location.reload(), 1400);
     } catch (e) { showToast(e.message || 'Restore failed', 'error'); setBusy(false); }
@@ -429,11 +444,32 @@ export default function BackupSettings() {
             <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 20, background: 'var(--surface)', marginTop: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                  <div style={{ fontSize: 14, fontWeight: 600 }}>Restore Snapshot</div>
-                 <div style={{ display: 'flex', gap: 8 }}>
+                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                   {/* Import mode selector — Merge (safe) is the default. */}
+                   <div style={{ display: 'flex', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
+                     {[
+                       { id: 'merge', label: 'Merge' },
+                       { id: 'replace', label: 'Replace' },
+                     ].map(m => (
+                       <button key={m.id} onClick={() => setRestoreMode(m.id)} title={m.id === 'merge' ? 'Keep existing, add new, update matching (nothing deleted)' : 'Delete existing records, then import (snapshot taken first)'}
+                         style={{
+                           padding: '4px 12px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                           background: restoreMode === m.id ? (m.id === 'replace' ? '#EF4444' : 'var(--ink)') : 'var(--surface)',
+                           color: restoreMode === m.id ? '#fff' : 'var(--ink-soft)',
+                         }}>
+                         {m.label}
+                       </button>
+                     ))}
+                   </div>
                    <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={handleOpenRestore}>Close</button>
                    <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={() => fileRef.current?.click()}><Upload size={12}/> Import File</button>
                    <input ref={fileRef} type="file" accept=".zip,.json,application/zip,application/json" onChange={handleRestoreFile} style={{ display:'none' }} />
                  </div>
+              </div>
+              <div style={{ fontSize: 12, color: restoreMode === 'replace' ? '#EF4444' : 'var(--ink-soft)', marginBottom: 12 }}>
+                {restoreMode === 'replace'
+                  ? '⚠ Replace mode: existing records in the file’s scope are deleted before import (a safety snapshot is taken first).'
+                  : 'Merge mode (recommended): keeps existing records, adds new, updates matching. Nothing is deleted.'}
               </div>
               
               {loadingFiles ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Loading...</div>
@@ -542,11 +578,16 @@ export default function BackupSettings() {
                 onChange={async (e) => {
                   const file = e.target.files?.[0]; e.target.value = '';
                   if (!file) return;
-                  if (!window.confirm(`Restore catalog from "${file.name}"?\nRestores classes, varieties, tools, settings and all images. History records are merged (no duplicates, nothing deleted).`)) return;
+                  const replace = restoreMode === 'replace';
+                  if (replace) {
+                    if (window.prompt(`REPLACE catalogue from "${file.name}".\n\nThis overwrites brands, classes, varieties, tools, warranty templates and settings with the file's contents (a safety snapshot is taken first). History (quotations/warranties) is NOT touched.\n\nType REPLACE to confirm:`) !== 'REPLACE') return;
+                  } else if (!window.confirm(`Restore catalogue from "${file.name}"?\nMerges brands, classes, varieties, tools, warranty templates, settings and images. History is never touched. Nothing is deleted.`)) {
+                    return;
+                  }
                   setBusy(true);
                   try {
-                    const r = await restoreCatalogFromFile(file);
-                    showToast(`Catalog restored, ${r.restored_images ?? 0} images. ${restoreMsg(r)}. Reloading...`);
+                    const r = await restoreCatalogFromFile(file, restoreMode);
+                    showToast(`Catalogue ${replace ? 'replaced' : 'restored'}, ${r.restored_images ?? 0} images. Reloading...`);
                     setTimeout(() => window.location.reload(), 1400);
                   } catch (err) { showToast(err.message || 'Restore failed', 'error'); setBusy(false); }
                 }}

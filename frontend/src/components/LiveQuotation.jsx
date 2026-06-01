@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { Minus, Plus, Trash2 } from 'lucide-react';
+import NumberField from './NumberField';
 
 export default function LiveQuotation() {
   const {
@@ -74,7 +75,7 @@ export default function LiveQuotation() {
                     </div>
                     <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--line)', borderRadius: '4px' }}>
                       <button onClick={() => updateCartQty(item.cartId, item.qty - 1)} style={{ padding: '4px 8px', background: 'transparent', border: 'none', cursor: 'pointer' }}><Minus size={14} color="var(--ink-mid)"/></button>
-                      <input type="number" value={item.qty} onChange={e => updateCartQty(item.cartId, parseInt(e.target.value)||1)} style={{ width: '40px', border: 'none', textAlign: 'center', fontSize: '13px', background: 'transparent' }} />
+                      <NumberField value={item.qty} min={1} fallback={1} onCommit={n => updateCartQty(item.cartId, n)} style={{ width: '40px', border: 'none', textAlign: 'center', fontSize: '13px', background: 'transparent' }} />
                       <button onClick={() => updateCartQty(item.cartId, item.qty + 1)} style={{ padding: '4px 8px', background: 'transparent', border: 'none', cursor: 'pointer' }}><Plus size={14} color="var(--ink-mid)"/></button>
                     </div>
                   </div>

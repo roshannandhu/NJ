@@ -53,6 +53,10 @@ export async function createWarranty(w) {
   return req("/api/warranties", { method: "POST", body: JSON.stringify(w) });
 }
 
+export async function deleteWarranty(wid) {
+  return req(`/api/warranties/${encodeURIComponent(wid)}`, { method: "DELETE" });
+}
+
 export async function clearWarranties() {
   return req("/api/warranties", { method: "DELETE" });
 }
@@ -115,9 +119,10 @@ export async function runBackup() {
   return req("/api/backup/run", { method: "POST" });
 }
 
-export async function restoreFromFile(file) {
+export async function restoreFromFile(file, mode = "merge") {
   const fd = new FormData();
   fd.append("file", file);
+  fd.append("mode", mode);
   const res = await fetch(`${BASE}/api/backup/restore-file`, { method: "POST", body: fd });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Restore failed: ${res.status}`);
@@ -169,9 +174,10 @@ export async function downloadCatalogBackup() {
   return _downloadFromEndpoint("/api/backup/catalog", "nj_catalog");
 }
 
-export async function restoreCatalogFromFile(file) {
+export async function restoreCatalogFromFile(file, mode = "merge") {
   const fd = new FormData();
   fd.append("file", file);
+  fd.append("mode", mode);
   const res = await fetch(`${BASE}/api/backup/restore-catalog`, { method: "POST", body: fd });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Restore failed: ${res.status}`);
@@ -242,6 +248,6 @@ export async function listBackupFiles() {
   return req("/api/backup/list-files");
 }
 
-export async function restoreFromPath(path) {
-  return req("/api/backup/restore-path", { method: "POST", body: JSON.stringify({ path }) });
+export async function restoreFromPath(path, mode = "merge") {
+  return req("/api/backup/restore-path", { method: "POST", body: JSON.stringify({ path, mode }) });
 }
