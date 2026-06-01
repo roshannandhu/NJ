@@ -2,7 +2,7 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, MapPin, FileType2, Share2 } from 'lucide-react';
 import { downloadWarrantyDocx } from '../api';
-import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName } from '../share';
+import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 
 export default function QuotationDocument() {
   const { 
@@ -45,15 +45,20 @@ export default function QuotationDocument() {
 
   const downloadQuotationPDF = async () => {
     if (isDownloading) return;
-    setIsDownloading(true);
-    showToast("Generating PDF...", "info");
 
     const element = document.getElementById("quotationSheet");
     if (!element) {
       showToast("Quotation sheet element not found.", "error");
-      setIsDownloading(false);
       return;
     }
+
+    // Ask where to save FIRST (while the click is still "fresh"), then render.
+    const qName = `NJ_Quotation_${generatedDoc.id || 'Draft'}_${generatedDoc.customer.name.replace(/\s+/g, '_')}.pdf`;
+    const dest = await beginPdfSave(qName);
+    if (dest.mode === 'cancelled') { showToast("Save cancelled", "info"); return; }
+
+    setIsDownloading(true);
+    showToast("Generating PDF...", "info");
 
     try {
       // Temporarily remove CSS scale so html2canvas captures the full natural size
@@ -93,8 +98,8 @@ export default function QuotationDocument() {
       const xOffset = (pageW - imgW) / 2;
       pdf.addImage(canvas.toDataURL('image/png'), 'PNG', xOffset, 0, imgW, imgH);
 
-      pdf.save(`NJ_Quotation_${generatedDoc.id || 'Draft'}_${generatedDoc.customer.name.replace(/\s+/g, '_')}.pdf`);
-      showToast("Quotation PDF downloaded — single page!", "success");
+      const r = await finishPdfSave(pdf, qName, dest);
+      showToast(r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded — single page!", "success");
     } catch (error) {
       console.error("PDF download failed:", error);
       showToast("PDF generation failed.", "error");
@@ -249,15 +254,19 @@ export default function QuotationDocument() {
 
   const downloadWarrantyPDF = async () => {
     if (!activeCert || isDownloading) return;
-    setIsDownloading(true);
-    showToast("Generating PDF...", "info");
 
     const element = document.getElementById("warrantyDoc");
     if (!element) {
       showToast("Warranty sheet element not found.", "error");
-      setIsDownloading(false);
       return;
     }
+
+    const wName = `NJ_Warranty_${activeCert.warrantyNo || activeCert.id || 'NJ-W-0001'}_${activeCert.customer?.name.replace(/\s+/g, '_')}.pdf`;
+    const dest = await beginPdfSave(wName);
+    if (dest.mode === 'cancelled') { showToast("Save cancelled", "info"); return; }
+
+    setIsDownloading(true);
+    showToast("Generating PDF...", "info");
 
     try {
       const canvas = await window.html2canvas(element, {
@@ -273,8 +282,8 @@ export default function QuotationDocument() {
       // The certificate is auto-fitted to exactly one A4 page → one full page.
       pdf.addImage(imgData, 'PNG', 0, 0, pw, phMax);
 
-      pdf.save(`NJ_Warranty_${activeCert.warrantyNo || activeCert.id || 'NJ-W-0001'}_${activeCert.customer?.name.replace(/\s+/g, '_')}.pdf`);
-      showToast("Warranty PDF downloaded successfully!", "success");
+      const r = await finishPdfSave(pdf, wName, dest);
+      showToast(r === 'saved' ? "Warranty PDF saved!" : "Warranty PDF downloaded successfully!", "success");
     } catch (error) {
       console.error("PDF download failed:", error);
       showToast("PDF generation failed. Using browser print as fallback.", "error");

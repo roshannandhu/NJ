@@ -530,15 +530,36 @@ def restore_from_payload(payload):
 
     db = SessionLocal()
     try:
-        # Config: replace only when explicitly present AND non-empty. History-only
-        # backups have no "config" key; an empty {} is rejected — both prevent
-        # wiping classes, varieties and image paths.
+        # Config: merge arrays by id instead of replacing everything, to avoid
+        # wiping out new classes/varieties when importing an old catalog backup.
         if "config" in payload and payload["config"]:
             cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
             if cfg_row is None:
-                cfg_row = AppConfig(id=1)
+                cfg_row = AppConfig(id=1, data="{}")
                 db.add(cfg_row)
-            cfg_row.data = json.dumps(payload["config"])
+
+            try:
+                old_cfg = json.loads(cfg_row.data) if cfg_row.data else {}
+            except Exception:
+                old_cfg = {}
+                
+            new_cfg = payload["config"]
+            
+            for key in ["classes", "varieties", "warranties"]:
+                old_list = old_cfg.get(key, [])
+                new_list = new_cfg.get(key, [])
+                merged = {item.get("id"): item for item in old_list if isinstance(item, dict) and item.get("id")}
+                for item in new_list:
+                    if isinstance(item, dict) and item.get("id"):
+                        merged[item["id"]] = item
+                old_cfg[key] = list(merged.values())
+                
+            if "company" in new_cfg:
+                old_cfg["company"] = new_cfg["company"]
+            if "settings" in new_cfg:
+                old_cfg["settings"] = new_cfg["settings"]
+                
+            cfg_row.data = json.dumps(old_cfg)
 
         # Quotations: MERGE by id — add only those not already present.
         existing_q = {row[0] for row in db.query(Quotation.id).all()}
@@ -611,9 +632,29 @@ def restore_catalog_payload(payload):
     try:
         cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
         if cfg_row is None:
-            cfg_row = AppConfig(id=1)
+            cfg_row = AppConfig(id=1, data="{}")
             db.add(cfg_row)
-        cfg_row.data = json.dumps(cfg)
+        
+        try:
+            old_cfg = json.loads(cfg_row.data) if cfg_row.data else {}
+        except Exception:
+            old_cfg = {}
+            
+        for key in ["classes", "varieties", "warranties"]:
+            old_list = old_cfg.get(key, [])
+            new_list = cfg.get(key, [])
+            merged = {item.get("id"): item for item in old_list if isinstance(item, dict) and item.get("id")}
+            for item in new_list:
+                if isinstance(item, dict) and item.get("id"):
+                    merged[item["id"]] = item
+            old_cfg[key] = list(merged.values())
+            
+        if "company" in cfg:
+            old_cfg["company"] = cfg["company"]
+        if "settings" in cfg:
+            old_cfg["settings"] = cfg["settings"]
+            
+        cfg_row.data = json.dumps(old_cfg)
         db.commit()
         return {
             "status": "catalog_restored",

@@ -21,10 +21,15 @@ set "PYVER=3.12.7"
 set "PYEMBED=python-%PYVER%-embed-amd64"
 
 echo.
-echo ========== [1/5] Building frontend ==========
+echo ========== [1/5] Building frontend + share helper ==========
 cd /d "%ROOT%frontend" || goto :err
 call npm install || goto :err
 call npm run build || goto :err
+
+REM Compile the native Windows Share helper (ShareHelper.exe) with the in-box
+REM .NET Framework C# compiler against the OS WinRT metadata. No SDK required.
+cd /d "%ROOT%" || goto :err
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%backend\share_helper\build.ps1" || goto :err
 
 echo.
 echo ========== [2/5] Staging app folder ==========
@@ -48,6 +53,9 @@ xcopy /e /i /y "%ROOT%frontend\dist\*" "%BUILD%\app\dist\" >nul || goto :err
 REM Production launcher
 copy /y "%ROOT%installer\Start NJ India.bat" "%BUILD%\app\Start NJ India.bat" >nul || goto :err
 
+REM Application icon for the window
+copy /y "%ROOT%installer\app.ico" "%BUILD%\app\app.ico" >nul || goto :err
+
 echo.
 echo ========== [3/5] Preparing embedded Python ==========
 cd /d "%BUILD%" || goto :err
@@ -65,8 +73,11 @@ if not exist "get-pip.py" (
   echo Downloading get-pip.py ...
   powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'" || goto :err
 )
+mkdir "python\Lib\site-packages" 2>nul
 "python\python.exe" get-pip.py --no-warn-script-location || goto :err
-"python\python.exe" -m pip install --no-warn-script-location -r "%ROOT%backend\requirements.txt" || goto :err
+REM setuptools+wheel are needed to build pywebview's pure-python deps (proxy_tools)
+"python\python.exe" -m pip install --no-warn-script-location setuptools wheel || goto :err
+"python\python.exe" -m pip install --no-warn-script-location --no-build-isolation -r "%ROOT%backend\requirements.txt" || goto :err
 
 echo.
 echo ========== [4/5] Building installer (Inno Setup) ==========
@@ -88,10 +99,8 @@ goto :done
 :err
 echo.
 echo *** BUILD FAILED - see the error above. ***
-pause
 exit /b 1
 
 :done
 echo.
-pause
 exit /b 0

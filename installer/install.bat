@@ -15,19 +15,31 @@ REM Fast extract: bsdtar (built into Win10/11) handles .zip; PowerShell fallback
 tar -xf "%~dp0payload.zip" -C "%INSTALL%" 2>nul
 if errorlevel 1 powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Force '%~dp0payload.zip' '%INSTALL%'"
 
-REM Desktop + Start-menu shortcuts pointing at the launcher.
+REM Desktop + Start-menu shortcuts launch the app DIRECTLY via pythonw.exe so it
+REM opens as a native window with NO console window and no .bat flash. The NJ
+REM icon (app.ico) is used for both shortcuts.
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$w = New-Object -ComObject WScript.Shell;" ^
   "$root = Join-Path $env:LOCALAPPDATA 'NJ India';" ^
+  "$icon = Join-Path $root 'app.ico';" ^
   "foreach ($p in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
   "  $l = $w.CreateShortcut((Join-Path $p 'NJ India System.lnk'));" ^
-  "  $l.TargetPath = (Join-Path $root 'Start NJ India.bat');" ^
-  "  $l.WorkingDirectory = $root;" ^
-  "  $l.IconLocation = (Join-Path $root 'python\python.exe');" ^
+  "  $l.TargetPath = (Join-Path $root 'python\pythonw.exe');" ^
+  "  $l.Arguments = 'run_app.py';" ^
+  "  $l.WorkingDirectory = (Join-Path $root 'app');" ^
+  "  $l.IconLocation = $icon;" ^
   "  $l.Save() }"
 
-echo.
-echo   Installed. Starting NJ India System...
-echo.
+REM Register in Windows "Add or remove programs" (per-user, no admin).
+set "UKEY=HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\NJIndiaTrading"
+reg add "%UKEY%" /v DisplayName /t REG_SZ /d "NJ India Trading" /f >nul
+reg add "%UKEY%" /v DisplayVersion /t REG_SZ /d "1.0" /f >nul
+reg add "%UKEY%" /v Publisher /t REG_SZ /d "NJ India Trading" /f >nul
+reg add "%UKEY%" /v DisplayIcon /t REG_SZ /d "%INSTALL%\app.ico" /f >nul
+reg add "%UKEY%" /v InstallLocation /t REG_SZ /d "%INSTALL%" /f >nul
+reg add "%UKEY%" /v UninstallString /t REG_SZ /d "\"%INSTALL%\uninstall.bat\"" /f >nul
+reg add "%UKEY%" /v NoModify /t REG_DWORD /d 1 /f >nul
+reg add "%UKEY%" /v NoRepair /t REG_DWORD /d 1 /f >nul
 
-start "" "%INSTALL%\Start NJ India.bat"
+REM Launch the app now (native window, no console).
+start "" "%INSTALL%\python\pythonw.exe" "%INSTALL%\app\run_app.py"

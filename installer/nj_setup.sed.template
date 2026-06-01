@@ -23,7 +23,7 @@ SourceFiles=SourceFiles
 [Strings]
 InstallPrompt=
 DisplayLicense=
-FinishMessage=NJ India System has been installed. A shortcut was added to your Desktop.
+FinishMessage=NJ India System is installed. A shortcut "NJ India System" was added to your Desktop. Click OK to open the app.
 TargetName=@@TARGET@@
 FriendlyName=NJ India System Setup
 AppLaunched=cmd /c install.bat

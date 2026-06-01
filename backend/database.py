@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # DATA_DIR holds all writable app data (database + uploaded images). In
@@ -27,6 +27,21 @@ engine = create_engine(
     # avoiding transient "database is locked" errors.
     connect_args={"check_same_thread": False, "timeout": 30},
 )
+@event.listens_for(engine, "connect")
+def _sqlite_pragmas(dbapi_conn, _rec):
+    # WAL = far safer against corruption on power loss / crashes, and lets reads
+    # proceed during the backup write. synchronous=NORMAL is the recommended,
+    # durable pairing with WAL. Set on every new connection.
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass
+    finally:
+        cur.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

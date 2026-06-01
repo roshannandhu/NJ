@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from database import Base, engine, DATA_DIR
 import models
 import backup_service
-from routers import backup, config, quotations, uploads, warranties, warranty_docx
+from routers import backup, config, quotations, uploads, warranties, warranty_docx, share
 
 # Create tables before anything tries to read them (backup engine reads state).
 Base.metadata.create_all(bind=engine)
@@ -46,6 +46,7 @@ app.include_router(uploads.router)
 app.include_router(warranties.router)
 app.include_router(backup.router)
 app.include_router(warranty_docx.router)
+app.include_router(share.router)
 
 
 @app.get("/api/health")

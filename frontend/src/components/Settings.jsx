@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../AppContext';
-import { ShieldCheck, Briefcase, FileText, ShoppingBag, ArrowLeft, Grid, Lock, Unlock } from 'lucide-react';
+import { ShieldCheck, Briefcase, FileText, ShoppingBag, ArrowLeft, Grid, Lock, Unlock, Download } from 'lucide-react';
 
 import ProductsClassesSettings from './ProductsClassesSettings';
 import WarrantiesSettings from './WarrantiesSettings';
@@ -8,7 +8,7 @@ import QuotationSettings from './QuotationSettings';
 import BackupSettings from './BackupSettings';
 
 export default function Settings() {
-  const { data, setData, showToast, persistConfig } = useAppContext();
+  const { data, setData, showToast, persistConfig, askSaveLocation, setAskSaveLocation } = useAppContext();
   const [activeModule, setActiveModule] = useState(null);
 
   const [company, setCompany] = useState(data.company || {});
@@ -159,6 +159,40 @@ export default function Settings() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* PDF download location preference */}
+      <div style={{ background: 'var(--surface)', borderRadius: '6px', padding: '24px', border: '1px solid var(--line)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <Download size={20} color="var(--ink)" />
+          <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--ink)', margin: 0 }}>PDF Downloads</h2>
+        </div>
+        <p style={{ color: 'var(--ink-soft)', marginBottom: '24px', fontSize: '13px' }}>Choose what happens when you download a quotation or warranty PDF.</p>
+
+        <div style={{ background: 'var(--bg)', borderRadius: '4px', border: '1px solid var(--line)', padding: '16px 20px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--ink)' }}>Always ask where to save</div>
+                <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>
+                  {askSaveLocation
+                    ? 'A "Save as" window lets you pick the folder and name each time.'
+                    : 'PDFs save straight to your Downloads folder.'}
+                </div>
+              </div>
+            </div>
+            {/* Native-style desktop toggle switch */}
+            <div style={{ position: 'relative', width: '40px', height: '20px', borderRadius: '100px', background: askSaveLocation ? 'var(--ink)' : 'var(--line-soft)', border: '1px solid var(--line)', transition: 'background 0.2s' }}>
+              <input
+                type="checkbox"
+                checked={!!askSaveLocation}
+                onChange={e => { setAskSaveLocation(e.target.checked); showToast(e.target.checked ? 'PDFs will now ask where to save' : 'PDFs will save to Downloads'); }}
+                style={{ opacity: 0, width: '100%', height: '100%', cursor: 'pointer', position: 'absolute', zIndex: 2 }}
+              />
+              <div style={{ position: 'absolute', top: '1px', left: askSaveLocation ? '21px' : '1px', width: '16px', height: '16px', borderRadius: '50%', background: 'white', transition: 'all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1)', border: '1px solid rgba(0,0,0,0.1)' }}></div>
+            </div>
+          </label>
         </div>
       </div>
 

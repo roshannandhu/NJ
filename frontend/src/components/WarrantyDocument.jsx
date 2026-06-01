@@ -2,7 +2,7 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
 import { downloadWarrantyDocx } from '../api';
-import { elementToPdfFile, shareFiles, warrantyFileName } from '../share';
+import { elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 
 // ── Inline-Editable Cell ───────────────────────────────────────────────────
 function EditableCell({ value, onSave, multiline = false, style = {}, renderValue, hideIcon }) {
@@ -228,10 +228,15 @@ export default function WarrantyDocument() {
 
   const downloadPDF = async () => {
     if (isDownloading) return;
+    const el = document.getElementById('warrantyDoc');
+    if (!el) { if (showToast) showToast('Element not found.', 'error'); return; }
+
+    const wName = `NJ_Warranty_${doc.warrantyNo || 'NJ-W-0001'}_${(customer.name || 'Customer').replace(/\s+/g, '_')}.pdf`;
+    const dest = await beginPdfSave(wName);
+    if (dest.mode === 'cancelled') { if (showToast) showToast('Save cancelled', 'info'); return; }
+
     setIsDownloading(true);
     if (showToast) showToast('Generating PDF…', 'info');
-    const el = document.getElementById('warrantyDoc');
-    if (!el) { if (showToast) showToast('Element not found.', 'error'); setIsDownloading(false); return; }
     try {
       const canvas = await window.html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
       const imgData = canvas.toDataURL('image/png');
@@ -242,8 +247,8 @@ export default function WarrantyDocument() {
       // The on-screen certificate is auto-fitted to exactly one A4 page, so it
       // maps to a single full page (full width, no distortion, nothing cut).
       pdf.addImage(imgData, 'PNG', 0, 0, pw, phMax);
-      pdf.save(`NJ_Warranty_${doc.warrantyNo || 'NJ-W-0001'}_${(customer.name || 'Customer').replace(/\s+/g, '_')}.pdf`);
-      if (showToast) showToast('PDF downloaded!', 'success');
+      const r = await finishPdfSave(pdf, wName, dest);
+      if (showToast) showToast(r === 'saved' ? 'PDF saved!' : 'PDF downloaded!', 'success');
     } catch (err) {
       console.error(err);
       if (showToast) showToast('PDF failed. Use Print (Ctrl+P).', 'error');
@@ -256,8 +261,9 @@ export default function WarrantyDocument() {
     setIsDownloading(true);
     try {
       const el = document.getElementById('warrantyDoc');
-      const file = await elementToPdfFile(el, warrantyFileName(doc, customer.name));
-      const r = await shareFiles([file], { title: `NJ India Warranty — ${customer.name || 'Customer'}`, text: 'Warranty certificate from NJ India' });
+      const custName = (doc.customer && doc.customer.name) || '';
+      const file = await elementToPdfFile(el, warrantyFileName(doc, custName));
+      const r = await shareFiles([file], { title: `NJ India Warranty — ${custName || 'Customer'}`, text: 'Warranty certificate from NJ India' });
       if (showToast) showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared', r === 'downloaded' ? 'success' : 'info');
     } catch { if (showToast) showToast('Share failed', 'error'); }
     finally { setIsDownloading(false); }

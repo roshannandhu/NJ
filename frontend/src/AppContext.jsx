@@ -45,6 +45,16 @@ export function AppProvider({ children }) {
   const [backupStatus, setBackupStatus] = useState(null);
   const [reminderDismissed, setReminderDismissed] = useState(false);
 
+  // PDF saving preference (per machine). When on, downloading a PDF opens a
+  // "save as" location picker instead of dropping straight into Downloads.
+  const [askSaveLocation, setAskSaveLocationState] = useState(() => {
+    try { return localStorage.getItem('nj_ask_save_location') !== '0'; } catch { return true; }
+  });
+  const setAskSaveLocation = (v) => {
+    setAskSaveLocationState(!!v);
+    try { localStorage.setItem('nj_ask_save_location', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+
   const showToast = (message, type = 'success') => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, message, type }]);
@@ -163,6 +173,7 @@ export function AppProvider({ children }) {
     activeTab, setActiveTab,
     backendOffline,
     backupStatus, refreshBackupStatus,
+    askSaveLocation, setAskSaveLocation,
   };
 
   const days = backupStatus?.days_since_last_backup;

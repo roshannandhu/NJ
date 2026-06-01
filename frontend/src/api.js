@@ -1,4 +1,13 @@
-const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+// In the packaged desktop app the SPA is served BY the FastAPI backend, so the
+// API lives at the same origin (whatever port run_app.py picked). Only in Vite
+// dev (separate port) do we point at the fixed backend port.
+const BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : window.location.origin);
+
+// Same-origin base used by non-api.js modules (e.g. share.js) that need to hit
+// the backend directly.
+export const API_BASE = BASE;
 
 export function mediaUrl(url) {
   if (!url) return "";
@@ -56,9 +65,23 @@ export async function downloadWarrantyDocx(warrantyId, warrantyData, filename) {
   });
   if (!res.ok) throw new Error(`DOCX download failed: ${res.status}`);
   const blob = await res.blob();
+  const dlFilename = filename || `warranty_${warrantyId}.docx`;
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({ suggestedName: dlFilename });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = filename || `warranty_${warrantyId}.docx`;
+  a.href = url; a.download = dlFilename;
   document.body.appendChild(a); a.click();
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
@@ -108,6 +131,18 @@ async function _downloadFromEndpoint(endpoint, fallbackPrefix) {
   const disposition = res.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
   const filename = match ? match[1] : `${fallbackPrefix}_${Date.now()}.json`;
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({ suggestedName: filename });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return filename;
+    } catch (err) {
+      if (err.name === 'AbortError') return filename;
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
@@ -161,6 +196,19 @@ export async function downloadUploadsBackup() {
   const disposition = res.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
   const filename = match ? match[1] : `nj_uploads_${Date.now()}.zip`;
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({ suggestedName: filename });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return filename;
+    } catch (err) {
+      if (err.name === 'AbortError') return filename;
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
