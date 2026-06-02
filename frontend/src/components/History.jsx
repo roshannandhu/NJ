@@ -9,8 +9,20 @@ export default function History({ type }) {
 
   const isQuotation = type === 'quotations';
   
-  // Load live data from context registry
-  const rawList = isQuotation ? (data.quotations || []) : (data.warranty_certificates || []);
+  // Load live data from context registry. Hidden "warranty-only" quotations
+  // (backing records for standalone warranties) never appear in Quotation History.
+  // Dedupe by id/warrantyNo so the same record never shows twice (id uniquely
+  // identifies a record, so two entries with the same id are the same one).
+  const _seen = new Set();
+  const rawList = (isQuotation
+    ? (data.quotations || []).filter(q => !q.warrantyOnly)
+    : (data.warranty_certificates || [])
+  ).filter(r => {
+    const k = isQuotation ? r.id : (r.warrantyNo || r.id);
+    if (_seen.has(k)) return false;
+    _seen.add(k);
+    return true;
+  });
 
   // Filter based on search term (ID or Customer Name)
   const filteredData = rawList.filter(row => {
@@ -28,18 +40,26 @@ export default function History({ type }) {
       if (setActiveTab) setActiveTab('quotation');
       setCurrentView('quotation_document');
     } else {
-      // Find matching quotation
+      // Find the parent quotation. A standalone "Warranty Only" cert is backed by
+      // a hidden warrantyOnly quotation — open the certificate directly in that
+      // case (and when no parent exists), never the blank backing quotation.
       const matchingQuote = data.quotations?.find(q => q.id === row.quotationId);
-      if (matchingQuote) {
+      if (matchingQuote && !matchingQuote.warrantyOnly) {
         setActiveQuotation(matchingQuote);
         if (setActiveTab) setActiveTab(row.warrantyNo || row.id);
         setCurrentView('quotation_document');
       } else {
-        // Fallback: If no matching quotation, set the activeWarranty and view warranty_document
         setActiveWarranty(row);
         setCurrentView('warranty_document');
       }
     }
+  };
+
+  // Open a quotation directly on one of its warranty certificates.
+  const openWarranty = (quotation, cert) => {
+    setActiveQuotation(quotation);
+    if (setActiveTab) setActiveTab(cert.warrantyNo || cert.id);
+    setCurrentView('quotation_document');
   };
 
   const handleClearHistory = async () => {
@@ -149,7 +169,11 @@ export default function History({ type }) {
             const rowId = isQuotation ? row.id : (row.warrantyNo || row.id);
             const customerName = row.customer?.name || row.name || 'Anonymous Customer';
             const dateVal = row.date;
-            
+            // Warranties linked to this quotation (for the status chip + open button).
+            const rowCerts = isQuotation
+              ? (data.warranty_certificates || []).filter(w => w.quotationId === row.id)
+              : [];
+
             return (
               <div 
                 key={i} 
@@ -183,11 +207,19 @@ export default function History({ type }) {
                 
                 {/* Spec specifics */}
                 {isQuotation ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <FileText size={14} color="var(--ink-soft)" />
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink-mid)' }}>
-                      {row.items?.length || 0} items
-                    </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={14} color="var(--ink-soft)" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink-mid)' }}>
+                        {row.items?.length || 0} items
+                      </span>
+                    </div>
+                    {rowCerts.length > 0 && (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 700, color: '#15803d' }}
+                        title={rowCerts.map(c => c.warrantyNo || c.id).join(', ')}>
+                        <ShieldCheck size={12} /> {rowCerts.length === 1 ? (rowCerts[0].warrantyNo || rowCerts[0].id) : `${rowCerts.length} warranties`}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-mid)', fontWeight: 600 }}>
@@ -213,6 +245,26 @@ export default function History({ type }) {
                 
                 {/* Actions */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  {isQuotation && rowCerts.length > 0 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openWarranty(row, rowCerts[0]); }}
+                      className="btn-secondary"
+                      title="Open the warranty certificate for this quotation"
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                        gap: '6px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'white',
+                        border: '1px solid var(--line)',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        color: '#15803d'
+                      }}
+                    >
+                      <ShieldCheck size={13}/> Warranty
+                    </button>
+                  )}
                   {isQuotation && (
                     <button
                       onClick={(e) => { e.stopPropagation(); loadQuotationForEdit(row); }}

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Check,
-  ChevronDown,
+  ChevronRight,
   Image as ImageIcon,
   Layers,
   Minus,
@@ -15,28 +15,14 @@ import {
 } from 'lucide-react';
 import { mediaUrl } from '../api';
 import { useAppContext } from '../AppContext';
-import CustomerCard from './CustomerCard';
 import LiveQuotation from './LiveQuotation';
 import NumberField from './NumberField';
+import './QuotationDesk.css';
 
 const TOOLS_SECTION_ID = 'tools';
-
 const getVarietyClass = (classes, variety) => classes.find(c => c.id === variety.classId);
-
 const escapeCssUrl = (url) => mediaUrl(url).replace(/"/g, '\\"');
-
-const imageBackground = (
-  url,
-  overlay = 'linear-gradient(135deg, rgba(0,0,0,0.18), rgba(0,0,0,0.04))',
-  fit = 'cover'
-) => {
-  if (!url) return undefined;
-  const image = `url("${escapeCssUrl(url)}") center/${fit} no-repeat`;
-  return overlay ? `${overlay}, ${image}` : image;
-};
-
 const getColorOffset = (color) => Number(color?.offset ?? color?.priceOffset ?? 0) || 0;
-
 const matchesSearch = (item, cls, search) => {
   if (!search) return true;
   return [item.name, item.description, cls?.name, cls?.subtitle]
@@ -45,201 +31,127 @@ const matchesSearch = (item, cls, search) => {
 };
 
 export default function QuotationDesk() {
-  const { data, addToCart } = useAppContext();
+  const { data, addToCart, customer, setCustomer } = useAppContext();
   const cur = data?.settings?.currencySymbol || '₹';
-  const productListRef = React.useRef(null);
-  const toolsSectionRef = React.useRef(null);
-  const tileClasses = React.useMemo(
-    () => (data.classes || []).filter(c => c.type !== 'tools'),
-    [data.classes]
-  );
-  const allTools = React.useMemo(
-    () => (data.varieties || []).filter(v => {
-      const cls = getVarietyClass(data.classes || [], v);
-      return cls?.type === 'tools' || v.classId === 'cls_tools';
-    }),
-    [data.classes, data.varieties]
-  );
 
-  const [activeStrip, setActiveStrip] = React.useState(null);
   const [catalogView, setCatalogView] = React.useState('products');
   const [search, setSearch] = React.useState('');
   const [selections, setSelections] = React.useState({});
   const [addedItems, setAddedItems] = React.useState({});
-  const [brandFilter, setBrandFilter] = React.useState('all');
+  const [activeClassId, setActiveClassId] = React.useState(null);
+  const [moreCustomer, setMoreCustomer] = React.useState(false);
 
-  // Parent Brands available as a filter (active only), plus a brand resolver.
+  const toolsActive = catalogView === TOOLS_SECTION_ID;
+  const normalizedSearch = search.trim().toLowerCase();
+
+  // ── Brand / class resolution (same logic as before) ──────────────────────
   const brands = React.useMemo(
     () => (data.brands || []).filter(b => b.active !== false).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [data.brands]
   );
   const fallbackBrandId = (data.brands || [])[0]?.id;
   const brandOf = (cls) => ((data.brands || []).some(b => b.id === cls?.brandId) ? cls.brandId : fallbackBrandId);
-  const brandById = (id) => (data.brands || []).find(b => b.id === id);
-  // Tool/accessory classes — rendered with the SAME class-strip hierarchy as
-  // products (Brand → Class → Variety), just on the "Tools & Accessories" tab.
-  const toolClasses = React.useMemo(
-    () => (data.classes || []).filter(c => c.type === 'tools'),
-    [data.classes]
-  );
-  // Classes shown for the current brand filter, per active tab.
-  const visibleClasses = React.useMemo(
-    () => tileClasses.filter(c => brandFilter === 'all' || brandOf(c) === brandFilter),
-    [tileClasses, brandFilter, data.brands]
-  );
-  const visibleToolClasses = React.useMemo(
-    () => toolClasses.filter(c => brandFilter === 'all' || brandOf(c) === brandFilter),
-    [toolClasses, brandFilter, data.brands]
-  );
-  const normalizedSearch = search.trim().toLowerCase();
-  const toolsActive = catalogView === TOOLS_SECTION_ID;
-  // Resolve the expanded strip against ALL classes (products AND tool/accessory
-  // classes). Validating only against tileClasses meant clicking a tool class
-  // (e.g. "Rain Gutter") reset this to null, so its varieties never expanded.
-  const resolvedActiveStrip = (data.classes || []).some(c => c.id === activeStrip)
-    ? activeStrip
-    : null;
 
-  const productTotal = (data.varieties || []).filter(v => {
-    const cls = getVarietyClass(data.classes || [], v);
-    return cls?.type !== 'tools' && v.classId !== 'cls_tools';
-  }).length;
+  const tileClasses = React.useMemo(() => (data.classes || []).filter(c => c.type !== 'tools'), [data.classes]);
+  const toolClasses = React.useMemo(() => (data.classes || []).filter(c => c.type === 'tools'), [data.classes]);
+  const railClasses = toolsActive ? toolClasses : tileClasses;
 
-  const setSelection = (id, patch) => {
-    setSelections(prev => ({
-      ...prev,
-      [id]: { ...prev[id], ...patch },
-    }));
-  };
+  // Group the rail's classes under their parent brand (brand order preserved).
+  const brandGroups = React.useMemo(() => {
+    const groups = [];
+    for (const b of brands) {
+      const items = railClasses.filter(c => brandOf(c) === b.id);
+      if (items.length) groups.push({ brand: b, items });
+    }
+    const orphan = railClasses.filter(c => !brands.some(b => b.id === brandOf(c)));
+    if (orphan.length) groups.push({ brand: null, items: orphan });
+    return groups;
+  }, [brands, railClasses]);
 
-  const getSelectedColor = (item) => {
-    const selection = selections[item.id] || {};
-    return selection.color || item.colors?.[0]?.name || 'Standard';
-  };
+  // Default / keep a valid active class for the current tab.
+  React.useEffect(() => {
+    if (!railClasses.some(c => c.id === activeClassId)) {
+      setActiveClassId(railClasses[0]?.id || null);
+    }
+  }, [railClasses, activeClassId]);
 
-  const getSelectedColorInfo = (item) => {
-    const selectedColor = getSelectedColor(item);
-    return item.colors?.find(c => c.name === selectedColor);
-  };
+  const allClasses = data.classes || [];
+  const allVarieties = data.varieties || [];
+  const classVarietyCount = (id) => allVarieties.filter(v => v.classId === id).length;
+  const getClassVarieties = (classId) => allVarieties
+    .filter(v => v.classId === classId)
+    .filter(v => matchesSearch(v, getVarietyClass(allClasses, v), normalizedSearch));
 
+  // ── Per-variety selection helpers (unchanged behaviour) ──────────────────
+  const setSelection = (id, patch) => setSelections(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  const getSelectedColor = (item) => (selections[item.id]?.color) || item.colors?.[0]?.name || 'Standard';
+  const getSelectedColorInfo = (item) => item.colors?.find(c => c.name === getSelectedColor(item));
   const getSelectedQty = (item) => selections[item.id]?.qty || 1;
-
   const getItemPrice = (item) => item.basePrice + getColorOffset(getSelectedColorInfo(item));
 
-  const getClassVarieties = (classId) => (data.varieties || [])
-    .filter(v => v.classId === classId)
-    .filter(v => matchesSearch(v, getVarietyClass(data.classes || [], v), normalizedSearch));
-
-  const getTools = () => allTools
-    .filter(v => matchesSearch(v, getVarietyClass(data.classes || [], v), normalizedSearch));
-
   const addItem = (item) => {
-    const cls = getVarietyClass(data.classes || [], item);
+    const cls = getVarietyClass(allClasses, item);
     const color = getSelectedColor(item);
     const qty = getSelectedQty(item);
     const price = getItemPrice(item);
     const isTool = cls?.type === 'tools' || item.classId === 'cls_tools';
     const brandId = brandOf(cls);
-    const brand = brandById(brandId);
-
+    const brand = (data.brands || []).find(b => b.id === brandId);
     addToCart({
       id: `${item.id}-${color}`,
       name: item.name,
-      // Always snapshot the real class name (e.g. "Accessories", "Tools") so
-      // tools follow the same Brand → Class → Variety identity as products and
-      // keep their class colour / grouping in Checkout and on the quotation.
       className: cls?.name || (isTool ? 'Tools & Accessories' : 'Products'),
-      // Brand snapshot for historical accuracy (rename-proof on the quotation).
       brandId,
       brandName: brand?.name || '',
-      price,
-      qty,
-      unit: item.unit,
-      color,
-      image: item.image,
+      // Product images live on the selected colour/type; fall back to the
+      // variety image (used by tools, which have no colours).
+      price, qty, unit: item.unit, color, image: getSelectedColorInfo(item)?.image || item.image,
     });
-
-    // Reset qty to 1 and flash the "Added" state
     setSelection(item.id, { qty: 1 });
     setAddedItems(prev => ({ ...prev, [item.id]: true }));
     setTimeout(() => setAddedItems(prev => ({ ...prev, [item.id]: false })), 1400);
   };
 
-  const toggleStrip = (id) => {
-    setActiveStrip(current => current === id ? null : id);
-  };
+  const activeClass = allClasses.find(c => c.id === activeClassId) || null;
+  const activeBrand = activeClass ? brands.find(b => b.id === brandOf(activeClass)) : null;
 
-  const scrollToSection = (ref) => {
-    if (!ref.current) return;
-    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    ref.current.scrollIntoView({
-      behavior: prefersReducedMotion ? 'auto' : 'smooth',
-      block: 'start',
-    });
-  };
+  // Center content: search results across the tab, else the active class's varieties.
+  const searchResults = React.useMemo(() => {
+    if (!normalizedSearch) return null;
+    return railClasses.flatMap(cls => getClassVarieties(cls.id));
+  }, [normalizedSearch, railClasses]);
+  const gridItems = normalizedSearch ? searchResults : (activeClass ? getClassVarieties(activeClass.id) : []);
 
-  const jumpToProducts = () => {
-    setCatalogView('products');
-    setSearch('');
-    window.setTimeout(() => scrollToSection(productListRef), 80);
-  };
-
-  const jumpToTools = () => {
-    setCatalogView(TOOLS_SECTION_ID);
-    setSearch('');
-    window.setTimeout(() => scrollToSection(toolsSectionRef), 80);
-  };
-
-  const renderVarietyCard = (item, index, isTool = false) => {
-    const cls = getVarietyClass(data.classes || [], item) || {};
+  // ── Variety card ─────────────────────────────────────────────────────────
+  const renderCard = (item, index) => {
+    const cls = getVarietyClass(allClasses, item) || {};
+    const isTool = cls.type === 'tools' || item.classId === 'cls_tools';
     const selectedColor = getSelectedColor(item);
     const colorInfo = getSelectedColorInfo(item);
     const price = getItemPrice(item);
     const qty = getSelectedQty(item);
-    const cardColor = colorInfo?.hex || cls.color || '#8a857a';
     const activeImage = colorInfo?.image || item.image;
+    const cardColor = colorInfo?.hex || cls.color || '#8a857a';
 
     return (
-      <article
-        key={item.id}
-        className={`qd-variety-card ${isTool ? 'is-tool' : ''}`}
-        style={{
-          '--qd-card-color': cardColor,
-          animationDelay: `${index * 22}ms`,
-        }}
-      >
-        <div
-          className={`qd-variety-image ${activeImage ? 'has-image' : ''}`}
-          style={activeImage ? { background: isTool ? imageBackground(activeImage, null, 'contain') : imageBackground(activeImage) } : undefined}
-        >
-          {!activeImage && (
-            <div className="qd-fallback-mark">
+      <article key={item.id} className="qd2-card" style={{ '--i': index }}>
+        <div className={`qd2-card-media${isTool ? ' is-tool' : ''}`}>
+          {activeImage ? (
+            <img key={activeImage} src={mediaUrl(activeImage)} alt={item.name} crossOrigin="anonymous" />
+          ) : (
+            <div className="qd2-card-fallback">
               {isTool ? <Wrench size={26} /> : <ImageIcon size={26} />}
-              <span>{isTool ? 'Accessory' : cls.subtitle || cls.name || 'Product'}</span>
+              <span>{cls.subtitle || cls.name || 'Product'}</span>
             </div>
           )}
-          
           {!isTool && item.colors?.length > 0 && (
-            <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: 'white', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, zIndex: 2, backdropFilter: 'blur(4px)' }}>
-              {selectedColor}
-            </div>
+            <span className="qd2-color-badge">{selectedColor}</span>
           )}
         </div>
 
-        <div className="qd-variety-body">
-          <div className="qd-variety-title-row">
-            <div>
-              <h3>{item.name}</h3>
-              <p>{item.description || cls.name || 'Ready to add to quotation'}</p>
-            </div>
-            <div className="qd-price">
-              <strong>{cur} {price}</strong>
-              <span>/ {item.unit}</span>
-            </div>
-          </div>
-
+        <div className="qd2-card-body">
           {!isTool && item.colors?.length > 0 && (
-            <div className="qd-color-row" aria-label={`Colors for ${item.name}`}>
+            <div className="qd2-swatches" aria-label={`Colors for ${item.name}`}>
               {item.colors.map(color => (
                 <button
                   key={color.name}
@@ -247,51 +159,31 @@ export default function QuotationDesk() {
                   title={color.name}
                   aria-label={color.name}
                   onClick={() => setSelection(item.id, { color: color.name })}
-                  className={selectedColor === color.name ? 'is-selected' : ''}
-                  style={{
-                    background: color.image
-                      ? `url("${escapeCssUrl(color.image)}") center/cover`
-                      : color.hex || '#d6d3cc',
-                  }}
+                  className={`qd2-swatch${selectedColor === color.name ? ' is-selected' : ''}`}
+                  style={{ background: color.image ? `url("${escapeCssUrl(color.image)}") center/cover` : (color.hex || '#d6d3cc') }}
                 >
-                  {selectedColor === color.name && <Check size={13} />}
+                  {selectedColor === color.name && <Check size={12} />}
                 </button>
               ))}
             </div>
           )}
 
-          <div className="qd-variety-actions">
-            <div className="qd-stepper">
-              <button
-                type="button"
-                onClick={() => setSelection(item.id, { qty: Math.max(1, qty - 1) })}
-                aria-label={`Decrease ${item.name} quantity`}
-              >
-                <Minus size={14} />
-              </button>
-              <NumberField
-                value={qty}
-                min={1}
-                fallback={1}
-                onCommit={n => setSelection(item.id, { qty: n })}
-                aria-label={`${item.name} quantity`}
-              />
-              <button
-                type="button"
-                onClick={() => setSelection(item.id, { qty: qty + 1 })}
-                aria-label={`Increase ${item.name} quantity`}
-              >
-                <Plus size={14} />
-              </button>
-            </div>
+          <div className="qd2-card-title">
+            <h3>{item.name}</h3>
+            <p>{item.description || cls.name || (normalizedSearch ? cls.name : 'Ready to add to quotation')}</p>
+          </div>
 
-            <button
-              className={`qd-add-btn ${addedItems[item.id] ? 'is-added' : ''}`}
-              type="button"
-              onClick={() => addItem(item)}
-            >
+          <div className="qd2-card-price">{cur} {price}<span> / {item.unit}</span></div>
+
+          <div className="qd2-card-actions">
+            <div className="qd2-stepper">
+              <button type="button" onClick={() => setSelection(item.id, { qty: Math.max(1, qty - 1) })} aria-label="Decrease quantity"><Minus size={14} /></button>
+              <NumberField value={qty} min={1} fallback={1} onCommit={n => setSelection(item.id, { qty: n })} aria-label={`${item.name} quantity`} />
+              <button type="button" onClick={() => setSelection(item.id, { qty: qty + 1 })} aria-label="Increase quantity"><Plus size={14} /></button>
+            </div>
+            <button type="button" className={`qd2-add${addedItems[item.id] ? ' is-added' : ''}`} onClick={() => addItem(item)}>
               {addedItems[item.id] ? <Check size={15} /> : <ShoppingCart size={15} />}
-              {addedItems[item.id] ? 'Added!' : 'Add'}
+              {addedItems[item.id] ? 'Added' : 'Add'}
             </button>
           </div>
         </div>
@@ -299,234 +191,146 @@ export default function QuotationDesk() {
     );
   };
 
-  const renderClassStrip = (cls, index) => {
-    const allClassItems = (data.varieties || []).filter(v => v.classId === cls.id);
-    const visibleItems = getClassVarieties(cls.id);
-    const isActive = resolvedActiveStrip === cls.id;
-    const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
-
-    return (
-      <article
-        key={cls.id}
-        className={`qd-strip ${isActive ? 'is-expanded' : ''}`}
-        style={{
-          '--qd-strip-color': cls.color || '#8a857a',
-          '--qd-strip-bg': cls.logo ? `url("${escapeCssUrl(cls.logo)}")` : 'none',
-          animationDelay: `${index * 40}ms`,
-        }}
-      >
-        <button className="qd-strip-head" type="button" onClick={() => toggleStrip(cls.id)}>
-          <div
-            className={`qd-strip-image ${cls.logo ? 'has-image' : ''}`}
-          >
-            {cls.logo ? (
-              <img className="qd-strip-logo-img" src={mediaUrl(cls.logo)} alt={`${cls.name} logo`} />
-            ) : (
-              <div className="qd-strip-fallback">
-                <Layers size={28} />
-                <span>{cls.subtitle || 'Roofing Series'}</span>
-              </div>
-            )}
-          </div>
-
-          <div className="qd-strip-copy">
-            <span className="qd-kicker">{cls.subtitle || 'Product Class'}</span>
-            <h2>{cls.name}</h2>
-            <p>{cls.description || 'Catalogue series for quotation line items.'}</p>
-            <div className="qd-strip-meta">
-              <span>{allClassItems.length} varieties</span>
-              {warranty && (
-                <span className="qd-warranty-pill">
-                  <ShieldCheck size={13} />
-                  {warranty.title}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="qd-strip-count">
-            <strong>{normalizedSearch ? visibleItems.length : allClassItems.length}</strong>
-            <span>{normalizedSearch ? 'matches' : 'items'}</span>
-            <ChevronDown size={20} />
-          </div>
-        </button>
-
-        <div className="qd-strip-body" aria-hidden={!isActive}>
-          <div className="qd-strip-body-inner">
-            {visibleItems.length === 0 ? (
-              <div className="qd-empty">
-                <Package size={30} />
-                <strong>No matching varieties</strong>
-                <span>Clear search or add products in Settings.</span>
-              </div>
-            ) : (
-              <div className="qd-variety-grid">
-                {visibleItems.map((item, itemIndex) => renderVarietyCard(item, itemIndex))}
-              </div>
-            )}
-          </div>
-        </div>
-      </article>
-    );
-  };
-
-  const visibleTools = getTools();
-
-  // Shared brand-filter pills — used by both the Products and Tools tabs so the
-  // brand → class hierarchy is navigated identically for each.
-  const brandFilterBar = brands.length > 1 ? (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-      <button
-        type="button"
-        onClick={() => setBrandFilter('all')}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
-          border: `1.5px solid ${brandFilter === 'all' ? 'var(--accent)' : 'var(--line)'}`,
-          background: brandFilter === 'all' ? 'var(--accent)' : 'var(--surface)',
-          color: brandFilter === 'all' ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
-        }}
-      >
-        All Brands
-      </button>
-      {brands.map(b => {
-        const active = brandFilter === b.id;
-        return (
-          <button
-            key={b.id}
-            type="button"
-            onClick={() => setBrandFilter(b.id)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: '7px', padding: '7px 14px', borderRadius: '999px',
-              border: `1.5px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
-              background: active ? 'var(--accent)' : 'var(--surface)',
-              color: active ? '#fff' : 'var(--ink)', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
-            }}
-          >
-            {b.logo && <img src={mediaUrl(b.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '36px', objectFit: 'contain', filter: active ? 'brightness(0) invert(1)' : 'none' }} />}
-            {b.name}
-          </button>
-        );
-      })}
-    </div>
-  ) : null;
+  const heroImg = activeClass?.logo ? mediaUrl(activeClass.logo) : null;
+  const activeWarranty = activeClass && (data.warranties || []).find(w => w.id === activeClass.warrantyId);
 
   return (
-    <div className="quotation-desk-shell qd-strip-mode">
-      <div className="qd-customer-panel">
-        <div className="qd-customer-title">
-          <UserRound size={18} />
-          <div>
-            <strong>Customer Details</strong>
-            <span>Customer profile for the current quotation.</span>
+    <div className="qd2">
+      {/* ── Customer bar ───────────────────────────────────────────────── */}
+      <div className="qd2-customer">
+        <div className="qd2-customer-avatar">{(customer.name || '?').trim().charAt(0).toUpperCase() || <UserRound size={18} />}</div>
+        <div className="qd2-cust-lead"><span>Quotation for</span><strong>{customer.name || 'New Customer'}</strong></div>
+        <div className="qd2-field is-name">
+          <label>Customer Name *</label>
+          <input name="name" value={customer.name || ''} onChange={e => setCustomer(p => ({ ...p, name: e.target.value }))} placeholder="Required for quotation" />
+        </div>
+        <div className="qd2-field is-phone">
+          <label>Phone</label>
+          <input name="phone" value={customer.phone || ''} onChange={e => setCustomer(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
+        </div>
+        <button type="button" className="qd2-more-btn" onClick={() => setMoreCustomer(m => !m)}>
+          {moreCustomer ? 'Less' : 'More details'}
+        </button>
+        {moreCustomer && (
+          <div className="qd2-more-fields">
+            <div className="qd2-field" style={{ flex: '1 1 240px' }}>
+              <label>Email</label>
+              <input name="email" value={customer.email || ''} onChange={e => setCustomer(p => ({ ...p, email: e.target.value }))} placeholder="Optional" />
+            </div>
+            <div className="qd2-field" style={{ flex: '2 1 320px' }}>
+              <label>Site Address</label>
+              <input name="address" value={customer.address || ''} onChange={e => setCustomer(p => ({ ...p, address: e.target.value }))} placeholder="Delivery location" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── LEFT: brand / class rail ───────────────────────────────────── */}
+      <aside className="qd2-panel qd2-rail">
+        <div className="qd2-rail-head">
+          <span className="qd2-rail-label">Catalogue</span>
+          <div className={`qd2-seg${toolsActive ? ' tools' : ''}`}>
+            <span className="qd2-seg-thumb" />
+            <button type="button" className={!toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView('products'); setSearch(''); }}>
+              <Layers size={15} /> Products
+            </button>
+            <button type="button" className={toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView(TOOLS_SECTION_ID); setSearch(''); }}>
+              <Wrench size={15} /> Tools
+            </button>
           </div>
         </div>
-        <CustomerCard />
-      </div>
 
-      <div className="qd-strip-workspace">
-        <section className="qd-strip-catalog">
-          <div className="qd-strip-toolbar">
-            <div className="qd-catalog-switch" aria-label="Catalogue sections">
-              <button
-                className={`qd-catalog-tab is-product ${!toolsActive ? 'is-active' : ''}`}
-                type="button"
-                onClick={jumpToProducts}
-                aria-current={!toolsActive ? 'true' : undefined}
-              >
-                <span className="qd-catalog-icon">
-                  <Layers size={19} />
-                </span>
-                <span className="qd-catalog-tab-copy">
-                  <span className="qd-kicker">Visual Catalogue</span>
-                  <strong>Product Classes</strong>
-                  <span>Roofing, ceiling, and accessory catalogue for NJ India quotations.</span>
-                </span>
-                <span className="qd-catalog-count">{productTotal}</span>
-              </button>
-
-              <button
-                className={`qd-catalog-tab is-tools ${toolsActive ? 'is-active' : ''}`}
-                type="button"
-                onClick={jumpToTools}
-                aria-current={toolsActive ? 'true' : undefined}
-              >
-                <span className="qd-catalog-icon">
-                  <Wrench size={19} />
-                </span>
-                <span className="qd-catalog-tab-copy">
-                  <span className="qd-kicker">Quick Add</span>
-                  <strong>Tools & Accessories</strong>
-                  <span>Hardware, fittings, and installation support items.</span>
-                </span>
-                <span className="qd-catalog-count">{allTools.length}</span>
-              </button>
+        <div className="qd2-scroll qd2-rail-list">
+          {brandGroups.length === 0 ? (
+            <div className="qd2-empty" style={{ padding: '40px 16px' }}>
+              <div className="qd2-empty-icon">{toolsActive ? <Wrench size={24} /> : <Layers size={24} />}</div>
+              <strong>No {toolsActive ? 'tools' : 'classes'} yet</strong>
+              <span>Add them in Settings.</span>
             </div>
-            <div className="qd-search">
-              <Search size={16} />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder={toolsActive ? 'Search accessories' : 'Search products or classes'}
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  aria-label="Clear search"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--ink-soft)', display: 'flex', alignItems: 'center',
-                    padding: '0 2px', flexShrink: 0,
-                  }}
-                >
-                  ✕
-                </button>
-              )}
-              <span>
-                {normalizedSearch
-                  ? toolsActive
-                    ? visibleTools.length
-                    : tileClasses.reduce((sum, cls) => sum + getClassVarieties(cls.id).length, 0)
-                  : toolsActive
-                    ? allTools.length
-                    : productTotal}
-              </span>
+          ) : brandGroups.map(({ brand, items }) => (
+            <div className="qd2-brand-group" key={brand?.id || 'orphan'}>
+              <div className="qd2-brand-head">
+                {brand?.logo && <img src={mediaUrl(brand.logo)} alt="" />}
+                <span>{brand?.name || 'Other'}</span>
+              </div>
+              {items.map(cls => {
+                const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
+                return (
+                  <button
+                    key={cls.id}
+                    type="button"
+                    className={`qd2-class${cls.id === activeClassId && !normalizedSearch ? ' is-active' : ''}`}
+                    onClick={() => { setActiveClassId(cls.id); setSearch(''); }}
+                  >
+                    <div className="qd2-class-thumb" style={cls.logo ? { backgroundImage: `url("${escapeCssUrl(cls.logo)}")` } : { background: cls.color || '#8a857a' }}>
+                      {!cls.logo && (cls.name || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="qd2-class-copy">
+                      <h4>{cls.name}</h4>
+                      <p>{cls.subtitle || 'Product class'}</p>
+                      <div className="qd2-class-meta">
+                        <span className="qd2-count-chip">{classVarietyCount(cls.id)}</span>
+                        {warranty && <span className="qd2-shield"><ShieldCheck size={10} /> Warranty</span>}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      {/* ── CENTER: variety grid ───────────────────────────────────────── */}
+      <section className="qd2-catalog qd2-scroll">
+        <div className="qd2-cat-head">
+          {normalizedSearch ? (
+            <div className="qd2-crumb"><Search size={14} /> <b>“{search.trim()}”</b> <span className="qd2-cnt">· {gridItems.length} results</span></div>
+          ) : activeClass ? (
+            <div className="qd2-crumb">
+              {activeBrand?.name && <>{activeBrand.name} <ChevronRight size={14} /> </>}
+              <b>{activeClass.name}</b> <span className="qd2-cnt">· {gridItems.length} products</span>
+            </div>
+          ) : <div className="qd2-crumb">Select a class</div>}
+
+          <div className="qd2-search">
+            <Search size={16} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={toolsActive ? 'Search accessories' : 'Search products'} />
+            {search && <button type="button" aria-label="Clear search" onClick={() => setSearch('')}>✕</button>}
+          </div>
+        </div>
+
+        {!normalizedSearch && activeClass && (
+          <div className="qd2-hero">
+            {heroImg && <div className="qd2-hero-img" style={{ backgroundImage: `url("${escapeCssUrl(activeClass.logo)}")` }} />}
+            <div className="qd2-hero-copy">
+              <div className="qd2-kick">{activeClass.subtitle || (activeBrand?.name || 'Product Class')}</div>
+              <h2>{activeClass.name}</h2>
+              <p>{activeClass.description || 'Catalogue series for quotation line items.'}</p>
+            </div>
+            {activeWarranty && <span className="qd2-hero-shield"><ShieldCheck size={13} /> {activeWarranty.title}</span>}
+          </div>
+        )}
+
+        {gridItems.length === 0 ? (
+          <div className="qd2-empty">
+            <div className="qd2-empty-icon"><Package size={26} /></div>
+            <strong>{normalizedSearch ? 'No matching products' : 'No products in this class'}</strong>
+            <span>{normalizedSearch ? 'Try a different search.' : 'Add varieties in Settings, or pick another class.'}</span>
+          </div>
+        ) : (
+          <div className="qd2-gridwrap" key={normalizedSearch || activeClassId}>
+            <div className="qd2-grid">
+              {gridItems.map((item, i) => renderCard(item, i))}
             </div>
           </div>
+        )}
+      </section>
 
-          {!toolsActive ? (
-            <div className="qd-strip-list" ref={productListRef}>
-              {brandFilterBar}
-              {visibleClasses.length === 0 ? (
-                <div className="qd-empty">
-                  <Layers size={30} />
-                  <strong>No classes for this brand</strong>
-                  <span>Pick another brand or add classes in Settings.</span>
-                </div>
-              ) : (
-                visibleClasses.map(renderClassStrip)
-              )}
-            </div>
-          ) : (
-            <section className="qd-strip-list" ref={toolsSectionRef} aria-label="Tools and accessories">
-              {brandFilterBar}
-              {visibleToolClasses.length === 0 ? (
-                <div className="qd-empty">
-                  <Wrench size={30} />
-                  <strong>No tool or accessory classes</strong>
-                  <span>Add a class of type “Tools &amp; Hardware” in Settings.</span>
-                </div>
-              ) : (
-                visibleToolClasses.map(renderClassStrip)
-              )}
-            </section>
-          )}
-        </section>
-
-        <aside className="qd-live-panel">
-          <LiveQuotation />
-        </aside>
-      </div>
+      {/* ── RIGHT: live quotation cart ─────────────────────────────────── */}
+      <aside className="qd2-cart">
+        <LiveQuotation />
+      </aside>
     </div>
   );
 }

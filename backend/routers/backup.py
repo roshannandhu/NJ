@@ -369,3 +369,62 @@ async def restore_file(file: UploadFile = File(...), mode: str = Form("merge")):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Restore failed: {e}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Intelligent recovery — scan a backup vs the live DB, restore only what's missing
+# ════════════════════════════════════════════════════════════════════════════
+@router.get("/api/recovery/backups")
+def recovery_backups():
+    """Available backup sets across connected destinations (newest first)."""
+    return {"backups": backup_service.list_backup_sets()}
+
+
+@router.get("/api/recovery/scan")
+def recovery_scan(backup: str = ""):
+    """Compare a backup (newest if none given) against the live DB."""
+    try:
+        return backup_service.analyze(backup or None)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scan failed: {e}")
+
+
+@router.get("/api/recovery/last")
+def recovery_last():
+    """Cached summary from the last scan (or null)."""
+    return backup_service.get_state().get("last_scan")
+
+
+@router.post("/api/recovery/recover")
+def recovery_recover(body: dict = Body(...)):
+    """Restore only the selected records/files from a backup set."""
+    backup = body.get("backup")
+    selection = body.get("selection") or {}
+    if not backup:
+        raise HTTPException(status_code=400, detail="backup path is required")
+    try:
+        return backup_service.recover(backup, selection)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recovery failed: {e}")
+
+
+@router.get("/api/recovery/report")
+def recovery_report(backup: str = ""):
+    """Download the full recovery report as a JSON attachment."""
+    try:
+        report = backup_service.analyze(backup or None)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scan failed: {e}")
+    from datetime import datetime
+    fname = f"NJ_Recovery_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    return Response(
+        content=json.dumps(report, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )

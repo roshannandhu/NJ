@@ -1,8 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { Minus, Plus, Trash2 } from 'lucide-react';
+import { Minus, Plus, Trash2, ShieldCheck, FileText } from 'lucide-react';
 import NumberField from './NumberField';
-
 export default function LiveQuotation() {
   const {
     cart,
@@ -13,6 +12,7 @@ export default function LiveQuotation() {
     setCustomer,
     setCurrentView,
     data,
+    setGenerateIntent,
   } = useAppContext();
 
   const [isPulsing, setIsPulsing] = React.useState(false);
@@ -25,11 +25,16 @@ export default function LiveQuotation() {
     prevCartLength.current = cart.length;
   }, [cart.length]);
 
-  const handleGenerate = () => {
+  // Every action routes THROUGH the Checkout page: pick what to produce
+  // ('quote' | 'both' | 'warranty') and review/finalize there. Nothing is
+  // generated directly from the desk.
+  const goCheckout = (intent) => {
     if (!customer.name) {
-      alert("Please enter Customer Name before generating the quotation.");
+      alert("Please enter Customer Name before continuing.");
       return;
     }
+    if (cart.length === 0) return;
+    setGenerateIntent(intent);
     setCurrentView('checkout');
   };
 
@@ -108,19 +113,55 @@ export default function LiveQuotation() {
             <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 600, color: 'var(--ink)' }}>{cur}{grandTotal.toFixed(2)}</span>
           </div>
 
-          <button 
-            className="btn-primary"
-            onClick={handleGenerate} 
-            disabled={cart.length === 0}
-            style={{ 
-              width: '100%', padding: '16px', fontSize: '15px', 
-              background: 'var(--accent)', color: 'var(--surface)',
-              opacity: cart.length === 0 ? 0.5 : 1, cursor: cart.length === 0 ? 'not-allowed' : 'pointer',
-              boxShadow: cart.length === 0 ? 'none' : 'var(--shadow-glow)'
-            }}
-          >
-            Generate Quotation →
-          </button>
+          {(() => {
+            const disabled = cart.length === 0;
+            const greenBtn = {
+              width: '100%', marginTop: '10px', padding: '13px', fontSize: '14px', fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              background: 'transparent', color: '#15803d', border: '1.5px solid #15803d',
+              borderRadius: 'var(--radius)',
+              opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
+            };
+            return (
+              <>
+                {/* Quotation + warranty together (primary) — review in Checkout */}
+                <button
+                  className="btn-primary"
+                  onClick={() => goCheckout('both')}
+                  disabled={disabled}
+                  title="Review in Checkout, then generate the quotation and its warranty certificate(s)"
+                  style={{
+                    width: '100%', padding: '16px', fontSize: '15px',
+                    background: 'var(--accent)', color: 'var(--surface)',
+                    opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer',
+                    boxShadow: disabled ? 'none' : 'var(--shadow-glow)'
+                  }}
+                >
+                  Generate Quot + Warranty →
+                </button>
+
+                {/* Warranty only — review in Checkout, then issue the certificate */}
+                <button
+                  onClick={() => goCheckout('warranty')}
+                  disabled={disabled}
+                  title="Review in Checkout, then create a warranty certificate (no quotation)"
+                  style={greenBtn}
+                >
+                  <ShieldCheck size={16} /> Warranty Only
+                </button>
+
+                {/* Quotation only — review in Checkout, then generate the quotation */}
+                <button
+                  onClick={() => goCheckout('quote')}
+                  disabled={disabled}
+                  title="Review in Checkout, then generate just the quotation (no warranty)"
+                  style={greenBtn}
+                >
+                  <FileText size={16} /> Quotation
+                </button>
+              </>
+            );
+          })()}
         </div>
       </div>
   );

@@ -41,6 +41,10 @@ export async function createQuotation(q) {
   return req("/api/quotations", { method: "POST", body: JSON.stringify(q) });
 }
 
+export async function deleteQuotation(qid) {
+  return req(`/api/quotations/${encodeURIComponent(qid)}`, { method: "DELETE" });
+}
+
 export async function clearQuotations() {
   return req("/api/quotations", { method: "DELETE" });
 }
@@ -250,4 +254,21 @@ export async function listBackupFiles() {
 
 export async function restoreFromPath(path, mode = "merge") {
   return req("/api/backup/restore-path", { method: "POST", body: JSON.stringify({ path, mode }) });
+}
+
+// ── Intelligent recovery (scan a backup vs the live DB, restore only what's missing) ──
+export async function recoveryBackups() {
+  return req("/api/recovery/backups");
+}
+export async function recoveryScan(backupPath) {
+  return req(`/api/recovery/scan${backupPath ? `?backup=${encodeURIComponent(backupPath)}` : ""}`);
+}
+export async function recoveryLast() {
+  return req("/api/recovery/last");
+}
+export async function recoveryRecover(backup, selection) {
+  return req("/api/recovery/recover", { method: "POST", body: JSON.stringify({ backup, selection }) });
+}
+export function recoveryReportUrl(backupPath) {
+  return `${BASE}/api/recovery/report${backupPath ? `?backup=${encodeURIComponent(backupPath)}` : ""}`;
 }

@@ -47,6 +47,12 @@ export function AppProvider({ children }) {
   // in QuotationDocument / reset in WarrantyDocument).
   const [activeQuotationId, setActiveQuotationId] = useState(null);
 
+  // What the Checkout's Finalize button should produce, chosen on the Quotation
+  // Desk: 'quote' (quotation only), 'both' (quotation + warranty), or
+  // 'warranty' (standalone warranty only). Every Desk action routes THROUGH
+  // Checkout; this carries the chosen intent there.
+  const [generateIntent, setGenerateIntent] = useState('quote');
+
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
   const [backupStatus, setBackupStatus] = useState(null);
@@ -209,6 +215,8 @@ export function AppProvider({ children }) {
     setActiveQuotation(q);
     setActiveQuotationId(q.id || null);
     setActiveTab('quotation');
+    // Editing an existing quotation is always a plain quotation finalize.
+    setGenerateIntent('quote');
     setCurrentView('checkout');
   };
 
@@ -224,6 +232,7 @@ export function AppProvider({ children }) {
     data, setData, persistConfig,
     activeQuotation, setActiveQuotation,
     activeQuotationId, setActiveQuotationId,
+    generateIntent, setGenerateIntent,
     activeWarranty,  setActiveWarranty,
     activeTab, setActiveTab,
     backendOffline,

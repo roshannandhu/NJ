@@ -17,49 +17,80 @@ export function warrantyFileName(doc, customerName) {
   return `NJ_Warranty_${safe(doc?.warrantyNo || doc?.id || 'NJ-W-0001')}_${safe(customerName || 'Customer')}.pdf`;
 }
 
-// Capture a DOM element into a PDF File. Warranty docs are auto-fitted to one A4
-// page (multiPage=false); the quotation sheet can be tall (multiPage=true).
-export async function elementToPdfFile(el, filename, { multiPage = false } = {}) {
-  const prevTransform = el.style.transform;
-  const prevTransformOrigin = el.style.transformOrigin;
-  el.style.transform = 'none';
-  el.style.transformOrigin = 'unset';
-
-  const canvas = await window.html2canvas(el, { 
-    scale: 2, 
-    useCORS: true, 
-    backgroundColor: '#ffffff', 
-    logging: false,
-    windowWidth: el.scrollWidth,
-    windowHeight: el.scrollHeight
-  });
-
-  el.style.transform = prevTransform;
-  el.style.transformOrigin = prevTransformOrigin;
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF('p', 'mm', 'a4');
-  const pw = pdf.internal.pageSize.getWidth();
-  const ph = pdf.internal.pageSize.getHeight();
-  if (multiPage) {
-    const fullH = (canvas.height * pw) / canvas.width;
-    if (fullH > ph) {
-      const pageH = (ph * canvas.width) / pw;
-      let y = 0;
-      while (y < canvas.height) {
-        if (y > 0) pdf.addPage();
-        const c2 = document.createElement('canvas');
-        c2.width = canvas.width;
-        c2.height = Math.min(pageH, canvas.height - y);
-        c2.getContext('2d').drawImage(canvas, 0, y, c2.width, c2.height, 0, 0, c2.width, c2.height);
-        pdf.addImage(c2.toDataURL('image/png'), 'PNG', 0, 0, pw, (c2.height * pw) / canvas.width);
-        y += pageH;
-      }
-    } else {
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pw, fullH);
+// Neutralise the on-screen fit-scale before a capture. The quotation sheet is
+// scaled via an inline transform on the element itself; the warranty certificate
+// is scaled via an inline transform on a CHILD (so it can fit the preview pane).
+// Both must render at natural full size for the export, or the shared/downloaded
+// PDF bakes in the preview shrink and looks compressed. We reset every inline
+// transform within the captured subtree (only inline ones — CSS-class transforms
+// on icons etc. are left alone) and revert any inline width the fit logic forced,
+// then restore everything afterwards so the on-screen view is untouched.
+function neutralizeScale(el) {
+  const saved = [];
+  const apply = (node) => {
+    const t = node.style && node.style.transform;
+    if (t && t !== 'none') {
+      saved.push({ node, transform: t, origin: node.style.transformOrigin, width: node.style.width });
+      node.style.transform = 'none';
+      node.style.transformOrigin = 'top left';
+      node.style.width = '';
     }
-  } else {
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pw, ph);
+  };
+  apply(el);
+  el.querySelectorAll('[style*="transform"]').forEach(apply);
+  return saved;
+}
+function restoreScale(saved) {
+  for (const s of saved) {
+    s.node.style.transform = s.transform;
+    s.node.style.transformOrigin = s.origin;
+    s.node.style.width = s.width;
   }
+}
+
+// ── ONE PDF engine for everything ───────────────────────────────────────────
+// Preview, Download, Print and Share must all produce the SAME document. The NJ
+// quotation and warranty are designed as single A4 pages (the quotation uses
+// density tiers, the warranty an auto-fit layout). This generator captures the
+// element at natural size and lays it out on EXACTLY ONE A4 page: full width when
+// it fits, or scaled down to fit (aspect preserved, centred) if it would slightly
+// overflow — so it never spills a sliver onto an unwanted second page.
+export async function elementToPdf(el) {
+  const saved = neutralizeScale(el);
+  void el.offsetHeight; // force a synchronous reflow so the capture sees full size
+  try {
+    const canvas = await window.html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      windowWidth: el.scrollWidth,
+      windowHeight: el.scrollHeight,
+    });
+    if (!canvas.width || !canvas.height) throw new Error('Empty capture');
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pw = pdf.internal.pageSize.getWidth();   // 210mm
+    const ph = pdf.internal.pageSize.getHeight();  // 297mm
+
+    // Fit to a single page: full width if it fits, else scale down to the page
+    // height keeping aspect ratio, and centre horizontally.
+    const fullH = (canvas.height * pw) / canvas.width;
+    const s = fullH > ph ? ph / fullH : 1;
+    const imgW = pw * s;
+    const imgH = fullH * s;
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - imgW) / 2, 0, imgW, imgH);
+    return pdf;
+  } finally {
+    restoreScale(saved);
+  }
+}
+
+// Capture a DOM element into a PDF File for sharing — wraps the one engine above
+// so Share is byte-for-byte the same document as Download.
+export async function elementToPdfFile(el, filename) {
+  const pdf = await elementToPdf(el);
   return new File([pdf.output('blob')], filename, { type: 'application/pdf', lastModified: Date.now() });
 }
 

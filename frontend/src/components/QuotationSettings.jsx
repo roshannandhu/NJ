@@ -3,7 +3,7 @@ import { useAppContext } from '../AppContext';
 import {
   DollarSign, FileText, Sliders, ChevronDown, ChevronUp,
   CheckCircle, AlertCircle, Info, Edit3, Tag, Layers,
-  ToggleLeft, ToggleRight, Save, Image as ImageIcon, X, Trash2
+  ToggleLeft, ToggleRight, Save, Image as ImageIcon, X, Trash2, Star
 } from 'lucide-react';
 
 // ─── Default per-class Terms from the original NJ PDFs ───────────────────────
@@ -70,28 +70,30 @@ const DEFAULT_CLASS_SPECS = {
 };
 
 // Section helper component
-function Section({ icon, title, subtitle, children, accent = '#0284C7' }) {
+function Section({ icon, title, subtitle, children }) {
+  // Unified premium card — one terracotta accent for every section.
   return (
     <div style={{
       background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
-      border: '1px solid var(--line)', overflow: 'hidden', marginBottom: '24px',
+      border: '1px solid var(--line)', overflow: 'hidden', marginBottom: '22px',
+      boxShadow: 'var(--shadow-sm)',
     }}>
       <div style={{
-        padding: '20px 28px', borderBottom: '1px solid var(--line)',
-        display: 'flex', alignItems: 'center', gap: '14px',
-        background: `linear-gradient(90deg, ${accent}08, transparent)`,
+        padding: '18px 24px', borderBottom: '1px solid var(--line-soft)',
+        display: 'flex', alignItems: 'center', gap: '13px',
+        background: 'linear-gradient(90deg, var(--accent-soft), transparent 70%)',
       }}>
         <div style={{
-          width: '40px', height: '40px', borderRadius: '10px',
-          background: `${accent}18`, color: accent,
+          width: '38px', height: '38px', borderRadius: '10px',
+          background: 'var(--surface)', border: '1px solid var(--line)', color: 'var(--accent)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}>{icon}</div>
         <div>
-          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>{title}</div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--ink)' }}>{title}</div>
           {subtitle && <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>{subtitle}</div>}
         </div>
       </div>
-      <div style={{ padding: '28px' }}>{children}</div>
+      <div style={{ padding: '24px' }}>{children}</div>
     </div>
   );
 }
@@ -201,7 +203,7 @@ function ClassDescriptionBlock({ label, color, specValue, onSpecChange }) {
 }
 
 // A single editable bank-account card (CHANGE 4).
-function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage }) {
+function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onSetDefault }) {
   const fieldStyle = {
     padding: '10px 12px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)',
     fontSize: '13px', background: 'var(--bg)', color: 'var(--ink)', width: '100%',
@@ -258,7 +260,7 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage }) {
         padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Tag size={15} color="#7C3AED" />
+          <Tag size={15} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>
             {bank.bankName || `Bank ${index + 1}`}
           </span>
@@ -299,9 +301,20 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage }) {
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', marginTop: '18px', flexWrap: 'wrap' }}>
           {renderImageSlot('logo', 'Bank Logo')}
           {renderImageSlot('qr', 'QR Image (optional)')}
+          {/* Default account — preselected at checkout. Only one bank is default. */}
+          <button
+            type="button"
+            onClick={() => onSetDefault()}
+            disabled={bank.default}
+            title={bank.default ? 'This is the default bank' : 'Use this bank by default on new quotations'}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: bank.default ? 'default' : 'pointer', marginLeft: 'auto', paddingBottom: '4px', background: 'transparent', border: 'none', fontWeight: 700, fontSize: '12.5px', color: bank.default ? 'var(--accent)' : 'var(--ink-soft)' }}
+          >
+            <Star size={16} fill={bank.default ? 'var(--accent)' : 'none'} color={bank.default ? 'var(--accent)' : 'var(--ink-soft)'} strokeWidth={2} />
+            {bank.default ? 'Default' : 'Set default'}
+          </button>
           <div
             onClick={() => onChange('active', !bank.active)}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginLeft: 'auto', paddingBottom: '4px' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', paddingBottom: '4px' }}
           >
             {bank.active
               ? <ToggleRight size={28} color="var(--accent)" strokeWidth={2} />
@@ -446,6 +459,9 @@ export default function QuotationSettings() {
   const updateBank = (id, field, value) =>
     setBanks(prev => prev.map(b => (b.id === id ? { ...b, [field]: value } : b)));
   const removeBank = (id) => setBanks(prev => prev.filter(b => b.id !== id));
+  // Mark one bank as the default (preselected at checkout). Exactly one default.
+  const setDefaultBank = (id) =>
+    setBanks(prev => prev.map(b => ({ ...b, default: b.id === id })));
   const moveBank = (id, dir) => setBanks(prev => {
     const i = prev.findIndex(b => b.id === id);
     const j = i + dir;
@@ -713,7 +729,7 @@ export default function QuotationSettings() {
               <button
                 onClick={() => setSettings(s => ({ ...s, commonTerms: DEFAULT_CLASS_TERMS.default }))}
                 style={{
-                  background: 'none', border: 'none', color: '#0284C7', fontSize: '11px',
+                  background: 'none', border: 'none', color: 'var(--accent)', fontSize: '11px',
                   fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: '2px 4px',
                 }}
               >
@@ -763,6 +779,7 @@ export default function QuotationSettings() {
               onRemove={() => removeBank(bank.id)}
               onMove={(dir) => moveBank(bank.id, dir)}
               onImage={(field, e) => handleBankImageUpload(bank.id, field, e)}
+              onSetDefault={() => setDefaultBank(bank.id)}
             />
           ))}
 
@@ -772,7 +789,7 @@ export default function QuotationSettings() {
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
               padding: '14px', border: '1.5px dashed var(--line)', borderRadius: 'var(--radius)',
-              background: 'var(--bg)', color: '#7C3AED', fontSize: '13px', fontWeight: 700,
+              background: 'var(--bg)', color: 'var(--accent)', fontSize: '13px', fontWeight: 700,
               cursor: 'pointer',
             }}
           >
@@ -792,10 +809,10 @@ export default function QuotationSettings() {
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: '12px',
           padding: '14px 18px', marginBottom: '20px',
-          background: '#0284C710', border: '1px solid #0284C730',
+          background: 'var(--accent-soft)', border: '1px solid var(--line)',
           borderRadius: 'var(--radius)', fontSize: '13px', color: 'var(--ink)',
         }}>
-          <Info size={16} color="#0284C7" style={{ flexShrink: 0, marginTop: '1px' }} />
+          <Info size={16} color="var(--accent)" style={{ flexShrink: 0, marginTop: '1px' }} />
           <div>
             <strong>How it works:</strong> Every product class below — including any class you add in
             <em> Products &amp; Catalog</em> — has its own Class Description. When a quotation is generated,
@@ -843,7 +860,7 @@ export default function QuotationSettings() {
           style={{
             display: 'flex', alignItems: 'center', gap: '10px',
             padding: '16px 36px', fontSize: '15px', fontWeight: 700,
-            background: saved ? '#059669' : 'var(--ink)',
+            background: saved ? 'var(--green)' : 'var(--accent)',
             color: 'white', border: 'none',
             borderRadius: 'var(--radius-full)', cursor: 'pointer',
             boxShadow: '0 8px 24px rgba(0,0,0,0.18)',

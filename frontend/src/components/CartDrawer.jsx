@@ -4,7 +4,7 @@ import { X, Minus, Plus, Trash2 } from 'lucide-react';
 import NumberField from './NumberField';
 
 export default function CartDrawer() {
-  const { cart, cartOpen, setCartOpen, updateCartQty, removeFromCart, cartTotal, customer, setCurrentView, data } = useAppContext();
+  const { cart, cartOpen, setCartOpen, updateCartQty, removeFromCart, cartTotal, customer, setCurrentView, setGenerateIntent, data } = useAppContext();
   const cur = data?.settings?.currencySymbol || '₹';
 
   const handleGenerate = () => {
@@ -12,6 +12,7 @@ export default function CartDrawer() {
       alert("Please enter Customer Name on the home page before checkout.");
       return;
     }
+    setGenerateIntent?.('quote'); // plain quotation finalize (avoid a stale Desk intent)
     setCartOpen(false);
     setCurrentView('checkout');
   };

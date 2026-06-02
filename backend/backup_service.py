@@ -18,6 +18,7 @@ A backup "set" is three files sharing a timestamp stem:
 """
 
 import json
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -80,7 +81,11 @@ def default_state():
         "targets": {
             "local": {"enabled": True, "path": str(default_local_dir())},
             "gdrive": {"enabled": False, "path": ""},
+            "onedrive": {"enabled": False, "path": ""},
+            "dropbox": {"enabled": False, "path": ""},
             "usb": {"enabled": False, "path": ""},
+            "nas": {"enabled": False, "path": ""},
+            "network": {"enabled": False, "path": ""},
         },
         "keep": KEEP_DEFAULT,
         "interval_days": INTERVAL_DAYS_DEFAULT,
@@ -712,6 +717,395 @@ def restore_catalog_payload(payload, mode="merge"):
         db.close()
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  Intelligent recovery — compare a backup set against the live DB and restore
+#  ONLY what's missing (never deletes, never auto-overwrites). Reuses the backup
+#  .json (config + all quotations + all warranties), .manifest.json (sha256) and
+#  .uploads.zip already produced by make_backup().
+# ════════════════════════════════════════════════════════════════════════════
+_UPLOAD_REF_RE = re.compile(r"/uploads/([^\"'\s)\\]+)")
+
+
+def _record_hash(obj):
+    """Stable fingerprint of a record's data so identical records compare equal."""
+    try:
+        return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    except Exception:
+        return hashlib.sha256(repr(obj).encode("utf-8")).hexdigest()
+
+
+def _backup_jsons_in(path):
+    """Newest-first list of backup .json files in a directory (excludes manifests)."""
+    try:
+        files = [f for f in Path(path).glob(PREFIX + "*.json") if not f.name.endswith(".manifest.json")]
+        return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
+    except Exception:
+        return []
+
+
+def list_backup_sets(limit_per_target=10):
+    """Every available backup set across enabled+reachable targets, newest first.
+    Each set: {target, json_path, uploads_zip_path, created_iso, sha, counts, size_bytes}."""
+    state = get_state()
+    sets = []
+    for name, cfg in state["targets"].items():
+        if not cfg.get("enabled"):
+            continue
+        path = cfg.get("path") or ""
+        if not path:
+            continue
+        ok, _ = _target_dir_ok(path)
+        if not ok:
+            continue
+        for jf in _backup_jsons_in(path)[:limit_per_target]:
+            stem = jf.name[:-5]  # strip ".json"
+            man = jf.parent / (stem + ".manifest.json")
+            up = jf.parent / (stem + ".uploads.zip")
+            sha = None
+            counts = {}
+            created = None
+            if man.exists():
+                try:
+                    m = json.loads(man.read_text(encoding="utf-8"))
+                    sha = (m.get("sha256") or {}).get("json")
+                    counts = m.get("rows") or {}
+                    created = m.get("created_iso")
+                except Exception:
+                    pass
+            if not sha:
+                try:
+                    sha = _sha256(jf)
+                except Exception:
+                    sha = None
+            if not created:
+                created = datetime.fromtimestamp(jf.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+            sets.append({
+                "target": name,
+                "json_path": str(jf),
+                "uploads_zip_path": str(up) if up.exists() else None,
+                "created_iso": created,
+                "sha": sha,
+                "counts": counts,
+                "size_bytes": jf.stat().st_size,
+            })
+    sets.sort(key=lambda s: s.get("created_iso") or "", reverse=True)
+    return sets
+
+
+def _targets_status():
+    state = get_state()
+    out = {}
+    for name, cfg in state["targets"].items():
+        path = cfg.get("path", "")
+        avail, msg = (_target_dir_ok(path) if path else (False, "no path set"))
+        latest = None
+        if avail:
+            js = _backup_jsons_in(path)
+            if js:
+                latest = datetime.fromtimestamp(js[0].stat().st_mtime).astimezone().isoformat(timespec="seconds")
+        out[name] = {"enabled": bool(cfg.get("enabled")), "path": path,
+                     "available": avail, "message": msg, "latest_backup_iso": latest}
+    return out
+
+
+def _load_backup_payload(json_path):
+    payload = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Backup file is not a valid backup payload")
+    return payload
+
+
+def _referenced_image_names(*objs):
+    names = set()
+    for o in objs:
+        try:
+            s = json.dumps(o)
+        except Exception:
+            continue
+        for m in _UPLOAD_REF_RE.findall(s):
+            names.add(Path(m).name)
+    return names
+
+
+def _cache_scan(report):
+    try:
+        with _state_lock:
+            state = get_state()
+            state["last_scan"] = {
+                "scanned_iso": report.get("scanned_iso"),
+                "source": report.get("source"),
+                "summary": report.get("summary"),
+                "corruption": report.get("corruption"),
+            }
+            set_state(state)
+    except Exception:
+        pass
+
+
+def analyze(backup_json_path=None, cap=500):
+    """Compare a backup set against the live DB. Returns a recovery report and
+    caches a summary. No DB writes."""
+    sets = list_backup_sets()
+    chosen = None
+    if backup_json_path:
+        chosen = next((s for s in sets if s["json_path"] == backup_json_path), None)
+        if not chosen and Path(backup_json_path).exists():
+            p = Path(backup_json_path)
+            stem = p.name[:-5]
+            up = p.parent / (stem + ".uploads.zip")
+            chosen = {"target": "(file)", "json_path": str(p),
+                      "uploads_zip_path": str(up) if up.exists() else None,
+                      "created_iso": None, "sha": _sha256(p), "counts": {}}
+    else:
+        chosen = sets[0] if sets else None
+
+    if not chosen:
+        rep = {"ok": False, "error": "No backup found on any connected destination.",
+               "scanned_iso": _now_iso(), "targets_status": _targets_status()}
+        return rep
+
+    payload = _load_backup_payload(chosen["json_path"])
+    bq = {q.get("id"): q for q in (payload.get("quotations") or []) if isinstance(q, dict) and q.get("id")}
+    bw = {w.get("id"): w for w in (payload.get("warranty_certificates") or []) if isinstance(w, dict) and w.get("id")}
+    bcfg = payload.get("config") or {}
+
+    db = SessionLocal()
+    try:
+        cq = {r.id: json.loads(r.data) for r in db.query(Quotation).all()}
+        cw = {r.id: json.loads(r.data) for r in db.query(WarrantyCertificate).all()}
+        cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
+        ccfg = json.loads(cfg_row.data) if (cfg_row and cfg_row.data) else {}
+    finally:
+        db.close()
+
+    def diff(bmap, cmap, summ):
+        missing, conflict, local_only = [], [], 0
+        for id_, obj in bmap.items():
+            if id_ not in cmap:
+                missing.append(summ(id_, obj))
+            elif _record_hash(obj) != _record_hash(cmap[id_]):
+                conflict.append(summ(id_, obj))
+        local_only = sum(1 for id_ in cmap if id_ not in bmap)
+        return missing, conflict, local_only
+
+    qsumm = lambda i, o: {"id": i, "customer": (o.get("customer") or {}).get("name", ""), "date": o.get("date", ""), "grandTotal": o.get("grandTotal", 0)}
+    wsumm = lambda i, o: {"id": i, "warrantyNo": o.get("warrantyNo", i), "customer": (o.get("customer") or {}).get("name", ""), "quotationId": o.get("quotationId", ""), "date": o.get("date", "")}
+    mq, cfq, loq = diff(bq, cq, qsumm)
+    mw, cfw, low = diff(bw, cw, wsumm)
+
+    missing_config, conflict_config = {}, {}
+    for key in _CONFIG_LIST_KEYS:
+        bl = {it.get("id"): it for it in (bcfg.get(key) or []) if isinstance(it, dict) and it.get("id")}
+        cl = {it.get("id"): it for it in (ccfg.get(key) or []) if isinstance(it, dict) and it.get("id")}
+        miss = [{"id": i, "name": it.get("name") or it.get("title") or i} for i, it in bl.items() if i not in cl]
+        conf = [{"id": i, "name": it.get("name") or it.get("title") or i} for i, it in bl.items() if i in cl and _record_hash(it) != _record_hash(cl[i])]
+        if miss:
+            missing_config[key] = miss
+        if conf:
+            conflict_config[key] = conf
+    scalar_conflicts = [sc for sc in ("company", "settings") if sc in bcfg and _record_hash(bcfg.get(sc) or {}) != _record_hash(ccfg.get(sc) or {})]
+
+    backup_names = set()
+    upz = chosen.get("uploads_zip_path")
+    if upz and Path(upz).exists():
+        try:
+            with zipfile.ZipFile(upz) as zf:
+                backup_names = {Path(n).name for n in zf.namelist() if not n.endswith("/")}
+        except Exception:
+            pass
+    try:
+        current_names = {f.name for f in UPLOADS_DIR.iterdir() if f.is_file()}
+    except Exception:
+        current_names = set()
+    missing_images = sorted(backup_names - current_names)
+    referenced = _referenced_image_names(bcfg, ccfg, list(cq.values()), list(cw.values()))
+    unrecoverable_images = sorted(n for n in referenced if n not in current_names and n not in backup_names)
+
+    try:
+        integrity = _verify_db_integrity(DB_PATH)
+    except Exception as e:
+        integrity = f"error: {type(e).__name__}: {e}"
+
+    report = {
+        "ok": True,
+        "scanned_iso": _now_iso(),
+        "source": {"target": chosen["target"], "file": chosen["json_path"],
+                   "created_iso": chosen.get("created_iso"), "sha": chosen.get("sha"),
+                   "uploads_zip": upz, "counts": chosen.get("counts") or {}},
+        "summary": {
+            "missing_quotations": len(mq), "missing_warranties": len(mw),
+            "conflict_quotations": len(cfq), "conflict_warranties": len(cfw),
+            "missing_config": sum(len(v) for v in missing_config.values()),
+            "conflict_config": sum(len(v) for v in conflict_config.values()),
+            "missing_images": len(missing_images),
+            "unrecoverable_images": len(unrecoverable_images),
+            "local_only_quotations": loq, "local_only_warranties": low,
+            "scalar_conflicts": scalar_conflicts,
+        },
+        "lists": {
+            "missing_quotations": mq[:cap], "missing_warranties": mw[:cap],
+            "conflict_quotations": cfq[:cap], "conflict_warranties": cfw[:cap],
+            "missing_config": missing_config, "conflict_config": conflict_config,
+            "missing_images": missing_images[:cap], "unrecoverable_images": unrecoverable_images[:cap],
+            "all_missing_quotation_ids": [m["id"] for m in mq],
+            "all_missing_warranty_ids": [m["id"] for m in mw],
+        },
+        "corruption": {"db_integrity": integrity, "ok": (integrity == "ok"),
+                       "unrecoverable_images": unrecoverable_images[:cap]},
+        "targets_status": _targets_status(),
+    }
+    _cache_scan(report)
+    return report
+
+
+def recover(backup_json_path, selection):
+    """Restore ONLY the selected records/files from a backup set. Adds missing
+    records; updates a record only if its id is in the matching overwrite list.
+    Never deletes. Snapshots the live DB first."""
+    payload = _load_backup_payload(backup_json_path)
+    bq = {q.get("id"): q for q in (payload.get("quotations") or []) if isinstance(q, dict) and q.get("id")}
+    bw = {w.get("id"): w for w in (payload.get("warranty_certificates") or []) if isinstance(w, dict) and w.get("id")}
+    bcfg = payload.get("config") or {}
+    sel = selection or {}
+    q_ids = set(sel.get("quotation_ids") or [])
+    w_ids = set(sel.get("warranty_ids") or [])
+    ow_q = set(sel.get("overwrite_quotation_ids") or [])
+    ow_w = set(sel.get("overwrite_warranty_ids") or [])
+    cfg_sel = sel.get("config_items") or {}
+    ow_cfg = set(sel.get("overwrite_config_item_ids") or [])
+    images = set(sel.get("images") or [])
+    ow_images = set(sel.get("overwrite_images") or [])
+
+    snap = snapshot_pre_restore()
+    applied = {"quotations": {"added": 0, "updated": 0}, "warranties": {"added": 0, "updated": 0}, "config_items": 0, "images": 0}
+
+    db = SessionLocal()
+    try:
+        existing_q = {r.id: r for r in db.query(Quotation).all()}
+        for qid in (q_ids | ow_q):
+            q = bq.get(qid)
+            if not q:
+                continue
+            row = existing_q.get(qid)
+            if row is None:
+                if qid not in q_ids:
+                    continue
+                db.add(Quotation(id=qid, customer_name=(q.get("customer") or {}).get("name", ""),
+                                 grand_total=q.get("grandTotal", 0), date=q.get("date", ""), data=json.dumps(q)))
+                applied["quotations"]["added"] += 1
+            elif qid in ow_q:
+                row.customer_name = (q.get("customer") or {}).get("name", "")
+                row.grand_total = q.get("grandTotal", 0)
+                row.date = q.get("date", "")
+                row.data = json.dumps(q)
+                applied["quotations"]["updated"] += 1
+
+        existing_w = {r.id: r for r in db.query(WarrantyCertificate).all()}
+        for wid in (w_ids | ow_w):
+            w = bw.get(wid)
+            if not w:
+                continue
+            row = existing_w.get(wid)
+            if row is None:
+                if wid not in w_ids:
+                    continue
+                db.add(WarrantyCertificate(id=wid, quotation_id=w.get("quotationId", ""),
+                                           customer_name=(w.get("customer") or {}).get("name", ""),
+                                           date=w.get("date", ""), data=json.dumps(w)))
+                applied["warranties"]["added"] += 1
+            elif wid in ow_w:
+                row.quotation_id = w.get("quotationId", "")
+                row.customer_name = (w.get("customer") or {}).get("name", "")
+                row.date = w.get("date", "")
+                row.data = json.dumps(w)
+                applied["warranties"]["updated"] += 1
+
+        if any(cfg_sel.get(k) for k in _CONFIG_LIST_KEYS):
+            cfg_row = db.query(AppConfig).filter(AppConfig.id == 1).first()
+            if cfg_row is None:
+                cfg_row = AppConfig(id=1, data="{}")
+                db.add(cfg_row)
+            cur = json.loads(cfg_row.data) if cfg_row.data else {}
+            for key in _CONFIG_LIST_KEYS:
+                want = set(cfg_sel.get(key) or [])
+                if not want:
+                    continue
+                bl = {it.get("id"): it for it in (bcfg.get(key) or []) if isinstance(it, dict) and it.get("id")}
+                order = list(cur.get(key) or [])
+                have = {x.get("id") for x in order if isinstance(x, dict) and x.get("id")}
+                for id_ in want:
+                    it = bl.get(id_)
+                    if not it:
+                        continue
+                    if id_ not in have:
+                        order.append(it)
+                        applied["config_items"] += 1
+                    elif id_ in ow_cfg:
+                        for i, x in enumerate(order):
+                            if isinstance(x, dict) and x.get("id") == id_:
+                                order[i] = it
+                                break
+                        applied["config_items"] += 1
+                cur[key] = order
+            cfg_row.data = json.dumps(cur)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if images:
+        upz = sel.get("uploads_zip_path")
+        if not upz:
+            stem = Path(backup_json_path).name[:-5]
+            upz = str(Path(backup_json_path).parent / (stem + ".uploads.zip"))
+        if upz and Path(upz).exists():
+            UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                cur_names = {f.name for f in UPLOADS_DIR.iterdir() if f.is_file()}
+            except Exception:
+                cur_names = set()
+            with zipfile.ZipFile(upz) as zf:
+                by_base = {Path(n).name: n for n in zf.namelist() if not n.endswith("/")}
+                for nm in images:
+                    if nm in cur_names and nm not in ow_images:
+                        continue
+                    src = by_base.get(nm)
+                    if not src:
+                        continue
+                    try:
+                        (UPLOADS_DIR / nm).write_bytes(zf.read(src))
+                        applied["images"] += 1
+                    except Exception:
+                        pass
+
+    try:
+        with _state_lock:
+            st = get_state()
+            st.pop("last_scan", None)
+            set_state(st)
+    except Exception:
+        pass
+    return {"status": "recovered", "applied": applied, "pre_restore_snapshot": snap}
+
+
+def _recovery_scan_if_changed():
+    """Background hook: rescan only when the newest backup differs from the last
+    cached scan (so a freshly synced/connected destination is auto-analysed)."""
+    try:
+        sets = list_backup_sets()
+        if not sets:
+            return
+        newest = sets[0]
+        last_sha = ((get_state().get("last_scan") or {}).get("source") or {}).get("sha")
+        if last_sha != newest.get("sha"):
+            analyze(newest["json_path"])
+    except Exception:
+        pass
+
+
 # ── status / health for the UI ───────────────────────────────────────────────
 def _days_since(iso):
     if not iso:
@@ -831,6 +1225,8 @@ def _scheduler_loop():
                 make_backup_safe("daily")
         except Exception:
             pass
+        # Auto-analyse the newest backup when a destination is freshly synced/connected.
+        _recovery_scan_if_changed()
         _scheduler_stop.wait(SCHEDULER_CHECK_SECONDS)
 
 

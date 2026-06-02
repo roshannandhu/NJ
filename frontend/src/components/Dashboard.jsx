@@ -244,8 +244,20 @@ export default function Dashboard() {
   } = useAppContext();
 
   const [prefs, setPrefs] = React.useState(loadPreferences);
-  const quotations = React.useMemo(() => data.quotations || [], [data.quotations]);
-  const warranties = React.useMemo(() => data.warranty_certificates || [], [data.warranty_certificates]);
+  // Exclude hidden warranty-only backing quotations, and dedupe by id so a record
+  // never counts/shows twice (id uniquely identifies a record).
+  const dedupeBy = (arr, keyOf) => {
+    const seen = new Set();
+    return (arr || []).filter(r => { const k = keyOf(r); if (seen.has(k)) return false; seen.add(k); return true; });
+  };
+  const quotations = React.useMemo(
+    () => dedupeBy((data.quotations || []).filter(q => !q.warrantyOnly), q => q.id),
+    [data.quotations]
+  );
+  const warranties = React.useMemo(
+    () => dedupeBy(data.warranty_certificates || [], w => w.warrantyNo || w.id),
+    [data.warranty_certificates]
+  );
 
   React.useEffect(() => {
     try {
@@ -304,8 +316,10 @@ export default function Dashboard() {
   };
 
   const openWarranty = (warranty) => {
-    const matchingQuote = quotations.find(q => q.id === warranty.quotationId);
-    if (matchingQuote) {
+    // A standalone "Warranty Only" cert is backed by a hidden warrantyOnly
+    // quotation — open the certificate directly, never the blank backing quote.
+    const matchingQuote = (data.quotations || []).find(q => q.id === warranty.quotationId);
+    if (matchingQuote && !matchingQuote.warrantyOnly) {
       setActiveQuotation(matchingQuote);
       if (setActiveTab) setActiveTab(warranty.warrantyNo || warranty.id);
       setCurrentView('quotation_document');

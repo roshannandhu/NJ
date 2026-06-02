@@ -2,7 +2,8 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
 import { downloadWarrantyDocx, mediaUrl, createQuotation, createWarranty } from '../api';
-import { elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { elementToPdf, elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { buildWarrantyCertsForQuotation } from '../warranty';
 
 // ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
 function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
@@ -189,45 +190,10 @@ export default function QuotationDocument() {
     showToast("Generating PDF...", "info");
 
     try {
-      // Temporarily remove CSS scale so html2canvas captures the full natural size
-      const prevTransform = element.style.transform;
-      const prevTransformOrigin = element.style.transformOrigin;
-      element.style.transform = 'none';
-      element.style.transformOrigin = 'unset';
-
-      const canvas = await window.html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight,
-      });
-
-      // Restore CSS scale after capture
-      element.style.transform = prevTransform;
-      element.style.transformOrigin = prevTransformOrigin;
-
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pageW = pdf.internal.pageSize.getWidth();   // 210mm
-      const pageH = pdf.internal.pageSize.getHeight();  // 297mm
-
-      // Always scale to fit exactly one A4 page (never paginate)
-      let imgW = pageW;
-      let imgH = (canvas.height * pageW) / canvas.width;
-
-      if (imgH > pageH) {
-        // Scale down to fit within A4 height, keeping aspect ratio
-        imgH = pageH;
-        imgW = (canvas.width * pageH) / canvas.height;
-      }
-
-      // Center horizontally if imgW < pageW
-      const xOffset = (pageW - imgW) / 2;
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', xOffset, 0, imgW, imgH);
-
+      // One engine: full-size, multi-page A4 (never shrunk). Identical to Share.
+      const pdf = await elementToPdf(element);
       const r = await finishPdfSave(pdf, qName, dest);
-      showToast(r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded — single page!", "success");
+      showToast(r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded!", "success");
     } catch (error) {
       console.error("PDF download failed:", error);
       showToast("PDF generation failed.", "error");
@@ -298,6 +264,48 @@ export default function QuotationDocument() {
   const activeTabId = activeTab || 'quotation';
   const activeCert = bundledWarranties.find(w => (w.warrantyNo || w.id) === activeTabId);
 
+  // ── Create Warranty (explicit, from this quotation) ───────────────────────
+  // Warranties are only ever created from a saved quotation. This builds one
+  // certificate per applicable warranty template, skipping any that already
+  // exist (deterministic ids) so a user's edits to an existing cert are never
+  // overwritten. The quotation is already persisted, so each cert is linked.
+  const [isCreatingWarranty, setIsCreatingWarranty] = React.useState(false);
+  const applicableCerts = buildWarrantyCertsForQuotation(generatedDoc, data, settings);
+  const missingCerts = applicableCerts.filter(
+    c => !bundledWarranties.some(w => (w.id || w.warrantyNo) === c.id)
+  );
+
+  const handleCreateWarranty = async () => {
+    if (applicableCerts.length === 0) {
+      showToast('No warranty applies to these products', 'info');
+      return;
+    }
+    if (missingCerts.length === 0) {
+      // Everything already exists — just open the first one.
+      setActiveTab(bundledWarranties[0].warrantyNo || bundledWarranties[0].id);
+      showToast('Warranty already created', 'info');
+      return;
+    }
+    if (!window.confirm('Do you want to create a warranty certificate for this quotation?')) return;
+
+    setIsCreatingWarranty(true);
+    try {
+      for (const cert of missingCerts) {
+        await createWarranty(cert).catch(() => {});
+      }
+      setData(prev => ({
+        ...prev,
+        warranty_certificates: [...missingCerts, ...(prev.warranty_certificates || [])],
+      }));
+      setActiveTab(missingCerts[0].warrantyNo || missingCerts[0].id);
+      showToast(missingCerts.length > 1 ? `${missingCerts.length} warranties created` : 'Warranty created', 'success');
+    } catch {
+      showToast('Could not create warranty', 'error');
+    } finally {
+      setIsCreatingWarranty(false);
+    }
+  };
+
   // ── Share ───────────────────────────────────────────────────────────────
   const custName = generatedDoc.customer?.name || 'Customer';
   const _wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -308,7 +316,7 @@ export default function QuotationDocument() {
     try {
       let file;
       if (activeTabId === 'quotation') {
-        file = await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName), { multiPage: true });
+        file = await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName));
       } else {
         file = await elementToPdfFile(document.getElementById('warrantyDoc'), warrantyFileName(activeCert || { id: activeTabId }, custName));
       }
@@ -324,7 +332,7 @@ export default function QuotationDocument() {
     try {
       const files = [];
       setActiveTab('quotation'); await _wait(450);
-      files.push(await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName), { multiPage: true }));
+      files.push(await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName)));
       for (const w of bundledWarranties) {
         try {
           setActiveTab(w.warrantyNo || w.id); await _wait(450);
@@ -881,6 +889,10 @@ export default function QuotationDocument() {
             border: none !important; 
             background: #ffffff !important;
           }
+          /* Reset the on-screen single-page fit-scale so the quotation prints at
+             full size and flows across multiple pages (matching Download/Share). */
+          #quotationSheet { transform: none !important; margin-bottom: 0 !important; }
+          .printable-sheet tr, .printable-sheet thead { page-break-inside: avoid; }
           @page {
             size: A4;
             margin: 15mm 20mm;
@@ -967,6 +979,32 @@ export default function QuotationDocument() {
                   </div>
                 </>)}
               </div>
+
+              {/* ── Create / View Warranty ── */}
+              {bundledWarranties.length > 0 ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '0 14px', color: '#15803d', fontWeight: 700, fontSize: '14px', whiteSpace: 'nowrap' }}
+                    title={bundledWarranties.map(w => w.warrantyNo || w.id).join(', ')}>
+                    <ShieldCheck size={18} /> Warranty Created
+                  </div>
+                  <button onClick={() => setActiveTab(bundledWarranties[0].warrantyNo || bundledWarranties[0].id)} className="hover-lift"
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--accent-soft)', color: 'var(--accent-deep)', border: '1px solid var(--accent)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
+                    <ShieldCheck size={18} /> View Warranty
+                  </button>
+                  {missingCerts.length > 0 && (
+                    <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift"
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
+                      <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Remaining'}
+                    </button>
+                  )}
+                </>
+              ) : applicableCerts.length > 0 ? (
+                <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#15803d', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: isCreatingWarranty ? 'not-allowed' : 'pointer', opacity: isCreatingWarranty ? 0.7 : 1 }}>
+                  <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Warranty'}
+                </button>
+              ) : null}
+
               <button onClick={startNew} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <RotateCcw size={18} /> Start New
@@ -1122,7 +1160,8 @@ export default function QuotationDocument() {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', fontSize: D.tcFs, fontWeight: '700' }}>
-                  Date: <EditableCell value={doc.date} onSave={v => updateField('date', v)} placeholder="date" />
+                  <div>Date: <EditableCell value={doc.date} onSave={v => updateField('date', v)} placeholder="date" /></div>
+                  <div style={{ marginTop: '2px', color: '#555' }}>Manager: <EditableCell value={doc.managerName} onSave={v => updateField('managerName', v)} placeholder="manager" /></div>
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: D.custMb }}>

@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, Body, HTTPException
 
 from database import get_db
-from models import Quotation
+from models import Quotation, WarrantyCertificate
 
 router = APIRouter()
 
@@ -53,11 +53,30 @@ def save_quotation(body: dict = Body(...)):
         db.close()
 
 
+@router.delete("/api/quotations/{qid}")
+def delete_quotation(qid: str):
+    """Delete a single quotation and CASCADE to its warranty certificates, so no
+    orphan warranties are ever left behind."""
+    db = next(get_db())
+    try:
+        deleted = db.query(Quotation).filter(Quotation.id == qid).delete()
+        db.query(WarrantyCertificate).filter(
+            WarrantyCertificate.quotation_id == qid
+        ).delete()
+        db.commit()
+        return {"status": "deleted" if deleted else "not_found"}
+    finally:
+        db.close()
+
+
 @router.delete("/api/quotations")
 def clear_quotations():
     db = next(get_db())
     try:
+        # Cascade: clearing all quotations removes every warranty too (warranties
+        # cannot exist without their parent quotation).
         db.query(Quotation).delete()
+        db.query(WarrantyCertificate).delete()
         db.commit()
         return {"status": "cleared"}
     finally:

@@ -12,6 +12,7 @@ import {
   getUploadsInfo, restoreCatalogFromFile,
   detectGdrivePath, detectUsbDrives, testConnection, listBackupFiles,
   clearQuotations, clearWarranties,
+  recoveryBackups, recoveryScan, recoveryRecover, recoveryReportUrl,
 } from '../api';
 import { shareFiles, blobToFile } from '../share';
 
@@ -71,10 +72,15 @@ const INTERVALS = [
 ];
 
 const DEST = {
-  local:  { label: 'Local Disk', Icon: HardDrive },
-  gdrive: { label: 'Google Drive', Icon: Cloud },
-  usb:    { label: 'USB Drive', Icon: Usb },
+  local:    { label: 'Local Disk', Icon: HardDrive },
+  gdrive:   { label: 'Google Drive', Icon: Cloud },
+  onedrive: { label: 'OneDrive', Icon: Cloud },
+  dropbox:  { label: 'Dropbox', Icon: Cloud },
+  usb:      { label: 'USB / External', Icon: Usb },
+  nas:      { label: 'NAS', Icon: HardDrive },
+  network:  { label: 'Network Folder', Icon: Wifi },
 };
+const DEST_NAMES = Object.keys(DEST);
 
 export default function BackupSettings() {
   const { showToast, refreshBackupStatus } = useAppContext();
@@ -105,6 +111,157 @@ export default function BackupSettings() {
 
   const fileRef = useRef(null);
   const catalogRestoreRef = useRef(null);
+
+  // ── Recovery Center state ──
+  const [recBackups, setRecBackups] = useState([]);
+  const [recBackupSel, setRecBackupSel] = useState('');
+  const [recReport, setRecReport] = useState(null);
+  const [recScanning, setRecScanning] = useState(false);
+  const [recBusy, setRecBusy] = useState(false);
+  const [pick, setPick] = useState({});
+  const togglePick = (k) => setPick(p => ({ ...p, [k]: !p[k] }));
+  const pickMany = (keys, on) => setPick(p => { const n = { ...p }; keys.forEach(k => { n[k] = on; }); return n; });
+
+  const loadRecovery = async () => {
+    try {
+      const { backups } = await recoveryBackups();
+      setRecBackups(backups || []);
+      if (backups && backups.length && !recBackupSel) setRecBackupSel(backups[0].json_path);
+    } catch { /* offline */ }
+  };
+  useEffect(() => { if (activeTab === 'recovery' && recBackups.length === 0) loadRecovery(); }, [activeTab]);
+
+  const doScan = async () => {
+    setRecScanning(true); setPick({});
+    try {
+      const rep = await recoveryScan(recBackupSel || undefined);
+      setRecReport(rep);
+      if (!rep.ok) showToast(rep.error || 'No backup found', 'error');
+    } catch { showToast('Scan failed', 'error'); }
+    finally { setRecScanning(false); }
+  };
+
+  const buildSelection = () => {
+    const sel = { quotation_ids: [], warranty_ids: [], overwrite_quotation_ids: [], overwrite_warranty_ids: [], images: [], config_items: {} };
+    Object.keys(pick).forEach(k => {
+      if (!pick[k]) return;
+      const p = k.split('|'); const kind = p[0];
+      if (kind === 'q') sel.quotation_ids.push(p[1]);
+      else if (kind === 'w') sel.warranty_ids.push(p[1]);
+      else if (kind === 'owq') sel.overwrite_quotation_ids.push(p[1]);
+      else if (kind === 'oww') sel.overwrite_warranty_ids.push(p[1]);
+      else if (kind === 'img') sel.images.push(p.slice(1).join('|'));
+      else if (kind === 'cfg') { (sel.config_items[p[1]] = sel.config_items[p[1]] || []).push(p.slice(2).join('|')); }
+    });
+    return sel;
+  };
+
+  const doRecover = async (all) => {
+    if (!recReport?.source?.file) return;
+    let selection;
+    if (all) {
+      const L = recReport.lists;
+      selection = {
+        quotation_ids: L.all_missing_quotation_ids || [],
+        warranty_ids: L.all_missing_warranty_ids || [],
+        images: L.missing_images || [],
+        config_items: Object.fromEntries(Object.entries(L.missing_config || {}).map(([k, v]) => [k, v.map(x => x.id)])),
+      };
+    } else {
+      selection = buildSelection();
+    }
+    const total = (selection.quotation_ids?.length || 0) + (selection.warranty_ids?.length || 0)
+      + (selection.overwrite_quotation_ids?.length || 0) + (selection.overwrite_warranty_ids?.length || 0)
+      + (selection.images?.length || 0) + Object.values(selection.config_items || {}).reduce((s, a) => s + a.length, 0);
+    if (total === 0) { showToast('Nothing selected to recover', 'error'); return; }
+    if (!window.confirm(`Recover ${total} item(s) from the backup?\n\nMissing records are added; nothing is deleted. A safety snapshot is taken first.`)) return;
+    setRecBusy(true);
+    try {
+      const r = await recoveryRecover(recReport.source.file, selection);
+      const a = r.applied || {};
+      showToast(`Recovered: +${a.quotations?.added || 0} quotations, +${a.warranties?.added || 0} warranties, ${a.images || 0} images`, 'success');
+      setTimeout(() => window.location.reload(), 1300); // reload so the whole app reflects restored data
+    } catch { showToast('Recovery failed', 'error'); }
+    finally { setRecBusy(false); }
+  };
+
+  // Render a checkbox list of recoverable items.
+  const recList = (title, items, kind, labelFn, accent = 'var(--accent)') => {
+    if (!items || items.length === 0) return null;
+    const keys = items.map(it => `${kind}|${it.id ?? it}`);
+    const allOn = keys.every(k => pick[k]);
+    return (
+      <div style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-warm)' }}>
+          <span style={{ fontWeight: 700, fontSize: 13, color: accent }}>{title} ({items.length})</span>
+          <button style={{ ...btnStyle, padding: '3px 8px', fontSize: 11 }} onClick={() => pickMany(keys, !allOn)}>{allOn ? 'Clear' : 'Select all'}</button>
+        </div>
+        <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {items.map((it, idx) => {
+            const k = `${kind}|${it.id ?? it}`;
+            return (
+              <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderTop: '1px solid var(--line-soft)', fontSize: 12.5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!pick[k]} onChange={() => togglePick(k)} />
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{labelFn(it)}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const recConfigList = () => {
+    const mc = recReport?.lists?.missing_config || {};
+    const rows = Object.entries(mc).flatMap(([key, items]) => items.map(it => ({ key, ...it })));
+    if (!rows.length) return null;
+    const keys = rows.map(r => `cfg|${r.key}|${r.id}`);
+    const allOn = keys.every(k => pick[k]);
+    return (
+      <div style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-warm)' }}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Missing catalog items ({rows.length})</span>
+          <button style={{ ...btnStyle, padding: '3px 8px', fontSize: 11 }} onClick={() => pickMany(keys, !allOn)}>{allOn ? 'Clear' : 'Select all'}</button>
+        </div>
+        <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+          {rows.map((r, i) => {
+            const k = `cfg|${r.key}|${r.id}`;
+            return (
+              <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderTop: '1px solid var(--line-soft)', fontSize: 12.5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!pick[k]} onChange={() => togglePick(k)} />
+                <span><b style={{ textTransform: 'capitalize' }}>{r.key.slice(0, -1)}</b> · {r.name}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const recConflicts = () => {
+    const cq = recReport?.lists?.conflict_quotations || [];
+    const cw = recReport?.lists?.conflict_warranties || [];
+    if (!cq.length && !cw.length) return null;
+    const row = (it, kind, label) => {
+      const k = `${kind}|${it.id}`;
+      return (
+        <label key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderTop: '1px solid var(--line-soft)', fontSize: 12.5, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!pick[k]} onChange={() => togglePick(k)} />
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{label}</span>
+        </label>
+      );
+    };
+    return (
+      <div style={{ border: '1px solid #fde68a', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', background: '#fffbeb', fontWeight: 700, fontSize: 13, color: '#b45309', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Conflicts — review ({cq.length + cw.length})</span>
+          <span style={{ fontWeight: 500, fontSize: 11 }}>tick to overwrite local with the backup version</span>
+        </div>
+        <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+          {cq.map(it => row(it, 'owq', `${it.id} · ${it.customer} · ₹${it.grandTotal}`))}
+          {cw.map(it => row(it, 'oww', `${it.id} · ${it.customer}`))}
+        </div>
+      </div>
+    );
+  };
 
   const load = async () => {
     try {
@@ -253,7 +410,7 @@ export default function BackupSettings() {
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin:'0 auto', padding: '24px', fontFamily: '"Segoe UI", system-ui, Roboto, sans-serif', color: 'var(--ink)' }}>
+    <div style={{ maxWidth: 1100, margin:'0 auto', padding: '0', fontFamily: 'var(--font-body)', color: 'var(--ink)' }}>
       <h1 style={{ fontSize: 24, fontWeight: 600, margin: '0 0 24px 0', letterSpacing: '-0.01em' }}>Security &amp; Backup</h1>
 
       <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
@@ -277,7 +434,7 @@ export default function BackupSettings() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-              <button disabled={busy} onClick={handleBackupNow} style={{ ...btnStyle, background: 'var(--ink)', color: 'white', border: 'none' }}>
+              <button disabled={busy} onClick={handleBackupNow} style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }}>
                 <RefreshCw size={14} /> Backup Now
               </button>
             </div>
@@ -288,14 +445,15 @@ export default function BackupSettings() {
             {[
               { id: 'destinations', label: 'Destinations' },
               { id: 'automation', label: 'Automation' },
-              { id: 'history', label: 'History Grid' }
+              { id: 'history', label: 'History Grid' },
+              { id: 'recovery', label: 'Recovery' }
             ].map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
                 style={{
                   padding: '8px 0', border: 'none', background: 'none', cursor: 'pointer',
                   fontSize: 14, fontWeight: activeTab === t.id ? 600 : 400,
-                  color: activeTab === t.id ? 'var(--ink)' : 'var(--ink-soft)',
-                  borderBottom: activeTab === t.id ? '2px solid var(--ink)' : '2px solid transparent',
+                  color: activeTab === t.id ? 'var(--accent)' : 'var(--ink-soft)',
+                  borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
                   marginBottom: -1
                 }}>
                 {t.label}
@@ -315,9 +473,9 @@ export default function BackupSettings() {
                 </div>
 
                 {/* Expandable Rows */}
-                {['local','gdrive','usb'].map((name, i) => {
+                {DEST_NAMES.map((name, i) => {
                   const { label, Icon } = DEST[name];
-                  const t = targets[name];
+                  const t = targets[name] || { enabled: false, path: '' };
                   const st = status.targets?.[name];
                   const isOk = t.enabled && st?.available;
                   const tr = testRes[name];
@@ -327,7 +485,7 @@ export default function BackupSettings() {
                     <React.Fragment key={name}>
                       {/* Master Row */}
                       <div onClick={() => setExpandedLoc(isExpanded ? null : name)}
-                        style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '10px 12px', borderBottom: i < 2 || isExpanded ? '1px solid var(--line)' : 'none', alignItems: 'center', fontSize: 13, cursor: 'pointer', background: isExpanded ? 'var(--bg)' : 'transparent' }}>
+                        style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '10px 12px', borderBottom: i < DEST_NAMES.length - 1 || isExpanded ? '1px solid var(--line)' : 'none', alignItems: 'center', fontSize: 13, cursor: 'pointer', background: isExpanded ? 'var(--bg)' : 'transparent' }}>
                         
                         <div onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={!!t.enabled} onChange={e => patchTargetAndSave(name, { enabled: e.target.checked })} style={{ margin: 0, cursor: 'pointer' }} />
@@ -352,13 +510,13 @@ export default function BackupSettings() {
 
                       {/* Detail Expander */}
                       {isExpanded && (
-                        <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < 2 ? '1px solid var(--line)' : 'none' }}>
+                        <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                             <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder={name === 'local' ? 'C:\\Backups' : 'Path'} style={{ ...inpStyle, flex: 1 }} />
                             {name === 'gdrive' && <button style={btnStyle} disabled={busy} onClick={handleDetectGdrive}><Search size={14}/> Detect</button>}
                             {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
                             <button style={{ ...btnStyle, width: 100 }} disabled={testing[name]} onClick={() => handleTest(name, t.path)}><Wifi size={14}/> Test</button>
-                            <button style={{ ...btnStyle, background: 'var(--ink)', color: 'white', border: 'none' }} onClick={() => handleSave(false)}>Save</button>
+                            <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} onClick={() => handleSave(false)}>Save</button>
                           </div>
                           
                           {name === 'usb' && usbList && (
@@ -437,6 +595,82 @@ export default function BackupSettings() {
                 )}
               </div>
             )}
+
+            {/* --------------------------------------
+                TAB: RECOVERY CENTER
+            -------------------------------------- */}
+            {activeTab === 'recovery' && (
+              <div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+                  <select value={recBackupSel} onChange={e => setRecBackupSel(e.target.value)} style={{ ...inpStyle, minWidth: 300 }}>
+                    {recBackups.length === 0 && <option value="">No backups found on connected destinations</option>}
+                    {recBackups.map(b => (
+                      <option key={b.json_path} value={b.json_path}>
+                        {(DEST[b.target]?.label || b.target)} · {fmtTime(b.created_iso)} · {(b.counts?.quotations ?? '?')}Q / {(b.counts?.warranty_certificates ?? '?')}W
+                      </option>
+                    ))}
+                  </select>
+                  <button style={{ ...btnStyle, background: 'var(--accent)', color: '#fff', border: 'none' }} disabled={recScanning || recBackups.length === 0} onClick={doScan}>
+                    <Search size={14} /> {recScanning ? 'Scanning…' : 'Scan now'}
+                  </button>
+                  <button style={btnStyle} onClick={loadRecovery}><RefreshCw size={14} /> Refresh</button>
+                  {recReport?.ok && <a href={recoveryReportUrl(recBackupSel)} style={{ ...btnStyle, textDecoration: 'none' }}><Download size={14} /> Export Report</a>}
+                </div>
+
+                {!recReport ? (
+                  <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-soft)', border: '1px dashed var(--line)', borderRadius: 8, fontSize: 13 }}>
+                    Pick a backup and click <b>Scan now</b> to compare it against your current data and recover only what's missing.
+                  </div>
+                ) : !recReport.ok ? (
+                  <div style={{ padding: 20, color: '#F59E0B', fontSize: 13 }}>{recReport.error}</div>
+                ) : (
+                  <>
+                    {!recReport.corruption.ok && (
+                      <div style={{ padding: '10px 14px', borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, marginBottom: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <ShieldAlert size={16} /> Database integrity: <b>{recReport.corruption.db_integrity}</b>
+                        {recReport.summary.unrecoverable_images > 0 ? ` · ${recReport.summary.unrecoverable_images} referenced image(s) missing from all backups` : ''}
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10, marginBottom: 16 }}>
+                      {[
+                        ['Missing quotations', recReport.summary.missing_quotations, 'var(--accent)'],
+                        ['Missing warranties', recReport.summary.missing_warranties, 'var(--accent)'],
+                        ['Missing catalog', recReport.summary.missing_config, 'var(--accent)'],
+                        ['Missing images', recReport.summary.missing_images, 'var(--accent)'],
+                        ['Conflicts', recReport.summary.conflict_quotations + recReport.summary.conflict_warranties, '#b45309'],
+                      ].map(([label, n, color]) => (
+                        <div key={label} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '12px 14px', background: 'var(--surface)' }}>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: n > 0 ? color : 'var(--ink-soft)', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{n}</div>
+                          <div style={{ fontSize: 12, color: 'var(--ink-soft)', fontWeight: 600, marginTop: 4 }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {recList('Missing quotations', recReport.lists.missing_quotations, 'q', it => `${it.id} · ${it.customer} · ₹${it.grandTotal}`)}
+                    {recList('Missing warranties', recReport.lists.missing_warranties, 'w', it => `${it.id} · ${it.customer}`)}
+                    {recConfigList()}
+                    {recList('Missing images', recReport.lists.missing_images, 'img', n => n)}
+                    {recConflicts()}
+
+                    {(recReport.summary.missing_quotations + recReport.summary.missing_warranties + recReport.summary.missing_config + recReport.summary.missing_images + recReport.summary.conflict_quotations + recReport.summary.conflict_warranties) === 0 && (
+                      <div style={{ padding: 24, textAlign: 'center', color: '#10B981', fontSize: 14, fontWeight: 600, border: '1px solid var(--line)', borderRadius: 8, background: 'var(--surface)' }}>
+                        <ShieldCheck size={20} style={{ verticalAlign: 'middle', marginRight: 6 }} /> In sync — this backup contains nothing your database is missing.
+                      </div>
+                    )}
+
+                    <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 8 }}>
+                      Local-only (here but not in this backup, left untouched): {recReport.summary.local_only_quotations} quotations, {recReport.summary.local_only_warranties} warranties.
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                      <button style={{ ...btnStyle, background: 'var(--accent)', color: '#fff', border: 'none' }} disabled={recBusy} onClick={() => doRecover(false)}><Upload size={14} /> {recBusy ? 'Recovering…' : 'Recover Selected'}</button>
+                      <button style={btnStyle} disabled={recBusy} onClick={() => doRecover(true)}><RotateCcw size={14} /> Recover All Missing</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 8 }}>A pre-restore snapshot is taken automatically. Records are only added (or updated for ticked conflicts) — nothing is ever deleted.</div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* INLINE RESTORE PANEL (Appears dynamically below main content) */}
@@ -454,7 +688,7 @@ export default function BackupSettings() {
                        <button key={m.id} onClick={() => setRestoreMode(m.id)} title={m.id === 'merge' ? 'Keep existing, add new, update matching (nothing deleted)' : 'Delete existing records, then import (snapshot taken first)'}
                          style={{
                            padding: '4px 12px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
-                           background: restoreMode === m.id ? (m.id === 'replace' ? '#EF4444' : 'var(--ink)') : 'var(--surface)',
+                           background: restoreMode === m.id ? (m.id === 'replace' ? 'var(--red)' : 'var(--accent)') : 'var(--surface)',
                            color: restoreMode === m.id ? '#fff' : 'var(--ink-soft)',
                          }}>
                          {m.label}
@@ -530,7 +764,7 @@ export default function BackupSettings() {
             </div>
             
             <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, marginBottom: 12 }}>
-              <div style={{ width: `${Math.min(100, Math.round(health.db_bytes / health.red_bytes * 100))}%`, height: '100%', background: 'var(--ink)', borderRadius: 2 }} />
+              <div style={{ width: `${Math.min(100, Math.round(health.db_bytes / health.red_bytes * 100))}%`, height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
             </div>
             
             <div style={{ fontSize: 12, color: 'var(--ink-mid)', display: 'flex', flexDirection: 'column', gap: 4 }}>

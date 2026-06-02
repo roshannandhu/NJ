@@ -1,640 +1,411 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../AppContext';
 import { mediaUrl, uploadImage } from '../api';
-import { Plus, Image as ImageIcon, Trash2, FolderTree, Package, Palette, FileText, CheckCircle2, Loader, Award } from 'lucide-react';
+import {
+  Plus, Image as ImageIcon, Trash2, Package, Palette, FileText, CheckCircle2, Loader,
+  Award, Wrench, X, ChevronLeft, ChevronRight, Copy, GripVertical, Pencil,
+} from 'lucide-react';
+import './ProductsCatalog.css';
 
-const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+const newId = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+const move = (arr, from, to) => { const a = [...arr]; const [m] = a.splice(from, 1); a.splice(to, 0, m); return a; };
+const cssUrl = (url) => `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/cover no-repeat`;
 
 export default function ProductsClassesSettings() {
   const { data, setData, showToast, persistConfig } = useAppContext();
-  
-  // State to track what is currently selected in the tree: { type: 'class'|'variety'|'color', id: string, parentId?: string }
-  const [selectedNode, setSelectedNode] = useState(null);
-  
-  // Local edit states to prevent immediate saving on every keystroke
-  const [editClass, setEditClass] = useState(null);
-  const [editVariety, setEditVariety] = useState(null);
-  const [editColor, setEditColor] = useState(null);
 
-  // Catalog tree is grouped by Parent Brand, with an optional brand filter.
-  const [brandFilter, setBrandFilter] = useState('all');
+  const [view, setView] = useState('list');             // 'list' | 'class'
+  const [activeClassId, setActiveClassId] = useState(null);
+  const [editClassId, setEditClassId] = useState(null); // class-edit modal
+  const [editVarId, setEditVarId] = useState(null);     // variety editor modal
+  const [editTypeIdx, setEditTypeIdx] = useState(null); // open type inside the variety modal
+  const [saveStatus, setSaveStatus] = useState('idle');
+  const [dragOver, setDragOver] = useState(null);
+  const dragRef = useRef(null);
+  const saveTimer = useRef(null);
 
-  // Auto-save state and refs
-  const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'pending' | 'saved'
-  const autoSaveTimer = useRef(null);
-  const skipAutoSave = useRef(false); // true when state was set by tree selection, not by user
+  // ── One simple save path ──────────────────────────────────────────────────
+  const commit = (next) => {
+    setData(next); setSaveStatus('pending');
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { persistConfig(next); setSaveStatus('saved'); setTimeout(() => setSaveStatus('idle'), 1500); }, 600);
+  };
+  useEffect(() => () => clearTimeout(saveTimer.current), []);
 
-  // "Latest ref" pattern — updated on every render so timer callbacks always
-  // see the current data/editX/selectedNode, never a stale closure.
-  const doSaveClassRef   = useRef(null);
-  const doSaveVarietyRef = useRef(null);
-  const doSaveColorRef   = useRef(null);
-
-  // --- Helpers ---
-  const imagePreview = (url, fit = 'cover') => (
-    url ? `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/${fit} no-repeat` : undefined
-  );
-
-  const handleImageUpload = async (e, callback) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-      showToast("Uploading image...");
-      const uploaded = await uploadImage(file);
-      callback(uploaded.url);
-    } catch {
-      showToast("Image upload failed. Start the backend and try again.", "error");
-    } finally {
-      e.target.value = '';
-    }
+  const imagePreview = (url, fit = 'cover') => (url ? `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/${fit} no-repeat` : undefined);
+  const upload = async (e, cb) => {
+    const file = e.target.files[0]; if (!file) return;
+    try { showToast('Uploading image…'); const up = await uploadImage(file); cb(up.url); }
+    catch { showToast('Image upload failed. Start the backend and try again.', 'error'); }
+    finally { e.target.value = ''; }
   };
 
-  // --- Tree Selection Handlers ---
-  const selectClass = (cls) => {
-    skipAutoSave.current = true;
-    clearTimeout(autoSaveTimer.current);
-    setSaveStatus('idle');
-    setSelectedNode({ type: 'class', id: cls.id });
-    setEditClass({ ...cls });
+  // ── Edit helpers ──────────────────────────────────────────────────────────
+  const updateClass = (id, patch) => commit({ ...data, classes: data.classes.map(c => c.id === id ? { ...c, ...patch } : c) });
+  const updateVariety = (id, patch) => commit({ ...data, varieties: data.varieties.map(v => v.id === id ? { ...v, ...patch } : v) });
+  const updateType = (vid, idx, patch) => commit({ ...data, varieties: data.varieties.map(v => v.id === vid ? { ...v, colors: (v.colors || []).map((c, i) => i === idx ? { ...c, ...patch } : c) } : v) });
+  const setColors = (vid, fn) => commit({ ...data, varieties: data.varieties.map(v => v.id === vid ? { ...v, colors: fn(v.colors || []) } : v) });
+
+  // ── Add ─────────────────────────────────────────────────────────────────
+  const addClass = (brandId, type = 'tiles') => {
+    const cls = { id: newId('cls'), name: type === 'tools' ? 'New Accessory Class' : 'New Class', type, color: '#E2E8F0', logo: null, warrantyId: null, brandId: type === 'tools' ? null : brandId };
+    commit({ ...data, classes: [...data.classes, cls] });
+    setEditClassId(cls.id);
+  };
+  const addVariety = () => {
+    const v = { id: newId('var'), classId: activeClassId, name: 'New Variety', description: '', unit: 'sqft', basePrice: 0, image: null, colors: [] };
+    commit({ ...data, varieties: [...data.varieties, v] });
+    setEditVarId(v.id); setEditTypeIdx(null);
+  };
+  const addType = (vid) => {
+    const v = data.varieties.find(x => x.id === vid);
+    const idx = (v?.colors || []).length;
+    setColors(vid, (cols) => [...cols, { name: 'New Type', hex: '#E2E8F0', image: null, offset: 0 }]);
+    setEditTypeIdx(idx);
   };
 
-  const selectVariety = (variety) => {
-    skipAutoSave.current = true;
-    clearTimeout(autoSaveTimer.current);
-    setSaveStatus('idle');
-    setSelectedNode({ type: 'variety', id: variety.id, parentId: variety.classId });
-    setEditVariety({ ...variety });
+  // ── Duplicate ───────────────────────────────────────────────────────────
+  const duplicateClass = (cls) => {
+    const nc = { ...cls, id: newId('cls'), name: `${cls.name} Copy` };
+    const nv = data.varieties.filter(v => v.classId === cls.id).map(v => ({ ...v, id: newId('var'), classId: nc.id, colors: (v.colors || []).map(c => ({ ...c })) }));
+    commit({ ...data, classes: [...data.classes, nc], varieties: [...data.varieties, ...nv] });
+    showToast('Class duplicated');
   };
+  const duplicateVariety = (v) => { commit({ ...data, varieties: [...data.varieties, { ...v, id: newId('var'), name: `${v.name} Copy`, colors: (v.colors || []).map(c => ({ ...c })) }] }); showToast('Variety duplicated'); };
+  const duplicateType = (vid, c) => setColors(vid, (cols) => [...cols, { ...c, name: `${c.name} Copy` }]);
 
-  const selectColor = (color, varietyId) => {
-    skipAutoSave.current = true;
-    clearTimeout(autoSaveTimer.current);
-    setSaveStatus('idle');
-    setSelectedNode({ type: 'color', id: color.name, parentId: varietyId });
-    setEditColor({ ...color, offset: color.offset ?? color.priceOffset ?? 0 });
+  // ── Delete ──────────────────────────────────────────────────────────────
+  const deleteClass = (id) => {
+    if (!confirm('Delete this class and ALL its varieties?')) return;
+    commit({ ...data, classes: data.classes.filter(c => c.id !== id), varieties: data.varieties.filter(v => v.classId !== id) });
+    setEditClassId(null);
+    if (activeClassId === id) { setView('list'); setActiveClassId(null); }
   };
-
-  // --- Save Helpers ---
-  const markSaved = () => {
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2200);
+  const deleteVariety = (id) => {
+    if (!confirm('Delete this variety?')) return;
+    commit({ ...data, varieties: data.varieties.filter(v => v.id !== id) });
+    if (editVarId === id) setEditVarId(null);
   };
+  const deleteType = (vid, idx) => { if (!confirm('Delete this type / colour?')) return; setColors(vid, (cols) => cols.filter((_, i) => i !== idx)); setEditTypeIdx(null); };
 
-  // --- Save Handlers (silent = auto-save, no toast) ---
-  const doSaveClass = (silent = false) => {
-    if (!editClass?.name) { if (!silent) showToast("Class name required"); return; }
-    const isNew = !data.classes.find(c => c.id === editClass.id);
-    let newClasses = [...data.classes];
-    if (isNew) newClasses.push(editClass);
-    else newClasses = newClasses.map(c => c.id === editClass.id ? editClass : c);
-    const nextData = { ...data, classes: newClasses };
-    setData(nextData);
-    persistConfig(nextData);
-    if (!silent) showToast("Class saved");
-    markSaved();
+  // ── Drag reorder ──────────────────────────────────────────────────────────
+  const onDrop = (kind, key) => {
+    const src = dragRef.current; dragRef.current = null; setDragOver(null);
+    if (!src || src.kind !== kind || src.key === key) return;
+    if (kind === 'class') { const f = data.classes.findIndex(c => c.id === src.key), t = data.classes.findIndex(c => c.id === key); if (f >= 0 && t >= 0) commit({ ...data, classes: move(data.classes, f, t) }); }
+    else if (kind === 'variety') { const f = data.varieties.findIndex(v => v.id === src.key), t = data.varieties.findIndex(v => v.id === key); if (f >= 0 && t >= 0) commit({ ...data, varieties: move(data.varieties, f, t) }); }
+    else if (kind === 'type') setColors(src.vid, (cols) => move(cols, src.key, key));
   };
+  const drag = (kind, key, vid) => ({
+    draggable: true,
+    onDragStart: (e) => { e.stopPropagation(); dragRef.current = { kind, key, vid }; },
+    onDragOver: (e) => { e.preventDefault(); const k = `${kind}:${key}`; if (dragOver !== k) setDragOver(k); },
+    onDragLeave: () => setDragOver(o => (o === `${kind}:${key}` ? null : o)),
+    onDrop: (e) => { e.preventDefault(); onDrop(kind, key); },
+  });
 
-  const doSaveVariety = (silent = false) => {
-    if (!editVariety?.name) { if (!silent) showToast("Variety name required"); return; }
-    const isNew = !data.varieties.find(v => v.id === editVariety.id);
-    let newVars = [...data.varieties];
-    if (isNew) newVars.push(editVariety);
-    else newVars = newVars.map(v => v.id === editVariety.id ? editVariety : v);
-    const nextData = { ...data, varieties: newVars };
-    setData(nextData);
-    persistConfig(nextData);
-    if (!silent) showToast("Variety saved");
-    markSaved();
-  };
-
-  const doSaveColor = (silent = false) => {
-    if (!editColor?.name) { if (!silent) showToast("Color/Type name required"); return; }
-    const restColor = { ...editColor };
-    delete restColor.priceOffset;
-    const normalizedColor = { ...restColor, offset: parseFloat(restColor.offset) || 0 };
-    const newVars = data.varieties.map(v => {
-      if (v.id === selectedNode.parentId) {
-        let updatedColors = v.colors ? [...v.colors] : [];
-        const exists = updatedColors.findIndex(c => c.name === selectedNode.id);
-        if (exists >= 0) updatedColors[exists] = normalizedColor;
-        else updatedColors.push(normalizedColor);
-        return { ...v, colors: updatedColors };
-      }
-      return v;
-    });
-    const nextData = { ...data, varieties: newVars };
-    setData(nextData);
-    persistConfig(nextData);
-    if (!silent) showToast("Color/Type saved");
-    markSaved();
-    setSelectedNode(prev => ({ ...prev, id: normalizedColor.name }));
-  };
-
-  // Manual save buttons call these (immediate, with toast)
-  const saveClass   = () => { clearTimeout(autoSaveTimer.current); doSaveClass(false); };
-  const saveVariety = () => { clearTimeout(autoSaveTimer.current); doSaveVariety(false); };
-  const saveColor   = () => { clearTimeout(autoSaveTimer.current); doSaveColor(false); };
-
-  // Keep refs pointing to latest functions — runs synchronously on every render
-  // before any timer callback fires, so the callback always gets fresh data.
-  doSaveClassRef.current   = doSaveClass;
-  doSaveVarietyRef.current = doSaveVariety;
-  doSaveColorRef.current   = doSaveColor;
-
-  // --- Auto-save effects (debounced 800ms after any field change) ---
+  // ── Ctrl+V paste into the open entity ─────────────────────────────────────
   useEffect(() => {
-    if (!editClass) return;
-    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
-    setSaveStatus('pending');
-    clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveClassRef.current(true), 800);
-  }, [editClass]);
-
-  useEffect(() => {
-    if (!editVariety) return;
-    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
-    setSaveStatus('pending');
-    clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveVarietyRef.current(true), 800);
-  }, [editVariety]);
-
-  useEffect(() => {
-    if (!editColor) return;
-    if (skipAutoSave.current) { skipAutoSave.current = false; return; }
-    setSaveStatus('pending');
-    clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => doSaveColorRef.current(true), 800);
-  }, [editColor]);
-
-  // Cleanup timer on unmount
-  useEffect(() => () => clearTimeout(autoSaveTimer.current), []);
-
-  // --- Ctrl+V paste image ---
-  useEffect(() => {
-    const handlePaste = async (e) => {
-      if (!selectedNode) return;
-      // Don't intercept when user is pasting text into an input/textarea
+    const onPaste = async (e) => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-
-      const imageItem = Array.from(e.clipboardData?.items || [])
-        .find(item => item.type.startsWith('image/'));
-      if (!imageItem) return;
-
-      const file = imageItem.getAsFile();
-      if (!file) return;
-      e.preventDefault();
-
+      const item = Array.from(e.clipboardData?.items || []).find(i => i.type.startsWith('image/'));
+      if (!item) return; const file = item.getAsFile(); if (!file) return; e.preventDefault();
       try {
-        showToast('Uploading pasted image...');
-        const uploaded = await uploadImage(file);
-        if (selectedNode.type === 'class')
-          setEditClass(prev => ({ ...prev, logo: uploaded.url }));
-        else if (selectedNode.type === 'variety')
-          setEditVariety(prev => ({ ...prev, image: uploaded.url }));
-        else if (selectedNode.type === 'color')
-          setEditColor(prev => ({ ...prev, image: uploaded.url }));
-      } catch {
-        showToast('Paste image upload failed', 'error');
-      }
+        showToast('Uploading pasted image…'); const up = await uploadImage(file);
+        if (editVarId && editTypeIdx != null) updateType(editVarId, editTypeIdx, { image: up.url });
+        else if (editClassId) updateClass(editClassId, { logo: up.url });
+        else if (editVarId) {
+          // Only tool varieties carry their own image; product images live on types.
+          const v = data.varieties.find(x => x.id === editVarId);
+          const tools = data.classes.find(c => c.id === v?.classId)?.type === 'tools';
+          if (tools) updateVariety(editVarId, { image: up.url });
+        }
+      } catch { showToast('Paste image upload failed', 'error'); }
     };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [editVarId, editTypeIdx, editClassId, data]);
 
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [selectedNode]);
-
-  // --- Delete Handlers ---
-  const deleteClass = (id) => {
-    if(!confirm("Delete this class and ALL its varieties?")) return;
-    const nextData = {
-      ...data,
-      classes: data.classes.filter(c => c.id !== id),
-      varieties: data.varieties.filter(v => v.classId !== id)
-    };
-    setData(nextData);
-    persistConfig(nextData);
-    setSelectedNode(null);
-  };
-
-  const deleteVariety = (id) => {
-    if(!confirm("Delete this variety?")) return;
-    const nextData = {
-      ...data,
-      varieties: data.varieties.filter(v => v.id !== id)
-    };
-    setData(nextData);
-    persistConfig(nextData);
-    setSelectedNode(null);
-  };
-
-  const deleteColor = (colorName, varietyId) => {
-    const newVars = data.varieties.map(v => {
-      if (v.id === varietyId) {
-        return { ...v, colors: (v.colors || []).filter(c => c.name !== colorName) };
-      }
-      return v;
-    });
-    const nextData = { ...data, varieties: newVars };
-    setData(nextData);
-    persistConfig(nextData);
-    setSelectedNode(null);
-  };
-
-  // --- Add New Handlers ---
-  const handleAddClass = () => {
-    const newId = generateId('cls');
-    const firstBrandId = (data.brands || [])[0]?.id || 'nj';
-    const newClass = { id: newId, name: 'New Class', type: 'tiles', color: '#E2E8F0', logo: null, warrantyId: null, brandId: firstBrandId };
-    selectClass(newClass);
-  };
-
-  const handleAddVariety = (classId) => {
-    const newId = generateId('var');
-    const newVar = { id: newId, classId, name: 'New Variety', description: '', unit: 'sqft', basePrice: 0, image: null, colors: [] };
-    selectVariety(newVar);
-  };
-
-  const handleAddColor = (varietyId) => {
-    const newColor = { name: 'New Color', hex: '#E2E8F0', image: null, offset: 0 };
-    selectColor(newColor, varietyId);
-  };
-
-  // --- Brand grouping for the catalog tree ---
+  // ── Derived ───────────────────────────────────────────────────────────────
   const sortedBrands = [...(data.brands || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const fallbackBrandId = sortedBrands[0]?.id;
-  // Resolve a class's brand, treating an unknown/missing brandId as the first brand.
   const brandOf = (cls) => (sortedBrands.some(b => b.id === cls.brandId) ? cls.brandId : fallbackBrandId);
-  const brandGroups = sortedBrands
-    .filter(b => brandFilter === 'all' || b.id === brandFilter)
-    .map(brand => ({ brand, classes: data.classes.filter(c => brandOf(c) === brand.id) }));
+  const productClassesOf = (bid) => data.classes.filter(c => c.type !== 'tools' && brandOf(c) === bid);
+  const toolClasses = data.classes.filter(c => c.type === 'tools');
+  const varietiesOf = (cid) => data.varieties.filter(v => v.classId === cid);
+  const activeClass = data.classes.find(c => c.id === activeClassId);
+  const activeBrand = activeClass && activeClass.type !== 'tools' ? sortedBrands.find(b => b.id === brandOf(activeClass)) : null;
+  const modalClass = data.classes.find(c => c.id === editClassId);
+  const editVar = data.varieties.find(v => v.id === editVarId);
+  const editVarTools = activeClass?.type === 'tools';
 
-  return (
-    <div className="animate-fade-up" style={{ display: 'flex', height: 'calc(100vh - 200px)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
-      
-      {/* Left Pane: Tree View */}
-      <div style={{ width: '320px', borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', background: 'var(--bg-warm)' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--surface)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Catalog Hierarchy</div>
-            <button onClick={handleAddClass} style={{ background: 'var(--ink)', color: 'var(--surface)', border: 'none', width: '28px', height: '28px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Plus size={16}/>
-            </button>
-          </div>
-          <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ padding: '8px 10px', border: '1.5px solid var(--line)', borderRadius: '6px', fontSize: '13px', background: 'var(--bg)', color: 'var(--ink)', cursor: 'pointer' }}>
-            <option value="all">All Brands</option>
-            {sortedBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+  const statusEl = () => saveStatus === 'pending'
+    ? <span className="pc-saving"><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</span>
+    : saveStatus === 'saved' ? <span className="pc-saving ok"><CheckCircle2 size={13} /> Saved</span> : null;
+
+  // The Quotation Desk card look (media + body), reused for grid cards + modal preview.
+  const qd2Inner = (v, isTool, active) => {
+    const colors = v.colors || [];
+    const ac = active || colors[0] || null;
+    const img = ac?.image || v.image;
+    const price = Math.round((Number(v.basePrice) || 0) + (Number(ac?.offset) || 0));
+    return (
+      <>
+        <div className={`qd2-card-media${isTool ? ' is-tool' : ''}`}>
+          {img ? <img src={mediaUrl(img)} alt={v.name} crossOrigin="anonymous" />
+            : <div className="qd2-card-fallback">{isTool ? <Wrench size={26} /> : <ImageIcon size={26} />}<span>{v.name || 'Product'}</span></div>}
+          {!isTool && colors.length > 0 && <span className="qd2-color-badge">{ac?.name}</span>}
+        </div>
+        <div className="qd2-card-body">
+          {!isTool && colors.length > 0 && (
+            <div className="qd2-swatches">{colors.map((c, i) => <span key={i} className={`qd2-swatch${ac && ac.name === c.name ? ' is-selected' : ''}`} title={c.name} style={{ background: c.image ? cssUrl(c.image) : (c.hex || '#d6d3cc') }} />)}</div>
+          )}
+          <div className="qd2-card-title"><h3>{v.name || 'Variety'}</h3><p>{v.description || activeClass?.name || ''}</p></div>
+          <div className="qd2-card-price">₹ {price}<span> / {v.unit}</span></div>
+        </div>
+      </>
+    );
+  };
+
+  // ════════════════════════════ PAGE 2: VARIETY PAGE ════════════════════════
+  if (view === 'class' && activeClass) {
+    return (
+      <div className="set-page wide pc">
+        <div className="pc-vp-head">
+          <button className="pc-back" onClick={() => { setView('list'); setEditVarId(null); }}><ChevronLeft size={16} /> Catalogue</button>
+          <div className="pc-vp-crumb">{editVarTools ? 'Tools & Accessories' : activeBrand?.name} <ChevronRight size={14} /> <b>{activeClass.name}</b></div>
+          <div className="pc-vp-spacer" /> {statusEl()}
+          <button className="set-btn" onClick={addVariety}><Plus size={16} /> Add Variety</button>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
-          {data.classes.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--ink-soft)', fontSize: '13px' }}>No classes. Add one to begin.</div>}
-
-          {brandGroups.map(group => (
-            <div key={group.brand.id} style={{ marginBottom: '6px' }}>
-              {/* Brand group header */}
-              <div style={{ padding: '8px 20px', display: 'flex', alignItems: 'center', gap: '8px', position: 'sticky', top: 0, background: 'var(--bg-warm)', zIndex: 1 }}>
-                {group.brand.logo
-                  ? <img src={mediaUrl(group.brand.logo)} alt="" style={{ height: '16px', width: 'auto', maxWidth: '40px', objectFit: 'contain' }} />
-                  : <Award size={14} color="#7C3AED" />}
-                <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-soft)' }}>{group.brand.name}</span>
-                <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--ink-soft)' }}>{group.classes.length}</span>
+        <div className="pc-vgrid">
+          {varietiesOf(activeClassId).map(v => (
+            <article key={v.id} className={`qd2-card pc-vcard${dragOver === `variety:${v.id}` ? ' dragover' : ''}`} onClick={() => { setEditVarId(v.id); setEditTypeIdx(null); }} {...drag('variety', v.id)}>
+              <div className="pc-vcard-overlay" onClick={e => e.stopPropagation()}>
+                <button title="Duplicate" onClick={() => duplicateVariety(v)}><Copy size={14} /></button>
+                <button className="danger" title="Delete" onClick={() => deleteVariety(v.id)}><Trash2 size={14} /></button>
               </div>
-              {group.classes.length === 0 && (
-                <div style={{ padding: '4px 20px 8px 32px', fontSize: '12px', color: 'var(--ink-soft)', fontStyle: 'italic' }}>No classes yet</div>
-              )}
-
-              {group.classes.map(cls => (
-            <div key={cls.id}>
-              {/* Class Node */}
-              <div 
-                onClick={() => selectClass(cls)}
-                style={{ 
-                  padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
-                  background: selectedNode?.id === cls.id ? 'var(--accent-soft)' : 'transparent',
-                  borderLeft: selectedNode?.id === cls.id ? '3px solid var(--accent)' : '3px solid transparent'
-                }}
-              >
-                <FolderTree size={16} color={selectedNode?.id === cls.id ? 'var(--accent)' : 'var(--ink-soft)'}/>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: selectedNode?.id === cls.id ? 'var(--accent)' : 'var(--ink)' }}>{cls.name}</span>
-                <button onClick={(e) => { e.stopPropagation(); handleAddVariety(cls.id); }} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-soft)' }} title="Add Variety">
-                  <Plus size={14}/>
-                </button>
-              </div>
-
-              {/* Varieties under Class */}
-              {data.varieties.filter(v => v.classId === cls.id).map(v => (
-                <div key={v.id}>
-                  {/* Variety Node */}
-                  <div 
-                    onClick={() => selectVariety(v)}
-                    style={{ 
-                      padding: '8px 20px 8px 44px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
-                      background: selectedNode?.id === v.id ? 'var(--accent-soft)' : 'transparent',
-                      borderLeft: selectedNode?.id === v.id ? '3px solid var(--accent)' : '3px solid transparent'
-                    }}
-                  >
-                    <Package size={14} color={selectedNode?.id === v.id ? 'var(--accent)' : 'var(--ink-soft)'}/>
-                    <span style={{ fontSize: '13px', fontWeight: 500, color: selectedNode?.id === v.id ? 'var(--accent)' : 'var(--ink-mid)' }}>{v.name}</span>
-                    <button onClick={(e) => { e.stopPropagation(); handleAddColor(v.id); }} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-soft)' }} title="Add Color/Type">
-                      <Plus size={14}/>
-                    </button>
-                  </div>
-
-                  {/* Colors under Variety */}
-                  {v.colors && v.colors.map(c => (
-                    <div 
-                      key={c.name}
-                      onClick={() => selectColor(c, v.id)}
-                      style={{ 
-                        padding: '6px 20px 6px 68px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
-                        background: selectedNode?.id === c.name && selectedNode?.parentId === v.id ? 'var(--accent-soft)' : 'transparent',
-                        borderLeft: selectedNode?.id === c.name && selectedNode?.parentId === v.id ? '3px solid var(--accent)' : '3px solid transparent'
-                      }}
-                    >
-                      <Palette size={12} color={selectedNode?.id === c.name && selectedNode?.parentId === v.id ? 'var(--accent)' : 'var(--ink-soft)'}/>
-                      <span style={{ fontSize: '13px', color: selectedNode?.id === c.name && selectedNode?.parentId === v.id ? 'var(--accent)' : 'var(--ink-soft)' }}>{c.name}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-              ))}
-            </div>
+              {qd2Inner(v, editVarTools)}
+            </article>
           ))}
+          <div className="pc-newvar" onClick={addVariety}><Plus size={22} /> Add Variety</div>
         </div>
-      </div>
 
-      {/* Right Pane: Inspector */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--surface)' }}>
-        {!selectedNode ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-soft)' }}>
-            <FolderTree size={48} style={{ opacity: 0.2, marginBottom: '16px' }}/>
-            <div style={{ fontSize: '16px', fontWeight: 500 }}>Select an item to edit</div>
-            <div style={{ fontSize: '13px', marginTop: '8px' }}>Manage classes, varieties, pricing, and images.</div>
-          </div>
-        ) : (
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            
-            {/* Editor for CLASS */}
-            {selectedNode.type === 'class' && editClass && (
-              <div className="animate-fade-up" style={{ padding: '40px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
-                  <div>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>Editing Class</div>
-                    <h2 style={{ fontSize: '28px', fontWeight: 600, color: 'var(--ink)' }}>{editClass.name || 'Unnamed Class'}</h2>
-                  </div>
-                  <button onClick={() => deleteClass(editClass.id)} style={{ padding: '8px 16px', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, background: 'transparent', cursor: 'pointer' }}>
-                    <Trash2 size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}/> Delete Class
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', maxWidth: '600px' }}>
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Class Logo / Category Image</label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px', padding: '18px', border: '1px solid var(--line)', borderRadius: 'var(--radius)', background: 'var(--bg-warm)' }}>
-                      <label
-                        className="hover-lift"
-                        style={{
-                          width: '118px',
-                          height: '118px',
-                          border: '2px dashed var(--line)',
-                          borderRadius: 'var(--radius-sm)',
-                          background: editClass.logo ? imagePreview(editClass.logo, 'contain') : editClass.color || 'var(--surface)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          cursor: 'pointer',
-                          overflow: 'hidden'
-                        }}
-                      >
-                        {!editClass.logo && <ImageIcon size={30} color="rgba(255,255,255,0.8)" />}
-                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleImageUpload(e, (url) => setEditClass({...editClass, logo: url}))} />
-                      </label>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', marginBottom: '4px' }}>Upload category image for this class</div>
-                        <div style={{ fontSize: '13px', color: 'var(--ink-soft)', lineHeight: 1.5 }}>This image appears on the Quotation Desk category card. If no image is uploaded, the class colour is used.</div>
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd> to paste image from clipboard
-                        </div>
-                        {editClass.logo && (
-                          <button
-                            type="button"
-                            onClick={() => setEditClass({...editClass, logo: null})}
-                            style={{ marginTop: '12px', fontSize: '12px', fontWeight: 700, color: 'var(--red)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-                          >
-                            Remove Logo
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Class Name</label>
-                    <input value={editClass.name} onChange={e => setEditClass({...editClass, name: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                  </div>
-
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Parent Brand</label>
-                    <select value={editClass.brandId || (data.brands || [])[0]?.id || 'nj'} onChange={e => setEditClass({...editClass, brandId: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', background: 'var(--surface)' }}>
-                      {(data.brands || []).map(b => (
-                        <option key={b.id} value={b.id}>{b.name}{b.active === false ? ' (inactive)' : ''}</option>
-                      ))}
-                    </select>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>The brand this class belongs to. Manage brands in Settings → Parent Brands.</div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Catalog Type</label>
-                    <select value={editClass.type === 'regular' ? 'tiles' : (editClass.type || 'tiles')} onChange={e => setEditClass({...editClass, type: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', background: 'var(--surface)' }}>
-                      <option value="tiles">Standard Product (Tiles, Ceilings, etc)</option>
-                      <option value="tools">Tools & Hardware</option>
-                    </select>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Identify Color</label>
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <input type="color" value={editClass.color || '#E2E8F0'} onChange={e => setEditClass({...editClass, color: e.target.value})} style={{ width: '48px', height: '48px', padding: 0, border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }} />
-                      <input type="text" value={editClass.color || '#E2E8F0'} onChange={e => setEditClass({...editClass, color: e.target.value})} style={{ flex: 1, padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                    </div>
-                  </div>
-
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', padding: '24px', background: 'var(--bg-warm)', borderRadius: 'var(--radius)', border: '1px solid var(--line)' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <FileText size={16} color="var(--accent)"/> Link Warranty Template
-                    </label>
-                    <p style={{ fontSize: '13px', color: 'var(--ink-soft)', marginBottom: '8px' }}>Automatically assign a specific warranty document whenever items from this class are purchased.</p>
-                    <select value={editClass.warrantyId || ''} onChange={e => setEditClass({...editClass, warrantyId: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', background: 'var(--surface)' }}>
-                      <option value="">-- No Warranty --</option>
-                      {data.warranties?.map(w => (
-                        <option key={w.id} value={w.id}>{w.title} ({w.duration})</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <button onClick={saveClass} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Class</button>
-                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
-                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
-                </div>
+        {/* ── Variety editor modal ── */}
+        {editVar && (
+          <div className="pc-backdrop" onClick={() => setEditVarId(null)}>
+            <div className="pc-modal pc-vmodal" onClick={e => e.stopPropagation()}>
+              <div className="pc-modal-head">
+                <Package size={16} color="var(--accent)" /><h3>Edit Variety</h3>
+                <button className="set-icon-btn" onClick={() => setEditVarId(null)}><X size={18} /></button>
               </div>
-            )}
-
-            {/* Editor for VARIETY */}
-            {selectedNode.type === 'variety' && editVariety && (
-              <div className="animate-fade-up" style={{ padding: '40px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
+              <div className="pc-modal-body">
+                <div className="pc-vmodal-grid">
                   <div>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>Editing Variety</div>
-                    <h2 style={{ fontSize: '28px', fontWeight: 600, color: 'var(--ink)' }}>{editVariety.name || 'Unnamed Variety'}</h2>
-                  </div>
-                  <button onClick={() => deleteVariety(editVariety.id)} style={{ padding: '8px 16px', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, background: 'transparent', cursor: 'pointer' }}>
-                    <Trash2 size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}/> Delete Variety
-                  </button>
-                </div>
+                    <div className="set-grid">
+                      <div className="set-field span2"><span className="set-label">Variety Name</span>
+                        <input className="set-input" value={editVar.name} onChange={e => updateVariety(editVar.id, { name: e.target.value })} /></div>
+                      <div className="set-field"><span className="set-label">Base Price (₹)</span>
+                        <input className="set-input" type="number" value={editVar.basePrice} onChange={e => updateVariety(editVar.id, { basePrice: parseFloat(e.target.value) || 0 })} /></div>
+                      <div className="set-field"><span className="set-label">Unit</span>
+                        <input className="set-input" list="pc-units" value={editVar.unit} onChange={e => updateVariety(editVar.id, { unit: e.target.value })} />
+                        <datalist id="pc-units"><option value="sqft" /><option value="ft" /><option value="piece" /><option value="nos" /><option value="box" /></datalist></div>
+                      <div className="set-field span2"><span className="set-label">Description</span>
+                        <textarea className="set-textarea" value={editVar.description || ''} onChange={e => updateVariety(editVar.id, { description: e.target.value })} /></div>
+                      {editVarTools && (
+                        <div className="set-field span2"><span className="set-label">Display Image</span>
+                          <label className="set-img" style={{ width: 130, height: 110, background: editVar.image ? imagePreview(editVar.image) : 'var(--bg-warm)' }}>
+                            {!editVar.image && <><ImageIcon size={22} /><span>Click or Ctrl+V</span></>}
+                            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => upload(e, url => updateVariety(editVar.id, { image: url }))} />
+                          </label></div>
+                      )}
+                    </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', maxWidth: '800px' }}>
-                  {data.classes.find(c => c.id === editVariety.classId)?.type === 'tools' && (
-                    <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Display Image</label>
-                      <label style={{
-                        width: '240px', height: '240px',
-                        border: '2px dashed var(--line)', borderRadius: 'var(--radius-lg)',
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        background: editVariety.image ? imagePreview(editVariety.image, 'cover') : 'var(--bg-warm)',
-                        cursor: 'pointer', transition: 'all 0.2s', position: 'relative', overflow: 'hidden',
-                        flexShrink: 0,
-                      }} className="hover-lift">
-                        {!editVariety.image && (
-                          <>
-                            <ImageIcon size={40} color="var(--ink-soft)" style={{ marginBottom: '16px' }}/>
-                            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Click to upload image</div>
-                            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>PNG, JPG up to 5MB</div>
-                            <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd> to paste
+                    {!editVarTools && (
+                      <>
+                        <div className="pc-types-head"><Palette size={13} /> Types / Colours · {(editVar.colors || []).length}</div>
+                        <div className="set-hint" style={{ marginTop: -4, marginBottom: 10 }}>Each type carries its own image — that's the picture shown on the product card.</div>
+                        <div className="pc-types">
+                          {(editVar.colors || []).map((c, idx) => (
+                            <div key={idx} className={`pc-type${editTypeIdx === idx ? ' is-open' : ''}${dragOver === `type:${idx}` ? ' dragover' : ''}`} onClick={() => setEditTypeIdx(idx)} {...drag('type', idx, editVar.id)}>
+                              <span className="pc-type-dot" style={{ background: c.image ? imagePreview(c.image) : (c.hex || '#ccc') }} />
+                              <span className="pc-type-name">{c.name}</span>
+                              {!!c.offset && <span className="pc-type-off">{c.offset > 0 ? '+' : ''}{c.offset}</span>}
                             </div>
-                          </>
-                        )}
-                        {editVariety.image && (
-                          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.2s' }} onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0}>
-                            <span style={{ color: 'white', fontWeight: 600 }}>Change Image</span>
-                          </div>
-                        )}
-                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleImageUpload(e, (url) => setEditVariety({...editVariety, image: url}))} />
-                      </label>
-                    </div>
-                  )}                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Variety Name</label>
-                    <input value={editVariety.name} onChange={e => setEditVariety({...editVariety, name: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                  </div>
-                  
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Description</label>
-                    <textarea value={editVariety.description || ''} onChange={e => setEditVariety({...editVariety, description: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', minHeight: '80px', fontSize: '15px' }} />
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Base Price (₹)</label>
-                    <input type="number" value={editVariety.basePrice} onChange={e => setEditVariety({...editVariety, basePrice: parseFloat(e.target.value)})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Unit of Measurement</label>
-                    <input list="units" value={editVariety.unit} onChange={e => setEditVariety({...editVariety, unit: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                    <datalist id="units">
-                      <option value="sqft"/>
-                      <option value="ft"/>
-                      <option value="piece"/>
-                      <option value="nos"/>
-                      <option value="box"/>
-                    </datalist>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <button onClick={saveVariety} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Variety</button>
-                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
-                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
-                </div>
-              </div>
-            )}
-
-            {/* Editor for COLOR */}
-            {selectedNode.type === 'color' && editColor && (
-              <div className="animate-fade-up" style={{ padding: '40px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
-                  <div>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, color: 'var(--accent)', marginBottom: '8px' }}>Editing Color / Type</div>
-                    <h2 style={{ fontSize: '28px', fontWeight: 600, color: 'var(--ink)' }}>{editColor.name || 'Unnamed Color'}</h2>
-                  </div>
-                  <button onClick={() => deleteColor(selectedNode.id, selectedNode.parentId)} style={{ padding: '8px 16px', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 'var(--radius-sm)', fontSize: '13px', fontWeight: 600, background: 'transparent', cursor: 'pointer' }}>
-                    <Trash2 size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }}/> Delete Color
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', maxWidth: '600px' }}>
-                  
-                  {/* Swatch Image Upload */}
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Swatch Image (Optional)</label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                      <label style={{ 
-                        width: '120px', height: '120px', border: '2px dashed var(--line)', borderRadius: 'var(--radius)', 
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        background: editColor.image ? imagePreview(editColor.image, 'cover') : editColor.hex || 'var(--bg-warm)',
-                        cursor: 'pointer', transition: 'all 0.2s', position: 'relative', overflow: 'hidden'
-                      }} className="hover-lift">
-                        {!editColor.image && <ImageIcon size={24} color="rgba(0,0,0,0.3)"/>}
-                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleImageUpload(e, (url) => setEditColor({...editColor, image: url}))} />
-                      </label>
-                      <div style={{ fontSize: '13px', color: 'var(--ink-soft)', flex: 1 }}>
-                        Upload a specific image for this color/type. If no image is provided, the hex color below will be used as a swatch fallback.
-                        <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <kbd style={{ padding: '1px 5px', background: 'var(--bg-warm)', border: '1px solid var(--line)', borderRadius: '4px', fontSize: '11px', fontFamily: 'monospace' }}>Ctrl+V</kbd>
-                          <span style={{ fontSize: '12px' }}>to paste image from clipboard</span>
+                          ))}
+                          <button className="pc-add-class" style={{ padding: '7px 12px' }} onClick={() => addType(editVar.id)}><Plus size={15} /> Add type</button>
                         </div>
-                      </div>
-                    </div>
+
+                        {editTypeIdx != null && (editVar.colors || [])[editTypeIdx] && (() => {
+                          const t = editVar.colors[editTypeIdx];
+                          return (
+                            <div className="pc-type-editor">
+                              <div className="set-grid">
+                                <div className="set-field span2"><span className="set-label">Type / Colour Name</span>
+                                  <input className="set-input" value={t.name} onChange={e => updateType(editVar.id, editTypeIdx, { name: e.target.value })} /></div>
+                                <div className="set-field"><span className="set-label">Swatch Colour</span>
+                                  <div style={{ display: 'flex', gap: 10 }}>
+                                    <input type="color" value={t.hex || '#000000'} onChange={e => updateType(editVar.id, editTypeIdx, { hex: e.target.value })} style={{ width: 46, height: 44, padding: 0, border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer' }} />
+                                    <input className="set-input" value={t.hex || '#000000'} onChange={e => updateType(editVar.id, editTypeIdx, { hex: e.target.value })} />
+                                  </div></div>
+                                <div className="set-field"><span className="set-label">Price Offset (₹)</span>
+                                  <input className="set-input" type="number" value={t.offset ?? 0} onChange={e => updateType(editVar.id, editTypeIdx, { offset: parseFloat(e.target.value) || 0 })} /></div>
+                                <div className="set-field span2"><span className="set-label">Swatch Image (optional)</span>
+                                  <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                                    <label className="set-img" style={{ width: 84, height: 84, background: t.image ? imagePreview(t.image) : (t.hex || 'var(--bg-warm)') }}>
+                                      {!t.image && <ImageIcon size={20} />}
+                                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => upload(e, url => updateType(editVar.id, editTypeIdx, { image: url }))} />
+                                    </label>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                      <button className="set-btn ghost" onClick={() => duplicateType(editVar.id, t)}><Copy size={14} /> Duplicate</button>
+                                      <button className="set-btn danger" onClick={() => deleteType(editVar.id, editTypeIdx)}><Trash2 size={14} /> Delete</button>
+                                    </div>
+                                  </div></div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
                   </div>
 
-                  <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Color / Type Name</label>
-                    <input value={editColor.name} onChange={e => setEditColor({...editColor, name: e.target.value})} style={{ padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
+                  {/* Live card */}
+                  <div className="pc-vmodal-preview">
+                    <div className="pc-preview-label">Live preview</div>
+                    <article className="qd2-card" style={{ width: 230 }}>
+                      {qd2Inner(editVar, editVarTools, editTypeIdx != null ? (editVar.colors || [])[editTypeIdx] : null)}
+                    </article>
                   </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Fallback Hex Color</label>
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <input type="color" value={editColor.hex || '#000000'} onChange={e => setEditColor({...editColor, hex: e.target.value})} style={{ width: '48px', height: '48px', padding: 0, border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }} />
-                      <input type="text" value={editColor.hex || '#000000'} onChange={e => setEditColor({...editColor, hex: e.target.value})} style={{ flex: 1, padding: '14px 16px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px' }} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>Price Offset (₹)</label>
-                    <div style={{ position: 'relative' }}>
-                      <span style={{ position: 'absolute', left: '16px', top: '14px', fontSize: '15px', color: 'var(--ink-mid)' }}>±</span>
-                      <input type="number" value={editColor.offset ?? 0} onChange={e => setEditColor({...editColor, offset: parseFloat(e.target.value) || 0})} style={{ padding: '14px 16px 14px 32px', border: '2px solid var(--line)', borderRadius: 'var(--radius-sm)', fontSize: '15px', width: '100%' }} />
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>Amount added or subtracted from base price.</div>
-                  </div>
-
-                </div>
-
-                <div style={{ marginTop: '40px', paddingTop: '24px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <button onClick={saveColor} className="btn-primary" style={{ padding: '16px 32px', fontSize: '15px' }}>Save Color</button>
-                  {saveStatus === 'pending' && <span style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}><Loader size={14} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</span>}
-                  {saveStatus === 'saved' && <span style={{ fontSize: '13px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> Auto-saved</span>}
                 </div>
               </div>
-            )}
-            
+              <div className="pc-modal-foot">
+                <button className="set-btn" onClick={() => setEditVarId(null)}>Done</button>
+                <button className="set-btn ghost" onClick={() => duplicateVariety(editVar)}><Copy size={15} /> Duplicate</button>
+                <button className="set-btn danger" onClick={() => deleteVariety(editVar.id)}><Trash2 size={15} /> Delete</button>
+                <div style={{ marginLeft: 'auto' }}>{statusEl()}</div>
+              </div>
+            </div>
           </div>
         )}
       </div>
+    );
+  }
+
+  // ════════════════════════════ PAGE 1: CATALOGUE LIST ══════════════════════
+  const renderStrip = (cls) => {
+    const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
+    const vcount = varietiesOf(cls.id).length;
+    return (
+      <div key={cls.id} className={`pc-strip${dragOver === `class:${cls.id}` ? ' dragover' : ''}`} onClick={() => { setActiveClassId(cls.id); setView('class'); setEditVarId(null); }} {...drag('class', cls.id)}>
+        <span className="pc-strip-drag" onClick={e => e.stopPropagation()} title="Drag to reorder"><GripVertical size={16} /></span>
+        <div className="pc-strip-cover" style={{ background: cls.logo ? imagePreview(cls.logo) : (cls.color || 'var(--bg-warm)') }}>{!cls.logo && (cls.type === 'tools' ? <Wrench size={20} /> : <Package size={22} />)}</div>
+        <div className="pc-strip-main">
+          <p className="pc-strip-name">{cls.name}</p>
+          <div className="pc-strip-meta">
+            <span className="pc-chip-sm">{vcount} {vcount === 1 ? 'variety' : 'varieties'}</span>
+            {warranty && <span className="pc-warranty-pill"><FileText size={10} /> Warranty</span>}
+          </div>
+        </div>
+        <div className="pc-strip-actions" onClick={e => e.stopPropagation()}>
+          <button className="set-icon-btn" title="Edit class" onClick={() => setEditClassId(cls.id)}><Pencil size={16} /></button>
+          <button className="set-icon-btn" title="Open varieties" onClick={() => { setActiveClassId(cls.id); setView('class'); }}><ChevronRight size={18} /></button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="set-page wide pc">
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Brands group your product classes. Tools & accessories are separate. Click a class to manage its varieties.</div>
+        <div style={{ marginLeft: 'auto' }}>{statusEl()}</div>
+      </div>
+
+      {/* Brand sections (products only) */}
+      {sortedBrands.map(brand => {
+        const classes = productClassesOf(brand.id);
+        return (
+          <div key={brand.id} className="pc-section">
+            <div className="pc-section-head">
+              {brand.logo ? <img className="pc-section-logo" src={mediaUrl(brand.logo)} alt="" /> : <div className="pc-section-badge"><Award size={18} /></div>}
+              <h3>{brand.name}</h3>
+              <span className="pc-count">{classes.length} {classes.length === 1 ? 'class' : 'classes'}</span>
+            </div>
+            <div className="pc-section-body">
+              {classes.length === 0 && <div className="pc-empty"><span>No classes in this brand yet.</span></div>}
+              {classes.map(cls => renderStrip(cls))}
+              <button className="pc-add-class" onClick={() => addClass(brand.id)}><Plus size={15} /> Add class to {brand.name}</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Tools & Accessories — never under a brand */}
+      <div className="pc-section tools">
+        <div className="pc-section-head">
+          <div className="pc-section-badge"><Wrench size={18} /></div>
+          <h3>Tools &amp; Accessories</h3>
+          <span className="pc-count">{toolClasses.length}</span>
+          <span className="pc-sub">— not tied to any brand</span>
+        </div>
+        <div className="pc-section-body">
+          {toolClasses.length === 0 && <div className="pc-empty"><span>No tool / accessory classes yet.</span></div>}
+          {toolClasses.map(cls => renderStrip(cls))}
+          <button className="pc-add-class" onClick={() => addClass(null, 'tools')}><Plus size={15} /> Add tool / accessory class</button>
+        </div>
+      </div>
+
+      {/* ── Class edit modal ── */}
+      {modalClass && (
+        <div className="pc-backdrop" onClick={() => setEditClassId(null)}>
+          <div className="pc-modal" onClick={e => e.stopPropagation()}>
+            <div className="pc-modal-head"><Pencil size={16} color="var(--accent)" /><h3>Edit {modalClass.type === 'tools' ? 'Accessory ' : ''}Class</h3>
+              <button className="set-icon-btn" onClick={() => setEditClassId(null)}><X size={18} /></button></div>
+            <div className="pc-modal-body">
+              <div className="set-grid">
+                <div className="set-field span2"><span className="set-label">Class Name</span>
+                  <input className="set-input" value={modalClass.name} onChange={e => updateClass(modalClass.id, { name: e.target.value })} /></div>
+                <div className="set-field span2"><span className="set-label">Class Logo / Category Image</span>
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                    <label className="set-img" style={{ width: 96, height: 96, background: modalClass.logo ? imagePreview(modalClass.logo, 'contain') : (modalClass.color || '#fff') }}>
+                      {!modalClass.logo && <ImageIcon size={24} color="rgba(255,255,255,0.85)" />}
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => upload(e, url => updateClass(modalClass.id, { logo: url }))} />
+                    </label>
+                    <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.5 }}>Shown on the Quotation Desk card; falls back to the class colour. Ctrl+V to paste.
+                      {modalClass.logo && <div><button onClick={() => updateClass(modalClass.id, { logo: null })} style={{ marginTop: 6, color: 'var(--red)', background: 'none', border: 'none', fontWeight: 700, cursor: 'pointer' }}>Remove image</button></div>}</div>
+                  </div></div>
+                {modalClass.type !== 'tools' && (
+                  <div className="set-field"><span className="set-label">Parent Brand</span>
+                    <select className="set-select" value={modalClass.brandId || sortedBrands[0]?.id} onChange={e => updateClass(modalClass.id, { brandId: e.target.value })}>
+                      {(data.brands || []).map(b => <option key={b.id} value={b.id}>{b.name}{b.active === false ? ' (inactive)' : ''}</option>)}
+                    </select></div>
+                )}
+                <div className="set-field"><span className="set-label">Catalog Type</span>
+                  <select className="set-select" value={modalClass.type === 'regular' ? 'tiles' : (modalClass.type || 'tiles')} onChange={e => updateClass(modalClass.id, { type: e.target.value, brandId: e.target.value === 'tools' ? null : (modalClass.brandId || sortedBrands[0]?.id) })}>
+                    <option value="tiles">Standard Product</option><option value="tools">Tools &amp; Accessories</option>
+                  </select></div>
+                <div className="set-field"><span className="set-label">Identify Colour</span>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <input type="color" value={modalClass.color || '#E2E8F0'} onChange={e => updateClass(modalClass.id, { color: e.target.value })} style={{ width: 46, height: 44, padding: 0, border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer' }} />
+                    <input className="set-input" value={modalClass.color || '#E2E8F0'} onChange={e => updateClass(modalClass.id, { color: e.target.value })} />
+                  </div></div>
+                <div className="set-field span2"><span className="set-label">Link Warranty</span>
+                  <select className="set-select" value={modalClass.warrantyId || ''} onChange={e => updateClass(modalClass.id, { warrantyId: e.target.value })}>
+                    <option value="">— No warranty —</option>
+                    {data.warranties?.map(w => <option key={w.id} value={w.id}>{w.title} ({w.duration})</option>)}
+                  </select></div>
+              </div>
+            </div>
+            <div className="pc-modal-foot">
+              <button className="set-btn" onClick={() => setEditClassId(null)}>Done</button>
+              <button className="set-btn ghost" onClick={() => duplicateClass(modalClass)}><Copy size={15} /> Duplicate</button>
+              <button className="set-btn danger" onClick={() => deleteClass(modalClass.id)}><Trash2 size={15} /> Delete</button>
+              <div style={{ marginLeft: 'auto' }}>{statusEl()}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

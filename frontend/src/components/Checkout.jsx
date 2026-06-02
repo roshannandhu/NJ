@@ -1,11 +1,12 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3 } from 'lucide-react';
-import { createQuotation, createWarranty, deleteWarranty } from '../api';
+import { createQuotation, createWarranty } from '../api';
+import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
 import NumberField from './NumberField';
 
 export default function Checkout() {
-  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId } = useAppContext();
+  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent } = useAppContext();
 
   const settings = data.settings || {};
 
@@ -32,8 +33,18 @@ export default function Checkout() {
     () => (settings.banks || []).filter(b => b.active).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [settings.banks]
   );
-  const [selectedBankId, setSelectedBankId] = React.useState(() =>
-    editingExisting ? (activeQuotation.bankId || '') : '');
+  const [selectedBankId, setSelectedBankId] = React.useState(() => {
+    if (editingExisting) return activeQuotation.bankId || '';
+    // New quotation → preselect the bank marked default in Settings (if active).
+    const def = (settings.banks || []).find(b => b.default && b.active);
+    return def ? def.id : '';
+  });
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  // Manager / preparer — mandatory; a quotation is always made "under" a manager.
+  const [managerName, setManagerName] = React.useState(() => {
+    if (editingExisting && activeQuotation.managerName) return activeQuotation.managerName;
+    try { return localStorage.getItem('nj_last_manager') || ''; } catch { return ''; }
+  });
 
   // ── Offer-price helpers ──────────────────────────────────────────────────
   // An "offer" exists only when the effective price was lowered below the
@@ -77,28 +88,44 @@ export default function Checkout() {
     return list;
   }, [cart, data.classes, data.warranties]);
 
-  // Unique warranty templates linked to tile classes in the cart
-  const availableWarrantyTemplates = React.useMemo(() => {
-    const seen = new Set();
-    const list = [];
-    cart.forEach(item => {
-      const cls = data.classes?.find(c => c.name === item.className);
-      if (cls?.warrantyId && !seen.has(cls.warrantyId)) {
-        const tmpl = data.warranties?.find(w => w.id === cls.warrantyId);
-        if (tmpl) { seen.add(cls.warrantyId); list.push({ ...tmpl, forClass: cls.name }); }
-      }
-    });
-    return list;
-  }, [cart, data.classes, data.warranties]);
-
   const handleGenerateQuotation = async () => {
+    if (isGenerating) return; // guard against double-submit creating duplicates
+    if (!managerName.trim()) {
+      showToast("Manager name is required", "error");
+      document.getElementById('manager-name-input')?.focus();
+      return;
+    }
     if (!customer.name) {
       showToast("Customer name is required", "error");
       document.getElementById('customer-name-input')?.focus();
       return;
     }
+    setIsGenerating(true);
+    try {
+      await finalizeGeneration();
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-    // Batch Number is optional — no validation required
+  const finalizeGeneration = async () => {
+
+    // What to produce was chosen on the Desk: 'quote' (quotation only),
+    // 'both' (quotation + warranty), or 'warranty' (standalone warranty only).
+    // Editing an existing quotation is always a plain quote finalize.
+    const intent = activeQuotationId ? 'quote' : (generateIntent || 'quote');
+
+    // Validate BEFORE minting/saving anything: a warranty-only finalize needs at
+    // least one warranty-eligible product. (Doing this before the id is minted
+    // avoids leaving a dangling activeQuotationId that would downgrade the next
+    // finalize to a plain quote.)
+    if (intent === 'warranty') {
+      const templates = warrantyTemplatesForQuotation({ items: cart }, data);
+      if (templates.length === 0) {
+        showToast("These products have no linked warranty. Add one in Settings → Warranties.", "error");
+        return;
+      }
+    }
 
     // Reuse the current draft's id if we're still editing the same session, so
     // the backend (which upserts by id) UPDATES the existing quotation instead
@@ -126,6 +153,8 @@ export default function Checkout() {
       id: qNo,
       items: [...cart],
       customer: { ...customer },
+      managerName: managerName.trim(), // the manager this quotation is made under
+
       subtotal,
       actualSubtotal,
       productSavings,
@@ -151,160 +180,60 @@ export default function Checkout() {
       // Keep the original issue date when updating; stamp today only for new ones.
       date: isRegenerate ? (base.date || today) : today,
     };
-    
-    // Auto-generate matching warranties. Each warranty id is DETERMINISTIC —
-    // derived from the quotation id + the warranty template id — so regenerating
-    // the same quotation reuses the same ids (backend upserts → updates, never
-    // duplicates). Use suffix of the quotation no. for a tidy, human warranty no.
-    const qSuffix = qNo.replace(/^.*?-/, '');
-    const wPrefix = settings.warrantyPrefix || 'NJ-W';
-    const certIdFor = (tmpl) => `${wPrefix}-${qSuffix}-${String(tmpl.id).replace(/[^a-zA-Z0-9]+/g, '').slice(0, 12)}`;
 
-    const generatedCerts = availableWarrantyTemplates.map((tmpl) => {
-      const matchingItems = cart.filter(item => item.className === tmpl.forClass);
-      const selectedItem = matchingItems.length > 0 ? matchingItems[0] : (cart[0] || null);
-      const wNo = certIdFor(tmpl);
-      return {
-        id: wNo,
-        quotationId: qNo,
-        items:     [...cart],
-        customer:  { ...customer },
-        date:      new Date().toLocaleDateString('en-GB'),
-        warrantyNo: wNo,
-        template:  tmpl,
-        certData: {
-          sellerName: data.company?.name || "NOUFAL & JABBAR INTERNATIONAL LLP",
-          batchNo: selectedItem?.batchNo || '',
-          purchaseDate: new Date().toLocaleDateString('en-GB'),
-          siteAddress: customer.address || "",
-          productName: selectedItem?.name || 'Standard Shingle',
-          productColor: selectedItem?.color || 'N/A',
-          productQty: selectedItem?.qty || 1,
-          productUnit: selectedItem?.unit || 'sqft',
-          selectedCartId: selectedItem?.cartId || ''
-        }
-      };
-    });
+    try { localStorage.setItem('nj_last_manager', managerName.trim()); } catch { /* ignore */ }
 
-    // On regenerate, drop any previously-generated warranties for THIS quotation
-    // whose product class is no longer in the cart, so history stays in sync.
-    const newCertIds = new Set(generatedCerts.map(c => c.id));
-    const obsoleteCerts = isRegenerate
-      ? (data.warranty_certificates || []).filter(c => c.quotationId === qNo && !newCertIds.has(c.id))
-      : [];
+    // (intent was resolved + validated above.) 'both'/'warranty' produce certs.
+    const wantsWarranty = intent === 'both' || intent === 'warranty';
+
+    // A warranty-only finalize is backed by a hidden quotation so the warranty is
+    // never orphaned but the backing record stays out of Quotation History.
+    if (intent === 'warranty') snapshot.warrantyOnly = true;
 
     try {
       await createQuotation(snapshot);
-      for (const cert of generatedCerts) {
-        await createWarranty(cert);
-      }
-      for (const cert of obsoleteCerts) {
-        await deleteWarranty(cert.id);
-      }
     } catch {
       showToast("Saved locally, backend sync failed", "error");
     }
 
-    // Update the local registry: upsert this quotation by id, and replace this
-    // quotation's warranty set (removing obsolete ones) — never blindly prepend.
-    setData(prev => {
-      const quotations = [snapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)];
-      const otherCerts = (prev.warranty_certificates || []).filter(c => c.quotationId !== qNo);
-      return {
-        ...prev,
-        quotations,
-        warranty_certificates: [...generatedCerts, ...otherCerts],
-      };
-    });
+    let certs = [];
+    if (wantsWarranty) {
+      certs = buildWarrantyCertsForQuotation(snapshot, data, settings);
+      for (const cert of certs) {
+        await createWarranty(cert).catch(() => {});
+      }
+    }
+
+    // Update the local registry: upsert this quotation by id; add any new certs.
+    setData(prev => ({
+      ...prev,
+      quotations: [snapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)],
+      warranty_certificates: certs.length
+        ? [...certs, ...(prev.warranty_certificates || []).filter(c => !certs.some(n => n.id === c.id))]
+        : (prev.warranty_certificates || []),
+    }));
+
+    setGenerateIntent?.('quote'); // reset so later edits default to a plain quote
+
+    if (intent === 'warranty') {
+      setActiveQuotationId(null); // standalone warranty, not a quotation draft
+      setActiveWarranty(certs[0]);
+      setCurrentView('warranty_document');
+      showToast(certs.length > 1 ? `${certs.length} warranties created` : 'Warranty created', "success");
+      return;
+    }
 
     if (setActiveTab) setActiveTab('quotation');
     setActiveQuotation(snapshot);
     setCurrentView('quotation_document');
 
-    const verb = isRegenerate ? 'updated' : 'generated';
-    if (generatedCerts.length > 0) {
-      showToast(`Quotation & ${generatedCerts.length} Warranties ${verb}!`, "success");
+    if (intent === 'both') {
+      showToast(certs.length
+        ? `Quotation + ${certs.length} warranty${certs.length > 1 ? ' certs' : ''} ${isRegenerate ? 'updated' : 'generated'}!`
+        : `Quotation ${isRegenerate ? 'updated' : 'generated'}! (no warranty applies)`, "success");
     } else {
-      showToast(`Quotation ${verb}!`, "success");
+      showToast(`Quotation ${isRegenerate ? 'updated' : 'generated'}!`, "success");
     }
-  };
-
-  const handleGenerateWarrantyInstant = async (tmpl) => {
-    if (!customer.name) {
-      showToast("Customer name is required to generate a warranty.", "error");
-      const nameInput = document.getElementById('customer-name-input');
-      if (nameInput) nameInput.focus();
-      return;
-    }
-
-    const matchingItems = tmpl
-      ? cart.filter(item => item.className === tmpl.forClass)
-      // No specific template: pick warrantable product lines (their class has a
-      // linked warranty). Tool/accessory classes have no warrantyId, so they're
-      // naturally excluded — no brittle name matching on "tool".
-      : cart.filter(i => data.classes?.find(cl => cl.name === i.className)?.warrantyId);
-
-    const selectedItem = matchingItems.length > 0 ? matchingItems[0] : (cart[0] || null);
-
-    const wNo = `${settings.warrantyPrefix || 'NJ-W'}-${Date.now().toString().slice(-6)}`;
-    const warrantySnapshot = {
-      id: wNo,
-      items:     [...cart],
-      customer:  { ...customer },
-      date:      new Date().toLocaleDateString('en-GB'),
-      warrantyNo: wNo,
-      template:  tmpl || {
-        title: "Product Performance Warranty",
-        opening: "Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards.",
-        sections: [
-          {
-            title: "1. Product Information",
-            content: "Roofing products designed for structural integrity and long-lasting performance.",
-            isBullets: false
-          },
-          {
-            title: "2. Warranty Coverage",
-            content: "Full Coverage against manufacturing defects.",
-            isBullets: false
-          },
-          {
-            title: "3. Warranty Conditions",
-            content: "Proper installation according to the manual.\nValid proof of purchase.",
-            isBullets: true
-          }
-        ]
-      },
-      certData: {
-        sellerName: data.company?.name || "NOUFAL & JABBAR INTERNATIONAL LLP",
-        batchNo: '',
-        purchaseDate: new Date().toLocaleDateString('en-GB'),
-        siteAddress: customer.address || "",
-        productName: selectedItem?.name || 'Standard Shingle',
-        productColor: selectedItem?.color || 'N/A',
-        productQty: selectedItem?.qty || 1,
-        productUnit: selectedItem?.unit || 'sqft',
-        selectedCartId: selectedItem?.cartId || ''
-      }
-    };
-
-    try {
-      await createWarranty(warrantySnapshot);
-    } catch {
-      showToast("Saved locally, backend sync failed", "error");
-    }
-
-    // Save to historical certificates registry
-    setData(prev => {
-      const history = prev.warranty_certificates || [];
-      return {
-        ...prev,
-        warranty_certificates: [warrantySnapshot, ...history]
-      };
-    });
-
-    setActiveWarranty(warrantySnapshot);
-    setCurrentView('warranty_document');
-    showToast("Warranty certificate generated instantly! Customize details below.", "success");
   };
 
   const handlePriceChange = (cartId, newPrice) => {
@@ -702,6 +631,25 @@ export default function Checkout() {
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Manager / preparer — mandatory; the quotation is made under this manager. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label htmlFor="manager-name-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--accent)' }}>
+                Manager Name * <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: 'var(--ink-soft)' }}>— who is preparing this quotation</span>
+              </label>
+              <input
+                id="manager-name-input"
+                value={managerName}
+                onChange={e => setManagerName(e.target.value)}
+                placeholder="e.g. Roshan"
+                style={{
+                  padding: '14px 16px',
+                  border: `1.5px solid ${managerName.trim() ? 'var(--line)' : 'var(--accent)'}`,
+                  borderRadius: 'var(--radius)', fontSize: '15px', fontWeight: 500,
+                  background: 'var(--bg)', color: 'var(--ink)', outline: 'none'
+                }}
+              />
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label htmlFor="customer-name-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Full Name *
@@ -825,11 +773,11 @@ export default function Checkout() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <ShieldCheck size={18} color="var(--accent)"/>
               <span style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--accent-deep)' }}>
-                Warranties Detected ({detectedWarranties.length})
+                Warranty-Eligible ({detectedWarranties.length})
               </span>
             </div>
             <p style={{ fontSize: '13px', color: 'var(--ink-mid)', margin: 0, lineHeight: 1.5 }}>
-              The system will automatically bundle and generate the following certificates along with your quotation:
+              These products qualify for warranty certificates. After generating the quotation, use <strong>Create Warranty</strong> on the quotation to issue them:
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
               {detectedWarranties.map((w, idx) => (
@@ -1085,17 +1033,20 @@ export default function Checkout() {
             {settings.currencySymbol || '₹'}{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}
           </div>
           
-          <button 
-            onClick={handleGenerateQuotation} 
+          <button
+            onClick={handleGenerateQuotation}
+            disabled={isGenerating}
             className="btn-primary"
-            style={{ 
-              width: '100%', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              gap: '12px', 
-              padding: '18px 24px', 
-              background: 'var(--ink)', 
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px',
+              padding: '18px 24px',
+              background: 'var(--ink)',
+              opacity: isGenerating ? 0.6 : 1,
+              pointerEvents: isGenerating ? 'none' : 'auto',
               border: 'none', 
               borderRadius: 'var(--radius)', 
               fontSize: '15px', 
@@ -1120,7 +1071,13 @@ export default function Checkout() {
               e.currentTarget.style.boxShadow = 'var(--shadow-md)';
             }}
           >
-            <FileText size={18}/> {editingExisting ? 'Update Quotation' : 'Finalize & Generate Quotation'}
+            <FileText size={18}/> {editingExisting
+              ? 'Update Quotation'
+              : generateIntent === 'warranty'
+                ? 'Finalize & Generate Warranty'
+                : generateIntent === 'both'
+                  ? 'Finalize & Generate Quot + Warranty'
+                  : 'Finalize & Generate Quotation'}
           </button>
           
         </div>

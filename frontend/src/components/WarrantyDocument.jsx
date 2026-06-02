@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
-import { downloadWarrantyDocx } from '../api';
-import { elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { downloadWarrantyDocx, createWarranty } from '../api';
+import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 
 // ── Inline-Editable Cell ───────────────────────────────────────────────────
 function EditableCell({ value, onSave, multiline = false, style = {}, renderValue, hideIcon }) {
@@ -82,7 +82,7 @@ function parseHeatoutLiability(text) {
 export default function WarrantyDocument() {
   const {
     activeWarranty: doc, data, setData, setCurrentView,
-    setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, showToast
+    setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, setActiveTab, setGenerateIntent, showToast
   } = useAppContext();
 
   const [isDownloading, setIsDownloading] = React.useState(false);
@@ -135,54 +135,77 @@ export default function WarrantyDocument() {
   const customer  = doc.customer  || {};
   const certData  = doc.certData  || {};
 
-  const updateCertField = (field, value) => {
-    const updatedCertData = { ...certData, [field]: value };
-    const updatedDoc = { ...doc, certData: updatedCertData };
+  // Is this a standalone "Warranty Only" certificate? Its parent quotation is a
+  // hidden warrantyOnly record (or missing). Standalone certs have no real
+  // quotation to go back to, so the action bar adapts below.
+  const parentQuote = data.quotations?.find(q => q.id === doc.quotationId) || null;
+  const isStandalone = !parentQuote || parentQuote.warrantyOnly;
+
+  // ── In-place warranty editing — sibling of the quotation's persistDoc ───────
+  // Every edit persists immediately: it updates the active certificate + the
+  // warranty_certificates registry AND upserts to the backend (createWarranty),
+  // so warranty edits are saved exactly like quotation edits (previously they
+  // lived only in memory until the app happened to save on exit).
+  const certKey = (w) => w.id || w.warrantyNo;
+  const persistWarranty = (updatedDoc) => {
     setActiveWarranty(updatedDoc);
     setData(prev => {
       const h = prev.warranty_certificates || [];
-      const i = h.findIndex(w => w.warrantyNo === doc.warrantyNo);
-      if (i !== -1) { const nh = [...h]; nh[i] = updatedDoc; return { ...prev, warranty_certificates: nh }; }
-      return prev;
+      const i = h.findIndex(w => certKey(w) === certKey(doc));
+      if (i === -1) return prev;
+      const nh = [...h]; nh[i] = updatedDoc;
+      return { ...prev, warranty_certificates: nh };
     });
+    createWarranty(updatedDoc).catch(() => {}); // fire-and-forget; local copy already saved
   };
 
-  const updateCustomerField = (field, value) => {
-    const updatedDoc = { ...doc, customer: { ...customer, [field]: value } };
-    setActiveWarranty(updatedDoc);
-    setData(prev => {
-      const h = prev.warranty_certificates || [];
-      const i = h.findIndex(w => w.warrantyNo === doc.warrantyNo);
-      if (i !== -1) { const nh = [...h]; nh[i] = updatedDoc; return { ...prev, warranty_certificates: nh }; }
-      return prev;
-    });
+  // Keep the certificate's product snapshot (certData.product*) in step with the
+  // line it points at, mirroring the quotation's syncCertToQuotation.
+  const syncCert = (d) => {
+    const items = d.items || [];
+    let sel = items.find(it => it.cartId === d.certData?.selectedCartId);
+    if (!sel) sel = items.find(it => it.className === d.template?.forClass) || items[0] || null;
+    return {
+      ...d,
+      certData: {
+        ...d.certData,
+        productName: sel?.name ?? d.certData?.productName,
+        productColor: sel?.color ?? d.certData?.productColor,
+        productQty: sel?.qty ?? d.certData?.productQty,
+        productUnit: sel?.unit ?? d.certData?.productUnit,
+        selectedCartId: sel?.cartId ?? d.certData?.selectedCartId ?? '',
+      },
+    };
   };
 
-  const updateTemplateField = (field, value) => {
-    const updatedTemplate = { ...template, [field]: value };
-    const updatedDoc = { ...doc, template: updatedTemplate };
-    setActiveWarranty(updatedDoc);
-    setData(prev => {
-      const h = prev.warranty_certificates || [];
-      const i = h.findIndex(w => w.warrantyNo === doc.warrantyNo);
-      if (i !== -1) { const nh = [...h]; nh[i] = updatedDoc; return { ...prev, warranty_certificates: nh }; }
-      return prev;
-    });
-  };
+  const updateCertField = (field, value) =>
+    persistWarranty({ ...doc, certData: { ...certData, [field]: value } });
+
+  const updateCustomerField = (field, value) =>
+    persistWarranty({ ...doc, customer: { ...customer, [field]: value } });
+
+  const updateTemplateField = (field, value) =>
+    persistWarranty({ ...doc, template: { ...template, [field]: value } });
 
   const updateSection = (idx, field, value) => {
     const updatedSections = [...(template.sections || [])];
     updatedSections[idx] = { ...updatedSections[idx], [field]: value };
-    const updatedTemplate = { ...template, sections: updatedSections };
-    const updatedDoc = { ...doc, template: updatedTemplate };
-    setActiveWarranty(updatedDoc);
-    setData(prev => {
-      const h = prev.warranty_certificates || [];
-      const i = h.findIndex(w => w.warrantyNo === doc.warrantyNo);
-      if (i !== -1) { const nh = [...h]; nh[i] = updatedDoc; return { ...prev, warranty_certificates: nh }; }
-      return prev;
-    });
+    persistWarranty({ ...doc, template: { ...template, sections: updatedSections } });
   };
+
+  // ── Line-item editing (parity with the quotation) ──────────────────────────
+  const items = doc.items || [];
+  const updateItemField = (cartId, field, value) =>
+    persistWarranty(syncCert({ ...doc, items: items.map(it => it.cartId === cartId ? { ...it, [field]: value } : it) }));
+  const setItemQty = (cartId, v) =>
+    persistWarranty(syncCert({ ...doc, items: items.map(it => it.cartId === cartId ? { ...it, qty: Number(v) || 0 } : it) }));
+  const removeItemRow = (cartId) =>
+    persistWarranty(syncCert({ ...doc, items: items.filter(it => it.cartId !== cartId) }));
+  const addItemRow = () =>
+    persistWarranty(syncCert({ ...doc, items: [...items, { cartId: 'custom_' + Date.now(), id: 'custom', name: 'Custom Product / Item', className: 'Custom', qty: 1, unit: 'nos', color: '' }] }));
+
+  // ── Customer phone (parity with the quotation) ─────────────────────────────
+  const updateCustomerPhone = (v) => updateCustomerField('phone', v);
 
   const bodyInnerRef = React.useRef(null);
   React.useLayoutEffect(() => {
@@ -238,15 +261,8 @@ export default function WarrantyDocument() {
     setIsDownloading(true);
     if (showToast) showToast('Generating PDF…', 'info');
     try {
-      const canvas = await window.html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
-      const imgData = canvas.toDataURL('image/png');
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pw = pdf.internal.pageSize.getWidth();   // 210mm
-      const phMax = pdf.internal.pageSize.getHeight(); // 297mm
-      // The on-screen certificate is auto-fitted to exactly one A4 page, so it
-      // maps to a single full page (full width, no distortion, nothing cut).
-      pdf.addImage(imgData, 'PNG', 0, 0, pw, phMax);
+      // One engine: full-size, multi-page A4 (never shrunk/stretched). Same as Share.
+      const pdf = await elementToPdf(el);
       const r = await finishPdfSave(pdf, wName, dest);
       if (showToast) showToast(r === 'saved' ? 'PDF saved!' : 'PDF downloaded!', 'success');
     } catch (err) {
@@ -453,6 +469,15 @@ export default function WarrantyDocument() {
         }
         .wd-batch-warn { color: #dc2626; font-size: 8pt; margin-left: 6px; font-weight: 700; }
 
+        /* Editing affordances (add/remove buttons): visible on screen, never in
+           the exported/printed certificate. data-html2canvas-ignore keeps them out
+           of the Download/Share capture; the @media print rule keeps them out of
+           Ctrl+P. */
+        .wd-edit-only { }
+        .wd-rm-btn { background: transparent; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 8.5pt; padding: 0 0 0 6px; }
+        .wd-add-btn { padding: 5px 11px; border: 1.5px dashed #c9a3a3; border-radius: 6px; background: transparent; color: #8b1a1a; font-weight: 700; font-size: 9pt; cursor: pointer; margin-top: 6px; }
+        @media print { .wd-edit-only { display: none !important; } }
+
         /* ── Footer — always anchored to bottom, never scaled ── */
         .wd-sig-block { text-align: center; font-size: 10pt; color: #555; }
         .wd-sig-line {
@@ -500,8 +525,13 @@ export default function WarrantyDocument() {
             padding: 12mm 16mm !important;
           }
           @page { size: A4 portrait; margin: 0; }
+          /* Reset the on-screen fit-scale so the certificate prints at full size
+             and flows across pages instead of being squeezed onto one. */
+          .wd-body-inner { transform: none !important; width: 100% !important; }
           .wd-section { page-break-inside: avoid; }
           .wd-two-col { page-break-inside: avoid; }
+          .wd-cert-row { page-break-inside: avoid; }
+          .wd-edit-only { display: none !important; }
         }
       `}} />
 
@@ -509,14 +539,23 @@ export default function WarrantyDocument() {
 
         {/* ── ACTION BAR ── */}
         <div className="wd-actions">
-          <button onClick={() => setCurrentView('quotation_document')} className="hover-lift"
+          <button
+            onClick={() => {
+              if (isStandalone) { setCurrentView('warranties'); return; }
+              setActiveQuotation(parentQuote);
+              setActiveTab?.(doc.warrantyNo || doc.id);
+              setCurrentView('quotation_document');
+            }}
+            className="hover-lift"
             style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-            <ArrowLeft size={15}/> Back
+            <ArrowLeft size={15}/> {isStandalone ? 'Back to Warranties' : 'Back'}
           </button>
-          <button onClick={() => setCurrentView('checkout')} className="hover-lift"
-            style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-            <FileText size={15}/> Edit Checkout
-          </button>
+          {!isStandalone && (
+            <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift"
+              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
+              <FileText size={15}/> Edit Checkout
+            </button>
+          )}
           <div style={{ marginLeft:'auto', display:'flex', gap:'10px' }}>
             <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
@@ -576,7 +615,7 @@ export default function WarrantyDocument() {
           </div>{/* end wd-header */}
 
           <div style={{ flex: 1, position: 'relative', width: '100%', marginTop: '6px', marginBottom: '16px', minHeight: 0 }}>
-            <div ref={bodyInnerRef} style={{ width: '100%', transformOrigin: 'top left' }}>
+            <div ref={bodyInnerRef} className="wd-body-inner" style={{ width: '100%', transformOrigin: 'top left' }}>
 
           {/* ══ BANNER ══ */}
           <div className="wd-banner">Warranty Certificate</div>
@@ -737,6 +776,22 @@ export default function WarrantyDocument() {
           <div className="wd-cert-block">
             <div className="wd-cert-title">Certificate Details</div>
 
+            {/* Customer Name (editable — parity with quotation) */}
+            <div className="wd-cert-row">
+              <span className="wd-cert-lbl">Customer Name</span>
+              <span className="wd-cert-val">
+                <EditableCell value={customer.name} onSave={v => updateCustomerField('name', v)} />
+              </span>
+            </div>
+
+            {/* Customer Phone (editable — parity with quotation) */}
+            <div className="wd-cert-row">
+              <span className="wd-cert-lbl">Phone</span>
+              <span className="wd-cert-val">
+                <EditableCell value={customer.phone} onSave={updateCustomerPhone} />
+              </span>
+            </div>
+
             {/* Address Row (all templates) */}
             <div className="wd-cert-row">
               <span className="wd-cert-lbl">Address</span>
@@ -762,6 +817,33 @@ export default function WarrantyDocument() {
                   onSave={v => updateCertField('productName', v)}
                 />
               </span>
+            </div>
+
+            {/* Covered Products — full line-item editing (parity with quotation).
+                Add/remove/qty/name are editable; the add/remove affordances are
+                edit-only (kept out of the exported certificate). */}
+            {items.length > 0 && (
+              <div className="wd-cert-row" style={{ alignItems: 'flex-start' }}>
+                <span className="wd-cert-lbl">Covered Products</span>
+                <span className="wd-cert-val" style={{ borderBottom: 'none', padding: 0 }}>
+                  {items.map(it => (
+                    <div key={it.cartId} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', padding: '1px 0', borderBottom: '1px dotted #ddd' }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <EditableCell value={it.name} onSave={v => updateItemField(it.cartId, 'name', v)} />
+                      </span>
+                      <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                        <EditableCell value={it.qty} onSave={v => setItemQty(it.cartId, v)} style={{ width: '40px', display: 'inline-block', textAlign: 'right' }} hideIcon />
+                        &nbsp;{it.unit || 'nos'}
+                      </span>
+                      <button className="wd-edit-only wd-rm-btn" data-html2canvas-ignore="true"
+                        onClick={() => removeItemRow(it.cartId)} title="Remove this product">✕</button>
+                    </div>
+                  ))}
+                </span>
+              </div>
+            )}
+            <div className="wd-edit-only" data-html2canvas-ignore="true">
+              <button className="wd-add-btn" onClick={addItemRow}>+ Add product</button>
             </div>
 
             {/* Batch Number Row (Docke and Ceramic) */}

@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, Body, HTTPException
 
 from database import get_db
-from models import WarrantyCertificate
+from models import WarrantyCertificate, Quotation
 
 router = APIRouter()
 
@@ -43,9 +43,17 @@ def save_warranty(body: dict = Body(...)):
     wid = body.get("id")
     if not wid:
         raise HTTPException(status_code=400, detail="id is required")
+    # A warranty is never standalone — it must be linked to an existing quotation.
+    # This guarantees no orphan certificates can ever be created or updated.
+    quotation_id = body.get("quotationId", "")
+    if not quotation_id:
+        raise HTTPException(status_code=400, detail="warranty must be linked to a quotation")
     customer = body.get("customer", {})
     db = next(get_db())
     try:
+        parent = db.query(Quotation).filter(Quotation.id == quotation_id).first()
+        if parent is None:
+            raise HTTPException(status_code=400, detail="linked quotation does not exist")
         row = (
             db.query(WarrantyCertificate)
             .filter(WarrantyCertificate.id == wid)
@@ -54,7 +62,7 @@ def save_warranty(body: dict = Body(...)):
         if row is None:
             row = WarrantyCertificate(id=wid)
             db.add(row)
-        row.quotation_id = body.get("quotationId", "")
+        row.quotation_id = quotation_id
         row.customer_name = customer.get("name", "")
         row.date = body.get("date", "")
         row.data = json.dumps(body)

@@ -91,7 +91,7 @@ export default function BrandsSettings() {
   return (
     <div className="animate-fade-up" style={{ maxWidth: '900px', margin: '0 auto', padding: '8px 0 40px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-        <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#7C3AED18', color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Award size={20} />
         </div>
         <div>
@@ -110,7 +110,7 @@ export default function BrandsSettings() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Award size={15} color="#7C3AED" />
+                  <Award size={15} color="var(--accent)" />
                   <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>{brand.name || `Brand ${idx + 1}`}</span>
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-soft)', border: '1px solid var(--line)', borderRadius: '20px', padding: '2px 8px' }}>
                     {count} class{count === 1 ? '' : 'es'}
@@ -168,7 +168,7 @@ export default function BrandsSettings() {
         <button onClick={addBrand} className="hover-lift" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '14px',
           border: '1.5px dashed var(--line)', borderRadius: 'var(--radius)', background: 'var(--bg)',
-          color: '#7C3AED', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+          color: 'var(--accent)', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
         }}>
           <Plus size={16} /> Add Parent Brand
         </button>
@@ -177,7 +177,7 @@ export default function BrandsSettings() {
       <div style={{ position: 'sticky', bottom: '24px', display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
         <button onClick={handleSave} style={{
           display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 32px', fontSize: '15px', fontWeight: 700,
-          background: saved ? '#059669' : 'var(--ink)', color: 'white', border: 'none', borderRadius: 'var(--radius-full)',
+          background: saved ? 'var(--green)' : 'var(--accent)', color: 'white', border: 'none', borderRadius: 'var(--radius-full)',
           cursor: 'pointer', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
         }}>
           <Save size={18} /> {saved ? 'Saved!' : 'Save Brands'}
