@@ -15,18 +15,15 @@ They share the **same working files**, so this board is the lock. **Rules:**
 ---
 
 ## 🔒 In Progress (active file locks)
-_(BUILDER idle — queue drained except deferred #4. Awaiting TESTER to release
-backend/main.py, or new queue items.)_
+_(BUILDER idle — full queue drained. Awaiting TESTER green / new items.)_
 
 ## 📥 Build Queue (Builder works top-down)
-_(empty — see Deferred)_
+_(empty)_
 
 ## ⏸ Deferred
-4. Backend: per-record `updated_at` + `deleted_at` tombstones for delta sync.
-   BLOCKED: needs a migration hook in backend/main.py, which TESTER has
-   uncommitted edits in. Also only a delta-sync optimization — the global sync
-   revision already delivers cross-device propagation. Pick up when TESTER has
-   committed/released backend/main.py.
+- delete-tombstones (deleted_at) for true incremental delta sync — skipped to
+  avoid changing delete semantics + desktop-DB risk while TESTER is live. Deletes
+  currently propagate via the revision bump + full list refetch. Low priority.
 
 ## 🧪 Ready to Test (Builder → Tester handoff)
 _(Builder moves finished items here with the commit hash.)_
@@ -42,6 +39,7 @@ _(Tester logs failures here: what, where, repro. Builder fixes from the queue to
 - Mobile quotation PDF generate + native share (expo-print/sharing) — HTML builder tested green
 - Mobile catalogue browser + company details on Account screen — babel-validated
 - Web responsive polish (cart drawer width, product/variety grids, settings nav stack) — build green
+- Backend updated_at + GET /api/sync/changes delta endpoint + safe column migration (migrations.py, runs at sync.py import; no main.py edit) — delta + legacy-DB migration tested green
 
 ---
 

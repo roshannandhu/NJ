@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException
 
@@ -67,6 +68,7 @@ def save_warranty(body: dict = Body(...)):
         row.customer_name = customer.get("name", "")
         row.date = body.get("date", "")
         row.data = json.dumps(body)
+        row.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(row)
         sync_state.bump()

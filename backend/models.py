@@ -57,6 +57,9 @@ class Quotation(Base):
     grand_total = Column(Float, default=0)
     date = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Server time of the last write. Powers delta sync (GET /api/sync/changes).
+    # Existing DBs get this column added at startup by migrations.ensure_columns.
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     data = Column(Text, nullable=False)
 
 
@@ -68,4 +71,5 @@ class WarrantyCertificate(Base):
     customer_name = Column(String, default="")
     date = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     data = Column(Text, nullable=False)

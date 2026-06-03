@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Body, HTTPException
 
@@ -47,6 +48,7 @@ def save_quotation(body: dict = Body(...)):
         row.grand_total = body.get("grandTotal", 0)
         row.date = body.get("date", "")
         row.data = json.dumps(body)
+        row.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(row)
         sync_state.bump()
