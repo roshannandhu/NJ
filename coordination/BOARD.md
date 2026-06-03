@@ -15,10 +15,9 @@ They share the **same working files**, so this board is the lock. **Rules:**
 ---
 
 ## 🔒 In Progress (active file locks)
-_(none)_
+- BUILDER: mobile/src/api.js, mobile/App.js, mobile/src/screens/QuotationDocumentScreen.js — queue item #2 (PDF generate + share)
 
 ## 📥 Build Queue (Builder works top-down)
-1. Mobile: quotation **create** flow (catalogue browse → cart → save to cloud API).
 2. Mobile: PDF generate + native share (expo-print), reuse desktop doc layout.
 3. Mobile: catalogue + settings screens.
 4. Backend: per-record `updated_at` + `deleted_at` tombstones for delta sync.
@@ -34,6 +33,7 @@ _(Tester logs failures here: what, where, repro. Builder fixes from the queue to
 - Phase 1 backend (sync + auth + Postgres-ready) — 9f86a46
 - Phase 2 web login — cc57d56
 - Phase 3 mobile scaffold (read-only lists) — af73125
+- Mobile quotation CREATE flow (catalogue → qty → customer → save) — payload tested green
 
 ---
 

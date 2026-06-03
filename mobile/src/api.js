@@ -62,6 +62,10 @@ export function listWarranties() { return req('/api/warranties'); }
 export function getQuotation(id) { return req(`/api/quotations/${encodeURIComponent(id)}`); }
 export function getWarranty(id) { return req(`/api/warranties/${encodeURIComponent(id)}`); }
 
+export function createQuotation(q) {
+  return req('/api/quotations', { method: 'POST', body: JSON.stringify(q) });
+}
+
 // ── Live sync heartbeat (same revision counter the PC polls) ──
 export function getSyncVersion() { return req('/api/sync/version'); }
 
