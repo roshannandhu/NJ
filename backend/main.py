@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,9 @@ import auth
 from routers import backup, config, quotations, uploads, warranties, warranty_docx, share, sync, admin
 from routers import auth as auth_router
 
+# Refuse to start in a dangerous cloud config (auth on + default JWT secret).
+# No-op on the local desktop where auth is disabled.
+auth.assert_secure_config()
 # Create tables before anything tries to read them (backup engine reads state).
 Base.metadata.create_all(bind=engine)
 # First-run cloud admin (no-op locally / when bootstrap env vars are unset).
@@ -37,10 +41,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NJ India System", lifespan=lifespan)
 
+# CORS origins: comma-separated NJ_CORS_ORIGINS locks the API to specific
+# domains in the cloud; unset keeps the open "*" the local same-origin desktop
+# app has always used. With "*" we must NOT allow credentials (browsers reject
+# that combo, and the app authenticates with Bearer tokens, not cookies).
+_cors_env = os.environ.get("NJ_CORS_ORIGINS", "").strip()
+_cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -22,7 +22,8 @@ import json
 import os
 import time
 
-SECRET = os.environ.get("NJ_JWT_SECRET", "dev-insecure-secret-change-in-cloud")
+DEFAULT_DEV_SECRET = "dev-insecure-secret-change-in-cloud"
+SECRET = os.environ.get("NJ_JWT_SECRET", DEFAULT_DEV_SECRET)
 AUTH_REQUIRED = os.environ.get("NJ_AUTH_REQUIRED", "").strip().lower() in (
     "1", "true", "yes", "on",
 )
@@ -95,6 +96,33 @@ def bearer_token(request) -> str | None:
     if h and h.lower().startswith("bearer "):
         return h[7:].strip()
     return None
+
+
+def current_identity(request):
+    """Return (username, role) for the caller.
+
+    When auth is disabled (local desktop) every caller is the synthetic
+    ('local', 'admin') so role-gated routes keep working offline. When auth is
+    enabled, the identity comes from a valid Bearer token, else (None, None)."""
+    if not AUTH_REQUIRED:
+        return ("local", "admin")
+    token = bearer_token(request)
+    payload = verify_token(token) if token else None
+    if not payload:
+        return (None, None)
+    return (payload.get("sub"), payload.get("role"))
+
+
+def assert_secure_config():
+    """Fail fast on a dangerous cloud misconfiguration: enforcing login while
+    still signing tokens with the public dev secret would make every token
+    forgeable. No-op on the local desktop (auth disabled)."""
+    if AUTH_REQUIRED and SECRET == DEFAULT_DEV_SECRET:
+        raise RuntimeError(
+            "NJ_AUTH_REQUIRED is set but NJ_JWT_SECRET is still the default dev "
+            "secret. Set NJ_JWT_SECRET to a strong random value before enabling "
+            "authentication."
+        )
 
 
 def bootstrap_admin():
