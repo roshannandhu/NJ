@@ -39,6 +39,7 @@ export default function QuotationDesk() {
   const [selections, setSelections] = React.useState({});
   const [addedItems, setAddedItems] = React.useState({});
   const [activeClassId, setActiveClassId] = React.useState(null);
+  const [openBrandId, setOpenBrandId] = React.useState(null);
   const [moreCustomer, setMoreCustomer] = React.useState(false);
 
   const toolsActive = catalogView === TOOLS_SECTION_ID;
@@ -68,12 +69,31 @@ export default function QuotationDesk() {
     return groups;
   }, [brands, railClasses]);
 
-  // Default / keep a valid active class for the current tab.
+  // Clear (never auto-pick) a stale selection so the rail opens fully collapsed:
+  // first load shows only brands, and switching tabs never forces a class open.
   React.useEffect(() => {
-    if (!railClasses.some(c => c.id === activeClassId)) {
-      setActiveClassId(railClasses[0]?.id || null);
+    if (activeClassId && !railClasses.some(c => c.id === activeClassId)) {
+      setActiveClassId(null);
     }
-  }, [railClasses, activeClassId]);
+    if (openBrandId && !brandGroups.some(g => (g.brand?.id || 'orphan') === openBrandId)) {
+      setOpenBrandId(null);
+    }
+  }, [railClasses, activeClassId, brandGroups, openBrandId]);
+
+  // Brand accordion (single-open). Opening a brand reveals its classes and
+  // auto-selects the first so the centre fills immediately; clicking the open
+  // brand again collapses it and clears the centre.
+  const toggleBrand = (brand, items) => {
+    const id = brand?.id || 'orphan';
+    if (openBrandId === id) {
+      setOpenBrandId(null);
+      setActiveClassId(null);
+    } else {
+      setOpenBrandId(id);
+      setActiveClassId(items[0]?.id || null);
+      setSearch('');
+    }
+  };
 
   const allClasses = data.classes || [];
   const allVarieties = data.varieties || [];
@@ -231,10 +251,10 @@ export default function QuotationDesk() {
           <span className="qd2-rail-label">Catalogue</span>
           <div className={`qd2-seg${toolsActive ? ' tools' : ''}`}>
             <span className="qd2-seg-thumb" />
-            <button type="button" className={!toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView('products'); setSearch(''); }}>
+            <button type="button" className={!toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView('products'); setSearch(''); setOpenBrandId(null); setActiveClassId(null); }}>
               <Layers size={15} /> Products
             </button>
-            <button type="button" className={toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView(TOOLS_SECTION_ID); setSearch(''); }}>
+            <button type="button" className={toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView(TOOLS_SECTION_ID); setSearch(''); setOpenBrandId(null); setActiveClassId(null); }}>
               <Wrench size={15} /> Tools
             </button>
           </div>
@@ -247,37 +267,54 @@ export default function QuotationDesk() {
               <strong>No {toolsActive ? 'tools' : 'classes'} yet</strong>
               <span>Add them in Settings.</span>
             </div>
-          ) : brandGroups.map(({ brand, items }) => (
-            <div className="qd2-brand-group" key={brand?.id || 'orphan'}>
-              <div className="qd2-brand-head">
-                {brand?.logo && <img src={mediaUrl(brand.logo)} alt="" />}
-                <span>{brand?.name || 'Other'}</span>
+          ) : brandGroups.map(({ brand, items }) => {
+            const brandKey = brand?.id || 'orphan';
+            const isOpen = openBrandId === brandKey;
+            return (
+            <div className="qd2-brand-group" key={brandKey}>
+              <button
+                type="button"
+                className={`qd2-brand-head${isOpen ? ' is-open' : ''}`}
+                onClick={() => toggleBrand(brand, items)}
+                aria-expanded={isOpen}
+              >
+                {brand?.logo
+                  ? <img src={mediaUrl(brand.logo)} alt="" />
+                  : <span className="qd2-brand-mark">{(brand?.name || 'O').charAt(0).toUpperCase()}</span>}
+                <span className="qd2-brand-name">{brand?.name || 'Other'}</span>
+                <span className="qd2-brand-count">{items.length}</span>
+                <ChevronRight size={16} className="qd2-brand-chev" />
+              </button>
+              <div className={`qd2-brand-classes${isOpen ? ' is-open' : ''}`}>
+                <div className="qd2-brand-classes-inner">
+                  {items.map(cls => {
+                    const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
+                    return (
+                      <button
+                        key={cls.id}
+                        type="button"
+                        className={`qd2-class${cls.id === activeClassId && !normalizedSearch ? ' is-active' : ''}`}
+                        onClick={() => { setActiveClassId(cls.id); setSearch(''); }}
+                      >
+                        <div className="qd2-class-thumb" style={cls.logo ? { backgroundImage: `url("${escapeCssUrl(cls.logo)}")` } : { background: cls.color || '#8a857a' }}>
+                          {!cls.logo && (cls.name || '?').charAt(0).toUpperCase()}
+                        </div>
+                        <div className="qd2-class-copy">
+                          <h4>{cls.name}</h4>
+                          <p>{cls.subtitle || 'Product class'}</p>
+                          <div className="qd2-class-meta">
+                            <span className="qd2-count-chip">{classVarietyCount(cls.id)}</span>
+                            {warranty && <span className="qd2-shield"><ShieldCheck size={10} /> Warranty</span>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              {items.map(cls => {
-                const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
-                return (
-                  <button
-                    key={cls.id}
-                    type="button"
-                    className={`qd2-class${cls.id === activeClassId && !normalizedSearch ? ' is-active' : ''}`}
-                    onClick={() => { setActiveClassId(cls.id); setSearch(''); }}
-                  >
-                    <div className="qd2-class-thumb" style={cls.logo ? { backgroundImage: `url("${escapeCssUrl(cls.logo)}")` } : { background: cls.color || '#8a857a' }}>
-                      {!cls.logo && (cls.name || '?').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="qd2-class-copy">
-                      <h4>{cls.name}</h4>
-                      <p>{cls.subtitle || 'Product class'}</p>
-                      <div className="qd2-class-meta">
-                        <span className="qd2-count-chip">{classVarietyCount(cls.id)}</span>
-                        {warranty && <span className="qd2-shield"><ShieldCheck size={10} /> Warranty</span>}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
             </div>
-          ))}
+            );
+          })}
         </div>
       </aside>
 
@@ -291,7 +328,7 @@ export default function QuotationDesk() {
               {activeBrand?.name && <>{activeBrand.name} <ChevronRight size={14} /> </>}
               <b>{activeClass.name}</b> <span className="qd2-cnt">· {gridItems.length} products</span>
             </div>
-          ) : <div className="qd2-crumb">Select a class</div>}
+          ) : <div className="qd2-crumb">Select a brand</div>}
 
           <div className="qd2-search">
             <Search size={16} />
@@ -312,7 +349,13 @@ export default function QuotationDesk() {
           </div>
         )}
 
-        {gridItems.length === 0 ? (
+        {!normalizedSearch && !activeClass ? (
+          <div className="qd2-empty">
+            <div className="qd2-empty-icon">{toolsActive ? <Wrench size={26} /> : <Layers size={26} />}</div>
+            <strong>Select a {toolsActive ? 'tool brand' : 'brand'} to begin</strong>
+            <span>Pick a brand on the left to reveal its classes, then choose one.</span>
+          </div>
+        ) : gridItems.length === 0 ? (
           <div className="qd2-empty">
             <div className="qd2-empty-icon"><Package size={26} /></div>
             <strong>{normalizedSearch ? 'No matching products' : 'No products in this class'}</strong>

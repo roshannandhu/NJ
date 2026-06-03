@@ -28,7 +28,7 @@ const normalizeCartSpelling = (record) => {
 };
 
 export function AppProvider({ children }) {
-  const [currentView, setCurrentView] = useState('dashboard'); // dashboard, quotation_desk, checkout, quotations, warranties, settings
+  const [currentView, setCurrentView] = useState('quotation_desk'); // dashboard, quotation_desk, checkout, quotations, warranties, settings
   const [selectedClassId, setSelectedClassId] = useState(null);
   const [selectedVarietyId, setSelectedVarietyId] = useState(null);
   

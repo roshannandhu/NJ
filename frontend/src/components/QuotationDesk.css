@@ -106,14 +106,46 @@
 .qd2-seg.tools .qd2-seg-thumb { transform: translateX(100%); }
 
 .qd2-rail-list { padding: 8px; flex: 1; }
-.qd2-brand-group + .qd2-brand-group { margin-top: 4px; }
+.qd2-brand-group + .qd2-brand-group { margin-top: 6px; }
+
+/* Brand row = the accordion toggle (big logo + name; classes nest below). */
 .qd2-brand-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 10px 6px; position: sticky; top: 0; z-index: 2;
-  background: linear-gradient(var(--surface) 70%, rgba(255,255,255,0));
+  display: flex; align-items: center; gap: 11px;
+  width: 100%; text-align: left;
+  padding: 12px 12px; border: 1px solid transparent; border-radius: 12px;
+  background: var(--bg-warm); cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, box-shadow 0.18s;
 }
-.qd2-brand-head img { height: 18px; width: auto; max-width: 46px; object-fit: contain; }
-.qd2-brand-head span { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-mid); }
+.qd2-brand-head:hover { background: var(--surface); border-color: var(--line); }
+.qd2-brand-head.is-open {
+  background: var(--surface); border-color: var(--line);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+.qd2-brand-head img { height: 34px; width: auto; max-width: 64px; object-fit: contain; }
+.qd2-brand-mark {
+  width: 34px; height: 34px; flex-shrink: 0; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent-deep);
+  font-weight: 800; font-size: 16px;
+}
+.qd2-brand-name { font-size: 14px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qd2-brand-count {
+  margin-left: auto; flex-shrink: 0;
+  font-size: 11px; font-weight: 800; color: var(--ink-mid);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px;
+}
+.qd2-brand-head.is-open .qd2-brand-count { background: var(--bg-warm); }
+.qd2-brand-chev { flex-shrink: 0; color: var(--ink-soft); transition: transform 0.3s cubic-bezier(0.4,0,0.2,1); }
+.qd2-brand-head.is-open .qd2-brand-chev { transform: rotate(90deg); }
+
+/* Collapsible class list — animates height via CSS grid 0fr → 1fr. */
+.qd2-brand-classes {
+  display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows 0.34s cubic-bezier(0.4,0,0.2,1), opacity 0.24s ease;
+}
+.qd2-brand-classes.is-open { grid-template-rows: 1fr; opacity: 1; }
+.qd2-brand-classes-inner { min-height: 0; overflow: hidden; padding: 2px 0 2px 4px; }
 
 .qd2-class {
   display: flex; align-items: center; gap: 11px;
@@ -271,7 +303,8 @@
 .qd2-gridwrap { animation: qd2-fade 0.3s ease; }
 
 @media (prefers-reduced-motion: reduce) {
-  .qd2-card, .qd2-card-media img, .qd2-add, .qd2-swatch, .qd2-class, .qd2-seg-thumb, .qd2-gridwrap {
+  .qd2-card, .qd2-card-media img, .qd2-add, .qd2-swatch, .qd2-class, .qd2-seg-thumb, .qd2-gridwrap,
+  .qd2-brand-classes, .qd2-brand-chev {
     animation: none !important;
     transition: none !important;
   }
