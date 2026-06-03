@@ -14,8 +14,13 @@ They share the **same working files**, so this board is the lock. **Rules:**
 
 ---
 
+## ✅✅ RUN COMPLETE — merged to main (ca5904f) on 2026-06-03
+Builder queue fully shipped + tester hardening committed; phase1-cloud-sync
+fast-forward-merged into main (10 commits ahead of origin, NOT pushed). Both
+terminals can stop. Next real step is DEPLOYMENT (needs a hosting account).
+
 ## 🔒 In Progress (active file locks)
-_(BUILDER idle — full queue drained. Awaiting TESTER green / new items.)_
+_(none — both terminals idle)_
 
 ## 📥 Build Queue (Builder works top-down)
 _(empty)_
