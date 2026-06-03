@@ -1,8 +1,9 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
-import { downloadWarrantyDocx, createWarranty } from '../api';
+import { downloadWarrantyDocx, createWarranty, mediaUrl } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import BrandWatermark from './BrandWatermark';
 
 // ── Inline-Editable Cell ───────────────────────────────────────────────────
 function EditableCell({ value, onSave, multiline = false, style = {}, renderValue, hideIcon }) {
@@ -299,6 +300,30 @@ export default function WarrantyDocument() {
 
   const certRef = doc.warrantyNo || doc.id || 'NJ-W-0001';
 
+  // Dominant brand across the certificate's items (most items wins, ties → first
+  // appearance). Used for the faint brand watermark. Returns { id, name, logo(URL) }
+  // or null when no item carries a brand (then the generic "WARRANTY" shows).
+  const getDominantBrand = (list) => {
+    const counts = new Map();
+    (list || []).forEach((it, idx) => {
+      const cls = data.classes?.find(c => c.name === it.className);
+      const brandId = it.brandId || cls?.brandId;
+      if (!brandId) return;
+      const nm = it.brandName || (data.brands || []).find(b => b.id === brandId)?.name || '';
+      const cur = counts.get(brandId);
+      if (cur) cur.count++; else counts.set(brandId, { count: 1, firstIdx: idx, name: nm });
+    });
+    if (!counts.size) return null;
+    let best = null;
+    for (const [id, v] of counts) {
+      if (!best || v.count > best.count || (v.count === best.count && v.firstIdx < best.firstIdx)) best = { id, ...v };
+    }
+    const brand = (data.brands || []).find(b => b.id === best.id);
+    const logo = brand?.logo ? mediaUrl(brand.logo) : '';
+    const name = best.name || brand?.name || '';
+    return (name || logo) ? { id: best.id, name, logo } : null;
+  };
+
   const sections = template.sections || [];
   const half = sections.length === 3 ? 1 : Math.ceil(sections.length / 2);
   const leftSections = sections.slice(0, half);
@@ -371,6 +396,12 @@ export default function WarrantyDocument() {
           font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none;
           color: rgba(0,0,0,0.028); white-space: nowrap; letter-spacing: 0.1em;
           font-family: 'Times New Roman', serif;
+        }
+        /* Brand-logo watermark: single, centred, faint, grayscale — never tiled. */
+        .wd-wm-logo {
+          max-width: 55%; max-height: 50%; width: auto; height: auto;
+          object-fit: contain; opacity: 0.06; filter: grayscale(100%);
+          display: block; margin: 0 auto;
         }
 
         /* ── Header ── */
@@ -587,7 +618,7 @@ export default function WarrantyDocument() {
             ════════════════════════════════════════════════════════ */}
         <div className={`warranty-doc${(isHeatout || isStoneCoated) ? ' is-dense' : ''}`} id="warrantyDoc">
 
-          <div className="wd-wm">WARRANTY</div>
+          <BrandWatermark brand={getDominantBrand(items)} fallbackText="WARRANTY" />
 
           {/* ══ HEADER ══ */}
           <div className="wd-header">

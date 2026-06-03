@@ -4,6 +4,7 @@ import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2
 import { downloadWarrantyDocx, mediaUrl, createQuotation, createWarranty } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
+import BrandWatermark from './BrandWatermark';
 
 // ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
 function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
@@ -405,19 +406,9 @@ export default function QuotationDocument() {
     showToast("Generating PDF...", "info");
 
     try {
-      const canvas = await window.html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff'
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pw = pdf.internal.pageSize.getWidth();    // 210mm
-      const phMax = pdf.internal.pageSize.getHeight(); // 297mm
-      // The certificate is auto-fitted to exactly one A4 page → one full page.
-      pdf.addImage(imgData, 'PNG', 0, 0, pw, phMax);
-
+      // One engine: full-size, aspect-preserved, single A4 page, no page frame.
+      // Identical to the standalone warranty Download and to Share.
+      const pdf = await elementToPdf(element);
       const r = await finishPdfSave(pdf, wName, dest);
       showToast(r === 'saved' ? "Warranty PDF saved!" : "Warranty PDF downloaded successfully!", "success");
     } catch (error) {
@@ -477,6 +468,33 @@ export default function QuotationDocument() {
     const name = item?.brandName || brand?.name || '';
     const logo = brand?.logo || '';
     return (name || logo) ? { name, logo } : null;
+  };
+
+  // Resolve the DOMINANT brand across a set of line items for the watermark: the
+  // brand with the most items wins, ties broken by first appearance. Returns
+  // { id, name, logo(URL) } or null when no item carries a brand. Mirrors
+  // getBrandForClass's snapshot rule (per-item brandName wins; logo from the live
+  // brand record resolved through mediaUrl).
+  const getDominantBrand = (items) => {
+    const list = items || [];
+    const counts = new Map();
+    list.forEach((it, idx) => {
+      const cls = data.classes?.find(c => c.name === it.className);
+      const brandId = it.brandId || cls?.brandId;
+      if (!brandId) return;
+      const nm = it.brandName || (data.brands || []).find(b => b.id === brandId)?.name || '';
+      const cur = counts.get(brandId);
+      if (cur) cur.count++; else counts.set(brandId, { count: 1, firstIdx: idx, name: nm });
+    });
+    if (!counts.size) return null;
+    let best = null;
+    for (const [id, v] of counts) {
+      if (!best || v.count > best.count || (v.count === best.count && v.firstIdx < best.firstIdx)) best = { id, ...v };
+    }
+    const brand = (data.brands || []).find(b => b.id === best.id);
+    const logo = brand?.logo ? mediaUrl(brand.logo) : '';
+    const name = best.name || brand?.name || '';
+    return (name || logo) ? { id: best.id, name, logo } : null;
   };
 
   // Table 1: Class Description cell. Priority: per-quotation override →
@@ -772,12 +790,18 @@ export default function QuotationDocument() {
         .q-editable:hover { background: rgba(138,24,86,0.06); outline: 1px dashed rgba(138,24,86,0.4); }
         body[data-quotation-editing="true"] #quotationSheet { transform: none !important; margin-bottom: 0 !important; }
 
-        .warranty-doc .wd-wm {
+        .warranty-doc .wd-wm, #quotationSheet .wd-wm {
           position: absolute; top: 50%; left: 50%;
           transform: translate(-50%,-50%) rotate(-30deg);
           font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none;
           color: rgba(0,0,0,0.028); white-space: nowrap; letter-spacing: 0.1em;
           font-family: 'Times New Roman', serif;
+        }
+        /* Brand-logo watermark: single, centred, faint, grayscale — never tiled. */
+        .wd-wm-logo {
+          max-width: 55%; max-height: 50%; width: auto; height: auto;
+          object-fit: contain; opacity: 0.06; filter: grayscale(100%);
+          display: block; margin: 0 auto;
         }
 
         .warranty-doc .wd-logo {
@@ -1099,8 +1123,11 @@ export default function QuotationDocument() {
                 width: '100%', maxWidth: '860px', background: '#FFFFFF',
                 padding: D.pad, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
                 color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
-                border: '1px solid #E5E7EB',
+                border: '1px solid #E5E7EB', position: 'relative',
               }}>
+
+              {/* ── Brand watermark (faint, behind content; nothing if no brand) ── */}
+              <BrandWatermark brand={getDominantBrand(doc.items)} fallbackText="" />
 
               {/* ── HEADER ── */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: D.divMb }}>
@@ -1582,7 +1609,7 @@ export default function QuotationDocument() {
             return (
             <div className={`warranty-doc${(isHeatout || isStoneCoated) ? ' is-dense' : ''}`} id="warrantyDoc">
 
-              <div className="wd-wm">WARRANTY</div>
+              <BrandWatermark brand={getDominantBrand(activeCert?.items || doc.items)} fallbackText="WARRANTY" />
 
               <div className="wd-header">
                 {tmpl.logo && tmpl.logo.startsWith('data:image/') ? (

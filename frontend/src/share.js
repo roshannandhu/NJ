@@ -48,6 +48,27 @@ function restoreScale(saved) {
   }
 }
 
+// Strip the on-screen frame (border / shadow / rounded corners) from the captured
+// ROOT element for the duration of the export only. The quotation sheet and the
+// warranty certificate both draw a thin border + drop shadow so they look like a
+// page on screen; html2canvas does NOT honour our @media print rules, so without
+// this the frame would bake into the downloaded/shared PDF. Inline styles outrank
+// the .warranty-doc class rule, so nulling them here removes both the quotation's
+// inline border and the warranty's class border. Restored in elementToPdf's
+// finally, leaving the on-screen preview untouched.
+function stripFrame(el) {
+  const s = { el, border: el.style.border, boxShadow: el.style.boxShadow, borderRadius: el.style.borderRadius };
+  el.style.border = 'none';
+  el.style.boxShadow = 'none';
+  el.style.borderRadius = '0';
+  return s;
+}
+function restoreFrame(s) {
+  s.el.style.border = s.border;
+  s.el.style.boxShadow = s.boxShadow;
+  s.el.style.borderRadius = s.borderRadius;
+}
+
 // ── ONE PDF engine for everything ───────────────────────────────────────────
 // Preview, Download, Print and Share must all produce the SAME document. The NJ
 // quotation and warranty are designed as single A4 pages (the quotation uses
@@ -57,6 +78,7 @@ function restoreScale(saved) {
 // overflow — so it never spills a sliver onto an unwanted second page.
 export async function elementToPdf(el) {
   const saved = neutralizeScale(el);
+  const savedFrame = stripFrame(el); // remove the page border/shadow from the capture only
   void el.offsetHeight; // force a synchronous reflow so the capture sees full size
   try {
     const canvas = await window.html2canvas(el, {
@@ -83,6 +105,7 @@ export async function elementToPdf(el) {
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - imgW) / 2, 0, imgW, imgH);
     return pdf;
   } finally {
+    restoreFrame(savedFrame);
     restoreScale(saved);
   }
 }
