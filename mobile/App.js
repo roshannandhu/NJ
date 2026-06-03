@@ -12,6 +12,7 @@ import { AuthProvider, useAuth } from './src/AuthContext';
 import LoginScreen from './src/screens/LoginScreen';
 import QuotationsScreen from './src/screens/QuotationsScreen';
 import NewQuotationScreen from './src/screens/NewQuotationScreen';
+import QuotationDocumentScreen from './src/screens/QuotationDocumentScreen';
 import WarrantiesScreen from './src/screens/WarrantiesScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import { colors } from './src/theme';
@@ -47,6 +48,7 @@ function QuotationsStack() {
         })}
       />
       <QStack.Screen name="NewQuotation" component={NewQuotationScreen} options={{ title: 'New Quotation' }} />
+      <QStack.Screen name="QuotationDocument" component={QuotationDocumentScreen} options={{ title: 'Quotation' }} />
     </QStack.Navigator>
   );
 }

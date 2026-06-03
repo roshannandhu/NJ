@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useAuth } from '../AuthContext';
 import { colors } from '../theme';
 
@@ -7,7 +7,7 @@ import { colors } from '../theme';
 // of records; `subtitle` derives the secondary line per record. The list
 // auto-refreshes whenever the global sync revision changes (another device made
 // an edit), and supports pull-to-refresh.
-export default function RecordListScreen({ fetcher, emptyText }) {
+export default function RecordListScreen({ fetcher, emptyText, onPressItem }) {
   const { revision } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,14 +39,15 @@ export default function RecordListScreen({ fetcher, emptyText }) {
     const name = item?.customer?.name || item?.customerName || 'Unnamed';
     const date = item?.date || '';
     const total = item?.grandTotal;
+    const Wrapper = onPressItem ? TouchableOpacity : View;
     return (
-      <View style={styles.row}>
+      <Wrapper style={styles.row} {...(onPressItem ? { onPress: () => onPressItem(item), activeOpacity: 0.7 } : {})}>
         <View style={{ flex: 1 }}>
           <Text style={styles.name} numberOfLines={1}>{name}</Text>
           <Text style={styles.meta}>{date}{item?.id ? `  ·  ${item.id}` : ''}</Text>
         </View>
         {total != null && <Text style={styles.total}>{fmtMoney(total)}</Text>}
-      </View>
+      </Wrapper>
     );
   };
 
