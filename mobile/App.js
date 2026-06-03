@@ -14,6 +14,7 @@ import QuotationsScreen from './src/screens/QuotationsScreen';
 import NewQuotationScreen from './src/screens/NewQuotationScreen';
 import QuotationDocumentScreen from './src/screens/QuotationDocumentScreen';
 import WarrantiesScreen from './src/screens/WarrantiesScreen';
+import CatalogueScreen from './src/screens/CatalogueScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import { colors } from './src/theme';
 
@@ -23,6 +24,7 @@ const QStack = createNativeStackNavigator();
 const ICONS = {
   Quotations: 'document-text-outline',
   Warranties: 'shield-checkmark-outline',
+  Catalogue: 'pricetags-outline',
   Account: 'person-circle-outline',
 };
 
@@ -69,6 +71,7 @@ function Tabs() {
     >
       <Tab.Screen name="Quotations" component={QuotationsStack} options={{ headerShown: false }} />
       <Tab.Screen name="Warranties" component={WarrantiesScreen} />
+      <Tab.Screen name="Catalogue" component={CatalogueScreen} />
       <Tab.Screen name="Account" component={AccountScreen} />
     </Tab.Navigator>
   );

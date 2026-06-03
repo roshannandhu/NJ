@@ -15,10 +15,11 @@ They share the **same working files**, so this board is the lock. **Rules:**
 ---
 
 ## 🔒 In Progress (active file locks)
-- BUILDER: mobile/App.js, mobile/src/screens/CatalogueScreen.js — queue item #3 (catalogue + settings screens)
+- BUILDER: queue item #4 (backend updated_at + tombstones). NOTE: TESTER has been
+  editing backend/ — will lock specific files (models.py, routers/quotations.py,
+  routers/warranties.py, routers/sync.py) just before editing each.
 
 ## 📥 Build Queue (Builder works top-down)
-3. Mobile: catalogue + settings screens.
 4. Backend: per-record `updated_at` + `deleted_at` tombstones for delta sync.
 5. Web: responsive/mobile polish of existing desktop screens.
 
@@ -34,6 +35,7 @@ _(Tester logs failures here: what, where, repro. Builder fixes from the queue to
 - Phase 3 mobile scaffold (read-only lists) — af73125
 - Mobile quotation CREATE flow (catalogue → qty → customer → save) — payload tested green
 - Mobile quotation PDF generate + native share (expo-print/sharing) — HTML builder tested green
+- Mobile catalogue browser + company details on Account screen — babel-validated
 
 ---
 
