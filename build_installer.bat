@@ -82,14 +82,24 @@ REM setuptools+wheel are needed to build pywebview's pure-python deps (proxy_too
 echo.
 echo ========== [4/5] Building installer (Inno Setup) ==========
 cd /d "%ROOT%" || goto :err
-where iscc >nul 2>nul
-if errorlevel 1 (
+
+REM Locate iscc.exe: PATH first, then the common Inno Setup 6 install folders.
+set "ISCC="
+for %%I in (iscc.exe) do if not defined ISCC if exist "%%~$PATH:I" set "ISCC=%%~$PATH:I"
+if not defined ISCC if exist "E:\Inno Setup 6\ISCC.exe"                    set "ISCC=E:\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"   set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe"        set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+
+if not defined ISCC (
   echo.
-  echo [WARN] iscc.exe is not on PATH.
-  echo        Open installer.iss in Inno Setup 6 and click Build^>Compile.
+  echo [WARN] iscc.exe not found ^(checked PATH and Inno Setup 6 folders^).
+  echo        Install Inno Setup 6 from https://jrsoftware.org/isdl.php, or
+  echo        open installer.iss in Inno Setup and click Build^>Compile.
   goto :done
 )
-iscc "%ROOT%installer.iss" || goto :err
+
+echo Using Inno Setup compiler: "%ISCC%"
+"%ISCC%" "%ROOT%installer.iss" || goto :err
 
 echo.
 echo ========== [5/5] Done ==========
