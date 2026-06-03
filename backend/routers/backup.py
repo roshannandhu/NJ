@@ -225,18 +225,104 @@ def restore_path(body: dict = Body(...)):
 
 
 # ── auto-detect helpers ──────────────────────────────────────────────────────
-@router.get("/api/backup/detect-gdrive")
-def detect_gdrive():
+def _detect_gdrive_root():
+    """Locate a Google Drive (Drive for Desktop) folder. Returns the root Path
+    of the sync folder, or None. Handles both the home-folder layout and the
+    virtual lettered drive that Drive for Desktop mounts (e.g. G:\\My Drive)."""
     home = Path.home()
     candidates = [
         home / "Google Drive",
         home / "My Drive",
         home / "GoogleDrive",
     ]
+    # Drive for Desktop usually mounts a virtual drive letter with "My Drive"
+    # (and optionally shared drives) at its root.
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        root = Path(f"{letter}:\\")
+        candidates.append(root / "My Drive")
+        candidates.append(root / "Google Drive")
     for p in candidates:
+        try:
+            if p.exists() and p.is_dir():
+                return p
+        except OSError:
+            continue
+    return None
+
+
+def _detect_onedrive_root():
+    """Locate the OneDrive sync folder via the env vars OneDrive sets, then the
+    home-folder fallback. Returns a Path or None."""
+    import os
+    for var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        val = os.environ.get(var)
+        if val:
+            p = Path(val)
+            try:
+                if p.exists() and p.is_dir():
+                    return p
+            except OSError:
+                pass
+    p = Path.home() / "OneDrive"
+    try:
         if p.exists() and p.is_dir():
-            return {"found": True, "path": str(p / "NJ_Backups")}
+            return p
+    except OSError:
+        pass
+    return None
+
+
+def _detect_dropbox_root():
+    """Locate the Dropbox folder from its authoritative info.json, falling back
+    to the home folder. Returns a Path or None."""
+    import os
+    for base in (os.environ.get("LOCALAPPDATA"), os.environ.get("APPDATA")):
+        if not base:
+            continue
+        info = Path(base) / "Dropbox" / "info.json"
+        try:
+            if info.exists():
+                data = json.loads(info.read_text(encoding="utf-8"))
+                for key in ("personal", "business"):
+                    entry = data.get(key) or {}
+                    path = entry.get("path")
+                    if path and Path(path).exists():
+                        return Path(path)
+        except Exception:
+            pass
+    p = Path.home() / "Dropbox"
+    try:
+        if p.exists() and p.is_dir():
+            return p
+    except OSError:
+        pass
+    return None
+
+
+_CLOUD_DETECTORS = {
+    "gdrive": _detect_gdrive_root,
+    "onedrive": _detect_onedrive_root,
+    "dropbox": _detect_dropbox_root,
+}
+
+
+@router.get("/api/backup/detect-cloud")
+def detect_cloud(provider: str = "gdrive"):
+    """Auto-detect a cloud sync folder (gdrive | onedrive | dropbox) and return
+    a suggested NJ_Backups subfolder inside it."""
+    detector = _CLOUD_DETECTORS.get(provider)
+    if detector is None:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    root = detector()
+    if root is not None:
+        return {"found": True, "path": str(root / "NJ_Backups")}
     return {"found": False, "path": ""}
+
+
+@router.get("/api/backup/detect-gdrive")
+def detect_gdrive():
+    """Backward-compatible alias for detect-cloud?provider=gdrive."""
+    return detect_cloud("gdrive")
 
 
 @router.get("/api/backup/usb-drives")

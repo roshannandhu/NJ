@@ -149,7 +149,11 @@ def update_settings(targets=None, keep=None, interval_days=None):
     with _state_lock:
         state = get_state()
         if targets:
-            for name in ("local", "gdrive", "usb"):
+            # Persist every known destination — local, the three cloud sync
+            # folders (gdrive/onedrive/dropbox), USB, NAS and network. Earlier
+            # this loop only covered local/gdrive/usb, so enabling OneDrive,
+            # Dropbox, NAS or Network in the UI silently did nothing.
+            for name in default_state()["targets"]:
                 if name in targets and isinstance(targets[name], dict):
                     cur = state["targets"].get(name, {})
                     state["targets"][name] = {

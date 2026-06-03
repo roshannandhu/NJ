@@ -240,6 +240,11 @@ export async function detectGdrivePath() {
   return req("/api/backup/detect-gdrive");
 }
 
+// Detect a cloud sync folder: provider = 'gdrive' | 'onedrive' | 'dropbox'.
+export async function detectCloudPath(provider) {
+  return req(`/api/backup/detect-cloud?provider=${encodeURIComponent(provider)}`);
+}
+
 export async function detectUsbDrives() {
   return req("/api/backup/usb-drives");
 }

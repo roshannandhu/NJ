@@ -10,7 +10,7 @@ import {
   runBackup, restoreFromFile, restoreFromPath,
   downloadBackup, downloadCatalogBackup, downloadHistoryBackup, fetchBackupBlob,
   getUploadsInfo, restoreCatalogFromFile,
-  detectGdrivePath, detectUsbDrives, testConnection, listBackupFiles,
+  detectCloudPath, detectUsbDrives, testConnection, listBackupFiles,
   clearQuotations, clearWarranties,
   recoveryBackups, recoveryScan, recoveryRecover, recoveryReportUrl,
 } from '../api';
@@ -318,11 +318,14 @@ export default function BackupSettings() {
     finally { setTesting(t => ({ ...t, [name]: false })); }
   };
 
-  const handleDetectGdrive = async () => {
+  // Detect a cloud sync folder (gdrive | onedrive | dropbox) and, if found,
+  // fill in + enable that destination immediately.
+  const handleDetectCloud = async (name) => {
+    const label = DEST[name]?.label || name;
     try {
-      const r = await detectGdrivePath();
-      if (r.found) { patchTargetAndSave('gdrive', { path: r.path, enabled: true }); showToast('Google Drive detected'); }
-      else showToast('Google Drive not found', 'error');
+      const r = await detectCloudPath(name);
+      if (r.found) { patchTargetAndSave(name, { path: r.path, enabled: true }); showToast(`${label} detected`); }
+      else showToast(`${label} folder not found — is the desktop app installed & signed in?`, 'error');
     } catch { showToast('Detection failed', 'error'); }
   };
 
@@ -392,7 +395,7 @@ export default function BackupSettings() {
     return <div style={{ padding:40, textAlign:'center', color:'var(--ink-soft)' }}>Loading...</div>;
   }
 
-  const activeCount = ['local','gdrive','usb'].filter(n => targets[n]?.enabled && status.targets?.[n]?.available).length;
+  const activeCount = DEST_NAMES.filter(n => targets[n]?.enabled && status.targets?.[n]?.available).length;
   const isHealthy = !status.needs_backup_reminder && activeCount > 0;
   
   const inpStyle = {
@@ -513,7 +516,7 @@ export default function BackupSettings() {
                         <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                             <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder={name === 'local' ? 'C:\\Backups' : 'Path'} style={{ ...inpStyle, flex: 1 }} />
-                            {name === 'gdrive' && <button style={btnStyle} disabled={busy} onClick={handleDetectGdrive}><Search size={14}/> Detect</button>}
+                            {(name === 'gdrive' || name === 'onedrive' || name === 'dropbox') && <button style={btnStyle} disabled={busy} onClick={() => handleDetectCloud(name)}><Search size={14}/> Detect</button>}
                             {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
                             <button style={{ ...btnStyle, width: 100 }} disabled={testing[name]} onClick={() => handleTest(name, t.path)}><Wifi size={14}/> Test</button>
                             <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} onClick={() => handleSave(false)}>Save</button>
