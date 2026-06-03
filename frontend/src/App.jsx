@@ -12,14 +12,21 @@ import Settings from './components/Settings';
 import History from './components/History';
 import QuotationDocument from './components/QuotationDocument';
 import WarrantyDocument  from './components/WarrantyDocument';
+import Login from './components/Login';
 import { useAppContext, AppProvider } from './AppContext';
 
 function AppContent() {
-  const { data, currentView, setCurrentView, cart, setCartOpen } = useAppContext();
-  
+  const { data, currentView, setCurrentView, cart, setCartOpen,
+          authChecked, needsLogin, doLogin } = useAppContext();
+
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('nj_unlocked') === 'true');
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
+
+  // Cloud auth gate (no-op on the local desktop, where auth is disabled):
+  // wait for the auth check, then show the login screen until signed in.
+  if (!authChecked) return null;            // brief: avoids a flash of the app/login
+  if (needsLogin) return <Login onLogin={doLogin} />;
 
   const isLocked = data?.settings?.pinEnabled && !unlocked;
 

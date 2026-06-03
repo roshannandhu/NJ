@@ -27,16 +27,18 @@ def login(body: dict = Body(...)):
 
 @router.get("/api/auth/me")
 def me(request: Request):
-    """Identity of the caller. When auth is disabled (local desktop) returns a
-    synthetic 'local' admin so the same frontend works with or without login."""
+    """Identity of the caller — always 200 so the frontend can branch cleanly.
+    When auth is disabled (local desktop) returns a synthetic 'local' admin, so
+    the same frontend works with or without login."""
     if not auth.AUTH_REQUIRED:
-        return {"username": "local", "role": "admin", "auth_required": False}
+        return {"auth_required": False, "authenticated": True, "username": "local", "role": "admin"}
     token = auth.bearer_token(request)
     payload = auth.verify_token(token) if token else None
     if not payload:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        return {"auth_required": True, "authenticated": False}
     return {
+        "auth_required": True,
+        "authenticated": True,
         "username": payload.get("sub"),
         "role": payload.get("role"),
-        "auth_required": True,
     }

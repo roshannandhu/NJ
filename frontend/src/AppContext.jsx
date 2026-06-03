@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { DEFAULT_DATA } from './data';
-import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus, getSyncVersion } from './api';
+import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus, getSyncVersion, getMe, login as apiLogin, setToken } from './api';
 
 const AppContext = createContext();
 
@@ -55,6 +55,13 @@ export function AppProvider({ children }) {
 
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
+
+  // Cloud auth state. On the local desktop auth is disabled, so authChecked
+  // flips true immediately and needsLogin stays false — nothing changes.
+  const [authChecked, setAuthChecked] = useState(false);
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [backupStatus, setBackupStatus] = useState(null);
   const [reminderDismissed, setReminderDismissed] = useState(false);
 
@@ -161,16 +168,31 @@ export function AppProvider({ children }) {
     setBackendOffline(false);
   };
 
-  // Initial load.
+  // Load data + prime the sync revision + check backups. Used after the auth
+  // check passes (or immediately on the desktop where auth is off).
+  const initData = async () => {
+    await loadData({ includeConfig: true });
+    try { lastRevisionRef.current = (await getSyncVersion()).revision; } catch { /* sync optional */ }
+    refreshBackupStatus();
+    // The on-launch auto-backup runs in the background; re-check shortly so the
+    // "protected" state shows without needing a manual reload.
+    setTimeout(refreshBackupStatus, 6000);
+  };
+
+  // Initial load — gate data fetching on the auth check so the cloud app shows a
+  // login screen (instead of 401 errors) before any data request is made.
   useEffect(() => {
     (async () => {
       try {
-        await loadData({ includeConfig: true });
-        try { lastRevisionRef.current = (await getSyncVersion()).revision; } catch { /* sync optional */ }
-        refreshBackupStatus();
-        // The on-launch auto-backup runs in the background; re-check shortly so
-        // the "protected" state shows without needing a manual reload.
-        setTimeout(refreshBackupStatus, 6000);
+        const me = await getMe();
+        setAuthRequired(!!me.auth_required);
+        if (me.auth_required && !me.authenticated) {
+          // Cloud, not logged in → show the login screen, load nothing yet.
+          setNeedsLogin(true);
+          return;
+        }
+        setCurrentUser(me.username || null);
+        await initData();
       } catch {
         // Hard failure: the backend (the real data store) is unreachable, so the
         // app is showing blank seed defaults. Make this loud and blocking instead
@@ -178,9 +200,27 @@ export function AppProvider({ children }) {
         // saved over the real data.
         setBackendOffline(true);
         showToast("Backend offline — your data is NOT loaded", "error");
+      } finally {
+        setAuthChecked(true);
       }
     })();
   }, []);
+
+  // Cloud login: authenticate, store the token, then load data. Throws on bad
+  // credentials so the Login screen can show an error.
+  const doLogin = async (username, password) => {
+    const out = await apiLogin(username, password); // sets token or throws
+    setCurrentUser(out.username || username);
+    setNeedsLogin(false);
+    setBackendOffline(false);
+    await initData();
+  };
+
+  const logout = () => {
+    setToken('');
+    setCurrentUser(null);
+    if (authRequired) setNeedsLogin(true);
+  };
 
   // ── Live sync ──────────────────────────────────────────────────────────
   // Poll the server's data revision every 5s; when it grows (another device —
@@ -282,6 +322,7 @@ export function AppProvider({ children }) {
     backendOffline,
     backupStatus, refreshBackupStatus,
     askSaveLocation, setAskSaveLocation,
+    authChecked, needsLogin, authRequired, currentUser, doLogin, logout,
   };
 
   const days = backupStatus?.days_since_last_backup;
