@@ -2225,4 +2225,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   .qd-variety-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   /* Reduce the grey tap-highlight flash on phones */
   button, a { -webkit-tap-highlight-color: transparent; }
+  /* Guard: never let a stray fixed-width child scroll the whole app sideways */
+  html, body, #root { max-width: 100%; overflow-x: hidden; }
 }

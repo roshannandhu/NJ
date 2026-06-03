@@ -4,9 +4,11 @@ import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edi
 import { createQuotation, createWarranty } from '../api';
 import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
 import NumberField from './NumberField';
+import useIsMobile from '../useIsMobile';
 
 export default function Checkout() {
   const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent } = useAppContext();
+  const isMobile = useIsMobile();
 
   const settings = data.settings || {};
 
@@ -300,7 +302,7 @@ export default function Checkout() {
   }
 
   return (
-    <div className="animate-fade-up" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '48px', minHeight: 'calc(100vh - 120px)' }}>
+    <div className="animate-fade-up" style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.5fr 1fr', gap: isMobile ? '24px' : '48px', minHeight: 'calc(100vh - 120px)' }}>
       
       {/* LEFT: Premium Order Review */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -396,14 +398,14 @@ export default function Checkout() {
                 <div 
                   style={{ 
                     background: 'var(--surface)', 
-                  border: '1px solid var(--line)', 
+                  border: '1px solid var(--line)',
                   borderLeft: `5px solid ${borderLeftColor}`,
-                  borderRadius: 'var(--radius-lg)', 
-                  padding: '24px', 
-                  display: 'grid', 
-                  gridTemplateColumns: '1.2fr 130px 110px auto', 
-                  gap: '24px', 
-                  alignItems: 'center', 
+                  borderRadius: 'var(--radius-lg)',
+                  padding: isMobile ? '16px' : '24px',
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : '1.2fr 130px 110px auto',
+                  gap: isMobile ? '12px' : '24px',
+                  alignItems: 'center',
                   transition: 'transform 0.2s, box-shadow 0.2s',
                   boxShadow: 'var(--shadow-sm)'
                 }}
@@ -622,7 +624,7 @@ export default function Checkout() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
         {/* Customer Attachment (Cleaned up, premium labels) */}
-        <div style={{ background: 'var(--surface)', padding: '32px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ background: 'var(--surface)', padding: isMobile ? '18px' : '32px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-sm)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
             <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <User size={18} color="var(--accent)"/>

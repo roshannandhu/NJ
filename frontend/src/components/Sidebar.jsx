@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { Home, Settings, FileText, ShieldCheck, PlusCircle, LayoutDashboard, Menu, X, ChevronRight } from 'lucide-react';
+import useIsMobile from '../useIsMobile';
 
-export default function Sidebar({ currentView, setCurrentView }) {
-  const [expanded, setExpanded] = useState(false);
+export default function Sidebar({ currentView, setCurrentView, open, setOpen }) {
+  // On desktop the sidebar owns its own expand/collapse state. On mobile the
+  // open-state is lifted to App so the Topbar hamburger can open this off-canvas
+  // drawer; fall back to internal state if no controlled props are passed.
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const isMobile = useIsMobile();
+  const expanded = open !== undefined ? open : internalExpanded;
+  const setExpanded = setOpen || setInternalExpanded;
 
   const navItems = [
     { id: 'dashboard',      label: 'Dashboard',          icon: LayoutDashboard },
@@ -32,7 +39,18 @@ export default function Sidebar({ currentView, setCurrentView }) {
 
       {/* ── Sidebar panel ── */}
       <div
-        style={{
+        style={isMobile ? {
+          // Mobile: off-canvas drawer (fixed, leaves flex flow so main is full width)
+          width: `${W_EXPANDED}px`, minWidth: `${W_EXPANDED}px`,
+          background: '#1a1a1a', color: '#d9d4c7',
+          display: 'flex', flexDirection: 'column',
+          height: '100vh', position: 'fixed', left: 0, top: 0, zIndex: 100,
+          borderRight: '1px solid #2a2a2a', overflow: 'hidden',
+          transform: expanded ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)',
+          boxShadow: expanded ? '4px 0 24px rgba(0,0,0,0.35)' : 'none',
+        } : {
+          // Desktop: in-flow sticky rail that expands/collapses in width
           width: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
           minWidth: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
           background: '#1a1a1a',

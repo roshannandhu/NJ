@@ -338,6 +338,12 @@ export default function WarrantyDocument() {
 
         /* ── Page wrapper ── */
         .wd-page-wrap { max-width: 880px; margin: 0 auto; padding: 24px 24px 0; }
+        /* Phone (screen only — never affects print/PDF): fit the toolbar; the A4
+           page keeps its true size and scrolls inside its container. */
+        @media screen and (max-width: 820px) {
+          .wd-page-wrap { padding: 12px 0 0 !important; max-width: 100% !important; }
+          .wd-actions { flex-wrap: wrap !important; }
+        }
         .wd-actions   { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
         .wd-hint      { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 10px 14px; background: rgba(139,26,26,0.05); border-radius: 8px; border: 1px solid rgba(139,26,26,0.15); font-size: 12px; color: #8b1a1a; font-weight: 600; }
 

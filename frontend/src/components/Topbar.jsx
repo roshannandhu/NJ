@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
+import { ShoppingCart, ChevronUp, ChevronDown, Menu } from 'lucide-react';
 
-export default function Topbar({ title, subtitle, cartCount, onOpenCart, currentView }) {
+export default function Topbar({ title, subtitle, cartCount, onOpenCart, currentView, isMobile, onMenu }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
@@ -18,21 +18,36 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
         transform: isCollapsed ? 'translateY(calc(-100% + 3px))' : 'translateY(0)',
         background: 'var(--surface)',
       }}>
-        <div 
-          className="glass" 
+        <div
+          className="glass"
           style={{
-            padding: '20px 40px',
+            padding: isMobile ? '12px 14px' : '20px 40px',
             display: 'flex',
             alignItems: 'center',
+            gap: isMobile ? '10px' : 0,
             justifyContent: 'space-between',
             borderBottom: '1px solid var(--line)',
           }}
         >
-          <div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 400, color: 'var(--ink)' }}>
+          {isMobile && (
+            <button
+              onClick={onMenu}
+              aria-label="Open menu"
+              style={{
+                flexShrink: 0, width: '38px', height: '38px', borderRadius: '10px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--bg-warm, #f4f1ea)', border: '1px solid var(--line)',
+                color: 'var(--ink)', cursor: 'pointer',
+              }}
+            >
+              <Menu size={20} strokeWidth={2} />
+            </button>
+          )}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: isMobile ? '18px' : '24px', fontWeight: 400, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {title}
             </h2>
-            {subtitle && (
+            {subtitle && !isMobile && (
               <div style={{ fontSize: '13px', color: 'var(--ink-soft)', marginTop: '4px' }}>
                 {subtitle}
               </div>
@@ -46,7 +61,8 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                padding: '10px 20px',
+                flexShrink: 0,
+                padding: isMobile ? '9px 12px' : '10px 20px',
                 background: 'white',
                 border: '1px solid var(--line)',
                 borderRadius: 'var(--radius-full)',
@@ -64,7 +80,7 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
               }}
             >
               <ShoppingCart size={18} strokeWidth={1.5} />
-              <span style={{ fontSize: '14px', fontWeight: 500 }}>Cart</span>
+              {!isMobile && <span style={{ fontSize: '14px', fontWeight: 500 }}>Cart</span>}
               {cartCount > 0 && (
                 <div style={{
                   background: 'var(--accent)',

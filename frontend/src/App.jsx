@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock } from 'lucide-react';
+import { Lock, Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import Dashboard from './components/Dashboard';
@@ -13,11 +13,14 @@ import History from './components/History';
 import QuotationDocument from './components/QuotationDocument';
 import WarrantyDocument  from './components/WarrantyDocument';
 import Login from './components/Login';
+import useIsMobile from './useIsMobile';
 import { useAppContext, AppProvider } from './AppContext';
 
 function AppContent() {
   const { data, currentView, setCurrentView, cart, setCartOpen,
           authChecked, needsLogin, doLogin } = useAppContext();
+  const isMobile = useIsMobile();
+  const [navOpen, setNavOpen] = useState(false);
 
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('nj_unlocked') === 'true');
   const [pinInput, setPinInput] = useState('');
@@ -125,24 +128,26 @@ function AppContent() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
-      
+      <Sidebar currentView={currentView} setCurrentView={setCurrentView} open={isMobile ? navOpen : undefined} setOpen={isMobile ? setNavOpen : undefined} />
+
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
         {currentView !== 'settings' && (
-          <Topbar 
-            title={pageTitle} 
-            subtitle={pageSubtitle} 
+          <Topbar
+            title={pageTitle}
+            subtitle={pageSubtitle}
             cartCount={cart.length}
             onOpenCart={() => setCartOpen(true)}
             currentView={currentView}
+            isMobile={isMobile}
+            onMenu={() => setNavOpen(true)}
           />
         )}
-        
-        <div 
+
+        <div
           className="main-content-scroll-container"
-          style={{ 
-            padding: (currentView === 'settings' || currentView === 'quotation_desk') ? 0 : '40px', 
-            flex: 1, 
+          style={{
+            padding: (currentView === 'settings' || currentView === 'quotation_desk') ? 0 : (isMobile ? '14px' : '40px'),
+            flex: 1,
             minHeight: 0, // Prevents container from stretching past viewport in flex columns
             overflow: currentView === 'quotation_desk' ? 'hidden' : 'auto',
             display: 'flex',
@@ -152,6 +157,24 @@ function AppContent() {
           {mainContent}
         </div>
       </main>
+
+      {/* Settings hides the Topbar, so on mobile give it a floating menu button
+          to reopen the off-canvas sidebar. */}
+      {isMobile && currentView === 'settings' && (
+        <button
+          onClick={() => setNavOpen(true)}
+          aria-label="Open menu"
+          style={{
+            position: 'fixed', top: '10px', left: '10px', zIndex: 90,
+            width: '38px', height: '38px', borderRadius: '10px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: '#1a1a1a', color: '#fff', border: 'none',
+            boxShadow: 'var(--shadow-md)', cursor: 'pointer',
+          }}
+        >
+          <Menu size={20} strokeWidth={2} />
+        </button>
+      )}
 
       {currentView !== 'quotation_desk' && currentView !== 'checkout' && <CartDrawer />}
     </div>

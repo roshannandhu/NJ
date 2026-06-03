@@ -319,3 +319,24 @@
 @media (max-width: 1100px) {
   .qd2 { grid-template-columns: 230px minmax(0, 1fr) 310px; }
 }
+/* ── Phone: stack the 3 panes into one vertically-scrolling column ───────────
+   Without this the 296+372px side panes are clipped by the desk's overflow:hidden
+   on a ~390px screen (this is also the default landing page). */
+@media (max-width: 768px) {
+  .qd2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-auto-flow: row;
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 12px;
+    padding: 12px;
+  }
+  .qd2 > * { min-width: 0; }
+  /* Panes flow into the page instead of each scrolling inside a fixed box */
+  .qd2-panel, .qd2-rail { overflow: visible; }
+  .qd2-scroll { overflow: visible; }
+  .qd2-customer { padding: 10px 12px; gap: 10px; }
+  /* Product cards: one per row so they don't overflow a phone */
+  .qd2-grid { grid-template-columns: 1fr; }
+}

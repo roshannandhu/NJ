@@ -745,6 +745,14 @@ export default function QuotationDocument() {
           resize: vertical;
         }
 
+        /* Phone (screen only — never affects print/PDF capture): let the toolbar
+           and hint fit the viewport. The A4 page keeps its true 794px size and
+           scrolls inside its container, so the app shell isn't broken. */
+        @media screen and (max-width: 820px) {
+          .actions-bar { flex-wrap: wrap; max-width: 100% !important; }
+          .q-edit-hint { max-width: 100% !important; }
+        }
+
         .warranty-doc {
           background: #fff;
           width: 794px; max-width: 794px;
