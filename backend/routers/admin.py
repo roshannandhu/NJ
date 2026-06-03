@@ -1,0 +1,41 @@
+"""Admin/data-migration endpoints.
+
+`export` returns the full data payload (config + quotations + warranties) from the
+CURRENT database; `import` merges a payload INTO the current database. Together
+they move existing local data up to the cloud:
+
+    local  GET  /api/admin/export   →  payload JSON
+    cloud  POST /api/admin/import    ←  payload JSON   (mode=merge, non-destructive)
+
+Reuses backup_service.build_payload / restore_from_payload so the merge logic and
+safety snapshot are identical to the Backup/Recovery feature. When auth is enabled
+(cloud) these routes require a valid token like every other /api route.
+"""
+
+from fastapi import APIRouter, Body, HTTPException
+
+import backup_service
+import sync_state
+
+router = APIRouter()
+
+
+@router.get("/api/admin/export")
+def export_all():
+    """Full data payload of the current database."""
+    return backup_service.build_payload()
+
+
+@router.post("/api/admin/import")
+def import_all(body: dict = Body(...), mode: str = "merge"):
+    """Merge (default) or replace the current database with a payload. Accepts
+    either the raw payload or {"payload": {...}}."""
+    payload = body.get("payload") if isinstance(body, dict) and "payload" in body else body
+    if mode not in ("merge", "replace"):
+        mode = "merge"
+    try:
+        result = backup_service.restore_from_payload(payload, mode=mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    sync_state.bump()
+    return {"status": "imported", "mode": mode, "result": result}

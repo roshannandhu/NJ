@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from database import get_db
 from models import Quotation, WarrantyCertificate
+import sync_state
 
 router = APIRouter()
 
@@ -48,6 +49,7 @@ def save_quotation(body: dict = Body(...)):
         row.data = json.dumps(body)
         db.commit()
         db.refresh(row)
+        sync_state.bump()
         return json.loads(row.data)
     finally:
         db.close()
@@ -64,6 +66,7 @@ def delete_quotation(qid: str):
             WarrantyCertificate.quotation_id == qid
         ).delete()
         db.commit()
+        sync_state.bump()
         return {"status": "deleted" if deleted else "not_found"}
     finally:
         db.close()
@@ -78,6 +81,7 @@ def clear_quotations():
         db.query(Quotation).delete()
         db.query(WarrantyCertificate).delete()
         db.commit()
+        sync_state.bump()
         return {"status": "cleared"}
     finally:
         db.close()

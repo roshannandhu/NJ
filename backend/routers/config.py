@@ -7,6 +7,7 @@ from database import get_db
 from models import AppConfig
 from seed_data import DEFAULT_DATA
 import backup_service
+import sync_state
 
 router = APIRouter()
 
@@ -45,6 +46,7 @@ def update_config(body: dict = Body(...)):
         config.data = json.dumps(body)
         db.commit()
         backup_service.mark_catalog_changed()
+        sync_state.bump()
         return {"status": "saved"}
     finally:
         db.close()

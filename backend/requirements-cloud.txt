@@ -1,0 +1,9 @@
+# Cloud (server) dependencies. Use this on the host instead of requirements.txt.
+# It is the desktop set MINUS pywebview (no GUI on a server) PLUS the Postgres
+# driver. Auth uses only the Python standard library, so nothing extra is needed.
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-multipart
+python-docx
+psycopg[binary]

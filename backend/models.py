@@ -23,6 +23,32 @@ class BackupState(Base):
     data = Column(Text, nullable=False)
 
 
+class User(Base):
+    """Login accounts for the cloud deployment (managers/owner). Unused by the
+    local desktop app unless NJ_AUTH_REQUIRED is enabled. Passwords are stored as
+    salted PBKDF2 hashes (see auth.py) — never plaintext."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="manager")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SyncState(Base):
+    """Single-row table (id=1) holding a global data ``revision`` counter that is
+    bumped on every data mutation (quotation/warranty save or delete, config
+    update). Polling clients compare this cheap number against their last-seen
+    value to know when to refetch — the basis of live multi-device sync."""
+
+    __tablename__ = "sync_state"
+
+    id = Column(Integer, primary_key=True, default=1)
+    revision = Column(Integer, nullable=False, default=0)
+
+
 class Quotation(Base):
     __tablename__ = "quotations"
 

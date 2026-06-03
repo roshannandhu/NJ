@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { DEFAULT_DATA } from './data';
-import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus } from './api';
+import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus, getSyncVersion } from './api';
 
 const AppContext = createContext();
 
@@ -84,65 +84,89 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Track the latest view without resetting the poll interval, so a background
+  // sync can avoid clobbering in-progress Settings edits.
+  const currentViewRef = useRef(currentView);
+  useEffect(() => { currentViewRef.current = currentView; }, [currentView]);
+
+  // Last data revision seen from the server (api getSyncVersion). null until the
+  // first successful load.
+  const lastRevisionRef = useRef(null);
+
+  // Apply the warranty-content backfill + one-time parent-brand migration to a
+  // freshly fetched config. Returns the normalized cfg and whether a migration
+  // happened (so the caller can persist it once).
+  const normalizeConfig = (cfg) => {
+    let brandMigrated = false;
+    if (cfg && cfg.warranties) {
+      cfg.warranties = cfg.warranties.map(w => {
+        const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
+        if (!def) return w; // custom warranty added by the user — leave as-is
+        const merged = { ...w };
+        // Backfill editable content only when empty (preserve user edits)
+        if (!merged.sections || merged.sections.length === 0) {
+          merged.sections = def.sections;
+          merged.opening = merged.opening || def.opening;
+        }
+        if (!merged.seriesTable || merged.seriesTable.length === 0) {
+          merged.seriesTable = def.seriesTable || [];
+        }
+        // Structural display flags are user-customizable in the Warranty Builder.
+        // Preserve an explicit saved choice (true/false); only backfill from the
+        // definition when the flag is absent (legacy configs).
+        if (merged.showSeriesTable === undefined) merged.showSeriesTable = def.showSeriesTable;
+        if (merged.heatoutTable === undefined && def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
+        return merged;
+      });
+    }
+    // ── Parent Brand migration (idempotent, automatic) ──────────────────
+    // Existing catalogs have no brand layer. Ensure a default "NJ" brand exists
+    // and every class is assigned to a brand. Persisted by the caller only when
+    // something actually changed, so this runs at most once per catalog.
+    if (cfg) {
+      let brands = Array.isArray(cfg.brands) ? cfg.brands : [];
+      if (brands.length === 0) {
+        brands = [{ id: 'nj', name: 'NJ', logo: '', description: 'NJ India in-house roofing brand.', order: 0, active: true }];
+        brandMigrated = true;
+      }
+      const defaultBrandId = brands[0].id;
+      const classes = (cfg.classes || []).map(c => {
+        if (!c.brandId) { brandMigrated = true; return { ...c, brandId: defaultBrandId }; }
+        return c;
+      });
+      cfg = { ...cfg, brands, classes };
+    }
+    return { cfg, brandMigrated };
+  };
+
+  // Load data from the backend. quotations + warranties are always refreshed;
+  // config is skipped when includeConfig is false (e.g. while the user edits
+  // Settings) so a background sync never overwrites unsaved catalogue edits.
+  const loadData = async ({ includeConfig = true } = {}) => {
+    const quotations = (await listQuotations()).map(normalizeCartSpelling);
+    const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
+    if (includeConfig) {
+      const { cfg, brandMigrated } = normalizeConfig(await getConfig());
+      setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
+      if (brandMigrated && cfg) {
+        // Save the migrated catalog back so the brand layer is durable.
+        saveConfig({
+          company: cfg.company, settings: cfg.settings, brands: cfg.brands,
+          classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,
+        }).catch(() => { /* will retry on next explicit save */ });
+      }
+    } else {
+      setData(prev => ({ ...prev, quotations, warranty_certificates }));
+    }
+    setBackendOffline(false);
+  };
+
+  // Initial load.
   useEffect(() => {
     (async () => {
       try {
-        let cfg = await getConfig();
-        const quotations = (await listQuotations()).map(normalizeCartSpelling);
-        const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
-
-        if (cfg && cfg.warranties) {
-          cfg.warranties = cfg.warranties.map(w => {
-            const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
-            if (!def) return w; // custom warranty added by the user — leave as-is
-            const merged = { ...w };
-            // Backfill editable content only when empty (preserve user edits)
-            if (!merged.sections || merged.sections.length === 0) {
-              merged.sections = def.sections;
-              merged.opening = merged.opening || def.opening;
-            }
-            if (!merged.seriesTable || merged.seriesTable.length === 0) {
-              merged.seriesTable = def.seriesTable || [];
-            }
-            // Structural display flags are now user-customizable in the Warranty
-            // Builder. Preserve an explicit saved choice (true/false); only
-            // backfill from the definition when the flag is absent (legacy
-            // configs), which fixes the warranty-period table going missing on
-            // older saved configs (e.g. Docke, Ceramic).
-            if (merged.showSeriesTable === undefined) merged.showSeriesTable = def.showSeriesTable;
-            if (merged.heatoutTable === undefined && def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
-            return merged;
-          });
-        }
-
-        // ── Parent Brand migration (idempotent, automatic) ──────────────────
-        // Existing catalogs have no brand layer. Ensure a default "NJ" brand
-        // exists and every class is assigned to a brand. Persist only if we
-        // actually changed something, so this runs at most once per catalog.
-        let brandMigrated = false;
-        if (cfg) {
-          let brands = Array.isArray(cfg.brands) ? cfg.brands : [];
-          if (brands.length === 0) {
-            brands = [{ id: 'nj', name: 'NJ', logo: '', description: 'NJ India in-house roofing brand.', order: 0, active: true }];
-            brandMigrated = true;
-          }
-          const defaultBrandId = brands[0].id;
-          const classes = (cfg.classes || []).map(c => {
-            if (!c.brandId) { brandMigrated = true; return { ...c, brandId: defaultBrandId }; }
-            return c;
-          });
-          cfg = { ...cfg, brands, classes };
-        }
-
-        setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
-        setBackendOffline(false);
-        if (brandMigrated && cfg) {
-          // Save the migrated catalog back so the brand layer is durable.
-          saveConfig({
-            company: cfg.company, settings: cfg.settings, brands: cfg.brands,
-            classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,
-          }).catch(() => { /* will retry on next explicit save */ });
-        }
+        await loadData({ includeConfig: true });
+        try { lastRevisionRef.current = (await getSyncVersion()).revision; } catch { /* sync optional */ }
         refreshBackupStatus();
         // The on-launch auto-backup runs in the background; re-check shortly so
         // the "protected" state shows without needing a manual reload.
@@ -156,6 +180,26 @@ export function AppProvider({ children }) {
         showToast("Backend offline — your data is NOT loaded", "error");
       }
     })();
+  }, []);
+
+  // ── Live sync ──────────────────────────────────────────────────────────
+  // Poll the server's data revision every 5s; when it grows (another device —
+  // PC or phone — saved a quotation, warranty, or catalogue change), refetch so
+  // this screen updates automatically. Config refresh is skipped while editing
+  // Settings to protect unsaved edits. This is the local proof of the live
+  // 2-way-sync architecture (one backend = single source of truth).
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const { revision } = await getSyncVersion();
+        if (lastRevisionRef.current === null) { lastRevisionRef.current = revision; return; }
+        if (revision !== lastRevisionRef.current) {
+          lastRevisionRef.current = revision;
+          await loadData({ includeConfig: currentViewRef.current !== 'settings' });
+        }
+      } catch { /* transient network/backend blip — retry next tick */ }
+    }, 5000);
+    return () => clearInterval(id);
   }, []);
 
   const persistConfig = async (nextData = data) => {
