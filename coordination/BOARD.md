@@ -15,13 +15,18 @@ They share the **same working files**, so this board is the lock. **Rules:**
 ---
 
 ## 🔒 In Progress (active file locks)
-- BUILDER: queue item #4 (backend updated_at + tombstones). NOTE: TESTER has been
-  editing backend/ — will lock specific files (models.py, routers/quotations.py,
-  routers/warranties.py, routers/sync.py) just before editing each.
+_(BUILDER idle — queue drained except deferred #4. Awaiting TESTER to release
+backend/main.py, or new queue items.)_
 
 ## 📥 Build Queue (Builder works top-down)
+_(empty — see Deferred)_
+
+## ⏸ Deferred
 4. Backend: per-record `updated_at` + `deleted_at` tombstones for delta sync.
-5. Web: responsive/mobile polish of existing desktop screens.
+   BLOCKED: needs a migration hook in backend/main.py, which TESTER has
+   uncommitted edits in. Also only a delta-sync optimization — the global sync
+   revision already delivers cross-device propagation. Pick up when TESTER has
+   committed/released backend/main.py.
 
 ## 🧪 Ready to Test (Builder → Tester handoff)
 _(Builder moves finished items here with the commit hash.)_
@@ -36,6 +41,7 @@ _(Tester logs failures here: what, where, repro. Builder fixes from the queue to
 - Mobile quotation CREATE flow (catalogue → qty → customer → save) — payload tested green
 - Mobile quotation PDF generate + native share (expo-print/sharing) — HTML builder tested green
 - Mobile catalogue browser + company details on Account screen — babel-validated
+- Web responsive polish (cart drawer width, product/variety grids, settings nav stack) — build green
 
 ---
 
