@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, Minus, Plus, ShoppingCart } from 'lucide-react';
 

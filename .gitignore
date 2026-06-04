@@ -23,9 +23,18 @@ __pycache__/
 
 # Local app data and uploads
 backend/*.db
+backend/*.db-shm
+backend/*.db-wal
 backend/*.sqlite
 backend/uploads/
 backend/backups/
+# Stray backup-target folders (e.g. a misconfigured network path that wrote locally)
+backend/*/nj_backup_*.db
+backend/[0-9]*.[0-9]*.[0-9]*.[0-9]*/
+
+# Cloud backup secrets / tokens (never commit — per-machine, contains OAuth tokens)
+backend/cloud_config.json
+backend/cloud_tokens.json
 
 # Scratch / packaged artifacts
 scratch_docx*

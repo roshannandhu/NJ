@@ -9,7 +9,6 @@ export default function LiveQuotation() {
     removeFromCart,
     cartTotal,
     customer,
-    setCustomer,
     setCurrentView,
     data,
     setGenerateIntent,
@@ -49,14 +48,14 @@ export default function LiveQuotation() {
       background: '#FFFFFF',
       border: '1px solid var(--line)',
       borderRadius: 'var(--radius-lg)',
-      height: '100%', // Fills grid column height perfectly
+      height: '100%',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
       boxShadow: 'var(--shadow-md)',
       transition: 'all 0.2s'
     }}>
-        <div style={{ padding: '18px 24px 12px', borderBottom: '1px solid var(--line)' }}>
+        <div style={{ padding: '18px 24px 12px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h3 style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, color: 'var(--ink-soft)' }}>
             Quotation Items ({cart.length})
           </h3>

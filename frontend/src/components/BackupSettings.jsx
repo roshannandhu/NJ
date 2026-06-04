@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, HardDrive, Cloud, Usb,
   Download, RefreshCw, ChevronDown, ChevronRight,
-  Database, Trash2, Search, Zap, Wifi, RotateCcw, Upload, Share2,
+  Database, Trash2, Search, Wifi, RotateCcw, Upload, Share2,
 } from 'lucide-react';
 import { useAppContext } from '../AppContext';
 import {
@@ -10,11 +10,13 @@ import {
   runBackup, restoreFromFile, restoreFromPath,
   downloadBackup, downloadCatalogBackup, downloadHistoryBackup, fetchBackupBlob,
   getUploadsInfo, restoreCatalogFromFile,
-  detectCloudPath, detectUsbDrives, testConnection, listBackupFiles,
+  detectUsbDrives, detectCloudPath, testConnection, listBackupFiles,
+  cloudStatus, saveCloudConfig, cloudConnect, cloudDisconnect,
   clearQuotations, clearWarranties,
   recoveryBackups, recoveryScan, recoveryRecover, recoveryReportUrl,
 } from '../api';
 import { shareFiles, blobToFile } from '../share';
+import BackupDashboard from './BackupDashboard';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -35,23 +37,6 @@ const fmtTime = (iso) => {
   }).replace(',', '');
 };
 
-const fmtAgo = (iso) => {
-  if (!iso) return 'Never';
-  const m = Math.floor((Date.now() - new Date(iso)) / 60000);
-  if (m < 1) return 'Just now';
-  if (m < 60) return `${m}m ago`;
-  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-};
-
-const fmtNext = (iso, days) => {
-  if (!iso) return 'Pending';
-  const d = Math.ceil((new Date(iso).getTime() + days * 86400000 - Date.now()) / 86400000);
-  if (d <= 0) return 'Due now';
-  if (d === 1) return 'Tomorrow';
-  return `In ${d} days`;
-};
-
 // Build a human message from a restore result (merge or replace).
 const restoreMsg = (r) => {
   const a = r?.added || {};
@@ -63,27 +48,24 @@ const restoreMsg = (r) => {
   return msg;
 };
 
-const INTERVALS = [
-  { value: 1,  label: 'Daily' },
-  { value: 3,  label: 'Every 3 Days' },
-  { value: 7,  label: 'Weekly' },
-  { value: 14, label: 'Bi-Weekly' },
-  { value: 30, label: 'Monthly' },
-];
-
+// Cloud destinations (gdrive/onedrive) log in via OAuth — see CLOUD below.
 const DEST = {
   local:    { label: 'Local Disk', Icon: HardDrive },
-  gdrive:   { label: 'Google Drive', Icon: Cloud },
-  onedrive: { label: 'OneDrive', Icon: Cloud },
-  dropbox:  { label: 'Dropbox', Icon: Cloud },
   usb:      { label: 'USB / External', Icon: Usb },
-  nas:      { label: 'NAS', Icon: HardDrive },
-  network:  { label: 'Network Folder', Icon: Wifi },
+  // Dropbox is a plain *synced folder* destination (point at the local Dropbox
+  // folder so the desktop client uploads it) — not an OAuth account like the two
+  // below. We auto-detect its folder via /detect-cloud?provider=dropbox.
+  dropbox:  { label: 'Dropbox (synced folder)', Icon: Cloud },
+  gdrive:   { label: 'Google Drive', Icon: Cloud, cloud: true },
+  onedrive: { label: 'OneDrive', Icon: Cloud, cloud: true },
 };
 const DEST_NAMES = Object.keys(DEST);
 
+// The full Backup & Recovery center (rendered by the sidebar "Backup & Recovery"
+// page). Tabs: Overview (health/automation/activity via BackupDashboard),
+// Destinations, Recovery, Tools (exports / metrics / factory reset).
 export default function BackupSettings() {
-  const { showToast, refreshBackupStatus } = useAppContext();
+  const { showToast } = useAppContext();
 
   const [status, setStatus] = useState(null);
   const [health, setHealth] = useState(null);
@@ -95,8 +77,15 @@ export default function BackupSettings() {
   const [testRes, setTestRes] = useState({});
   const [testing, setTesting] = useState({});
   const [usbList, setUsbList] = useState(null);
+
+  // Cloud OAuth accounts (gdrive/onedrive): live status, the client-id/secret
+  // the user pastes in, per-provider busy flag, and whether to show setup help.
+  const [cloud, setCloud] = useState({});
+  const [cloudCfg, setCloudCfg] = useState({});
+  const [cloudBusy, setCloudBusy] = useState({});
+  const [cloudHelp, setCloudHelp] = useState({});
   
-  const [activeTab, setActiveTab] = useState('destinations');
+  const [activeTab, setActiveTab] = useState('overview');
   const [expandedLoc, setExpandedLoc] = useState(null);
 
   const [showRestore, setShowRestore] = useState(false);
@@ -274,8 +263,20 @@ export default function BackupSettings() {
       setIntervalDays(cfg.interval_days ?? 7);
       setUploadsInfo(upl);
     } catch { showToast('Could not load backup info', 'error'); }
+    loadCloud();
   };
   useEffect(() => { load(); }, []);
+
+  // Cloud account status (Google Drive / OneDrive).
+  const CLOUD_NAMES = ['gdrive', 'onedrive'];
+  const loadCloud = async () => {
+    try {
+      const results = await Promise.all(CLOUD_NAMES.map(n => cloudStatus(n).catch(() => null)));
+      const map = {};
+      CLOUD_NAMES.forEach((n, i) => { if (results[i]) map[n] = results[i]; });
+      setCloud(map);
+    } catch { /* offline */ }
+  };
 
   const patchTarget = (name, patch) =>
     setTargets(t => ({ ...t, [name]: { ...t[name], ...patch } }));
@@ -298,17 +299,6 @@ export default function BackupSettings() {
     finally { setBusy(false); }
   };
 
-  const handleBackupNow = async () => {
-    setBusy(true);
-    try {
-      const m = await runBackup();
-      if (m.ok) showToast('Backup completed');
-      else showToast(m.hint || 'Backup failed', 'error');
-      await load(); refreshBackupStatus();
-    } catch { showToast('Backup failed', 'error'); }
-    finally { setBusy(false); }
-  };
-
   const handleTest = async (name, path) => {
     setTesting(t => ({ ...t, [name]: true }));
     try {
@@ -318,15 +308,47 @@ export default function BackupSettings() {
     finally { setTesting(t => ({ ...t, [name]: false })); }
   };
 
-  // Detect a cloud sync folder (gdrive | onedrive | dropbox) and, if found,
-  // fill in + enable that destination immediately.
-  const handleDetectCloud = async (name) => {
+  // ── Cloud OAuth account handlers (Google Drive / OneDrive) ──
+  const handleSaveCloudConfig = async (name) => {
     const label = DEST[name]?.label || name;
+    const cfg = cloudCfg[name] || {};
+    if (!cfg.client_id) { showToast('Paste the Client ID first', 'error'); return; }
+    setCloudBusy(b => ({ ...b, [name]: true }));
     try {
-      const r = await detectCloudPath(name);
-      if (r.found) { patchTargetAndSave(name, { path: r.path, enabled: true }); showToast(`${label} detected`); }
-      else showToast(`${label} folder not found — is the desktop app installed & signed in?`, 'error');
-    } catch { showToast('Detection failed', 'error'); }
+      const st = await saveCloudConfig(name, cfg.client_id.trim(), (cfg.client_secret || '').trim());
+      setCloud(c => ({ ...c, [name]: st }));
+      showToast(`${label} setup saved`);
+    } catch { showToast('Could not save setup', 'error'); }
+    finally { setCloudBusy(b => ({ ...b, [name]: false })); }
+  };
+
+  const handleCloudConnect = async (name) => {
+    const label = DEST[name]?.label || name;
+    setCloudBusy(b => ({ ...b, [name]: true }));
+    showToast(`Opening ${label} login in your browser…`);
+    try {
+      const r = await cloudConnect(name);          // blocks until the browser login finishes
+      setCloud(c => ({ ...c, [name]: r }));
+      if (r.connected) {
+        showToast(`Connected to ${label}${r.email ? ` as ${r.email}` : ''}`);
+        patchTargetAndSave(name, { enabled: true });   // auto-enable once connected
+      } else {
+        showToast(r.error || `${label} login was not completed`, 'error');
+      }
+    } catch { showToast(`${label} login failed`, 'error'); }
+    finally { setCloudBusy(b => ({ ...b, [name]: false })); }
+  };
+
+  const handleCloudDisconnect = async (name) => {
+    const label = DEST[name]?.label || name;
+    if (!window.confirm(`Disconnect ${label}? Backups will stop going there until you reconnect.`)) return;
+    setCloudBusy(b => ({ ...b, [name]: true }));
+    try {
+      const st = await cloudDisconnect(name);
+      setCloud(c => ({ ...c, [name]: st }));
+      showToast(`${label} disconnected`);
+    } catch { showToast('Could not disconnect', 'error'); }
+    finally { setCloudBusy(b => ({ ...b, [name]: false })); }
   };
 
   const handleDetectUsb = async () => {
@@ -335,6 +357,19 @@ export default function BackupSettings() {
       setUsbList(r.drives);
       if (!r.drives.length) showToast('No USB drives found', 'error');
     } catch { showToast('USB detection failed', 'error'); }
+  };
+
+  // Locate the local Dropbox sync folder and fill in a NJ_Backups subfolder.
+  const handleDetectDropbox = async () => {
+    try {
+      const r = await detectCloudPath('dropbox');
+      if (r.found && r.path) {
+        patchTargetAndSave('dropbox', { path: r.path, enabled: true });
+        showToast('Dropbox folder detected', 'success');
+      } else {
+        showToast('No Dropbox folder found on this PC', 'error');
+      }
+    } catch { showToast('Dropbox detection failed', 'error'); }
   };
 
   const handleOpenRestore = async () => {
@@ -395,9 +430,6 @@ export default function BackupSettings() {
     return <div style={{ padding:40, textAlign:'center', color:'var(--ink-soft)' }}>Loading...</div>;
   }
 
-  const activeCount = DEST_NAMES.filter(n => targets[n]?.enabled && status.targets?.[n]?.available).length;
-  const isHealthy = !status.needs_backup_reminder && activeCount > 0;
-  
   const inpStyle = {
     padding:'6px 12px', border:'1px solid var(--line)', borderRadius:'4px',
     fontSize:13, background:'var(--surface)', color:'var(--ink)', outline:'none',
@@ -414,61 +446,35 @@ export default function BackupSettings() {
 
   return (
     <div style={{ maxWidth: 1100, margin:'0 auto', padding: '0', fontFamily: 'var(--font-body)', color: 'var(--ink)' }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, margin: '0 0 24px 0', letterSpacing: '-0.01em' }}>Security &amp; Backup</h1>
+      {/* TABBED INTERFACE */}
+      <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--line)' }}>
+        {[
+          { id: 'overview', label: 'Overview' },
+          { id: 'destinations', label: 'Destinations' },
+          { id: 'recovery', label: 'Recovery' },
+          { id: 'tools', label: 'Tools' }
+        ].map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            style={{
+              padding: '8px 0', border: 'none', background: 'none', cursor: 'pointer',
+              fontSize: 14, fontWeight: activeTab === t.id ? 600 : 400,
+              color: activeTab === t.id ? 'var(--accent)' : 'var(--ink-soft)',
+              borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              marginBottom: -1
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
-        
-        {/* ==========================================
-            LEFT PANE (Main Area - Tabs & Content)
-        ========================================== */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          
-          {/* TOP STATUS STRIP (Always Visible) */}
-          <div style={{ padding: '16px 20px', border: '1px solid var(--line)', borderRadius: 6, display: 'flex', alignItems: 'center', background: 'var(--surface)', marginBottom: 24 }}>
-            <div style={{ marginRight: 16 }}>
-              {isHealthy ? <ShieldCheck size={24} color="#10B981" /> : <ShieldAlert size={24} color="#F59E0B" />}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)' }}>
-                {isHealthy ? 'System Protected' : 'Action Recommended'}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 2 }}>
-                Last Backup: {fmtAgo(status.last_success_iso)} &middot; Next Backup: {fmtNext(status.last_success_iso, +intervalDays)} &middot; {activeCount} Locations Active
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button disabled={busy} onClick={handleBackupNow} style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }}>
-                <RefreshCw size={14} /> Backup Now
-              </button>
-            </div>
-          </div>
+      <div style={{ marginTop: 20 }}>
+        {/* TAB: OVERVIEW — health, automation, activity */}
+        {activeTab === 'overview' && <BackupDashboard />}
 
-          {/* TABBED INTERFACE */}
-          <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--line)' }}>
-            {[
-              { id: 'destinations', label: 'Destinations' },
-              { id: 'automation', label: 'Automation' },
-              { id: 'history', label: 'History Grid' },
-              { id: 'recovery', label: 'Recovery' }
-            ].map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)}
-                style={{
-                  padding: '8px 0', border: 'none', background: 'none', cursor: 'pointer',
-                  fontSize: 14, fontWeight: activeTab === t.id ? 600 : 400,
-                  color: activeTab === t.id ? 'var(--accent)' : 'var(--ink-soft)',
-                  borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1
-                }}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 20 }}>
-            {/* --------------------------------------
-                TAB: DESTINATIONS
-            -------------------------------------- */}
-            {activeTab === 'destinations' && (
+        {/* --------------------------------------
+            TAB: DESTINATIONS
+        -------------------------------------- */}
+        {activeTab === 'destinations' && (
               <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}>
                 {/* Header */}
                 <div style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '8px 12px', background: 'var(--bg-warm)', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line)' }}>
@@ -477,12 +483,17 @@ export default function BackupSettings() {
 
                 {/* Expandable Rows */}
                 {DEST_NAMES.map((name, i) => {
-                  const { label, Icon } = DEST[name];
+                  const { label, Icon, cloud: isCloud } = DEST[name];
                   const t = targets[name] || { enabled: false, path: '' };
                   const st = status.targets?.[name];
                   const isOk = t.enabled && st?.available;
                   const tr = testRes[name];
                   const isExpanded = expandedLoc === name;
+                  const cs = cloud[name] || {};
+                  const pathLabel = isCloud
+                    ? (cs.connected ? (cs.email || 'Connected')
+                        : cs.configured ? 'Set up — not signed in' : 'Not set up')
+                    : (t.path || 'Not configured');
 
                   return (
                     <React.Fragment key={name}>
@@ -502,8 +513,8 @@ export default function BackupSettings() {
                           {t.enabled ? (isOk ? 'Ready' : 'Error') : 'Off'}
                         </div>
                         
-                        <div style={{ fontFamily: 'monospace', color: t.enabled && t.path ? 'var(--ink-mid)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {t.path || 'Not configured'}
+                        <div style={{ fontFamily: 'monospace', color: t.enabled && (isCloud ? cs.connected : t.path) ? 'var(--ink-mid)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {pathLabel}
                         </div>
                         
                         <div style={{ display: 'flex', justifyContent: 'flex-end', color: 'var(--ink-soft)' }}>
@@ -512,16 +523,70 @@ export default function BackupSettings() {
                       </div>
 
                       {/* Detail Expander */}
-                      {isExpanded && (
+                      {isExpanded && isCloud && (
+                        <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                          {cs.connected ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 13, color: '#10B981', fontWeight: 600 }}>✓ Connected{cs.email ? ` as ${cs.email}` : ''}</span>
+                              <button style={btnStyle} disabled={cloudBusy[name]} onClick={() => handleCloudDisconnect(name)}>Disconnect</button>
+                            </div>
+                          ) : (
+                            <>
+                              {!cs.configured && (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <input value={(cloudCfg[name]?.client_id) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_id: e.target.value } }))} placeholder="Client ID" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
+                                  {DEST[name].secret !== false && cs.needs_secret && (
+                                    <input value={(cloudCfg[name]?.client_secret) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_secret: e.target.value } }))} placeholder="Client secret" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
+                                  )}
+                                  <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} disabled={cloudBusy[name]} onClick={() => handleSaveCloudConfig(name)}>Save setup</button>
+                                </div>
+                              )}
+                              {cs.configured && (
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} disabled={cloudBusy[name]} onClick={() => handleCloudConnect(name)}>
+                                    <Cloud size={14}/> {cloudBusy[name] ? 'Waiting for browser…' : 'Connect account'}
+                                  </button>
+                                  <button style={btnStyle} disabled={cloudBusy[name]} onClick={() => { setCloud(c => ({ ...c, [name]: { ...c[name], configured: false } })); }}>Change Client ID</button>
+                                </div>
+                              )}
+                              <button onClick={() => setCloudHelp(h => ({ ...h, [name]: !h[name] }))} style={{ marginTop: 10, background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, padding: 0 }}>
+                                {cloudHelp[name] ? 'Hide setup steps' : 'How do I get a Client ID?'}
+                              </button>
+                              {cloudHelp[name] && (
+                                <ol style={{ marginTop: 8, fontSize: 12, color: 'var(--ink-mid)', lineHeight: 1.6, paddingLeft: 18 }}>
+                                  {name === 'gdrive' ? (
+                                    <>
+                                      <li>Open <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>console.cloud.google.com</a> and create a project.</li>
+                                      <li>APIs &amp; Services → enable the <b>Google Drive API</b>.</li>
+                                      <li>OAuth consent screen → <b>External</b> → add your email as a <b>Test user</b>.</li>
+                                      <li>Credentials → Create credentials → <b>OAuth client ID</b> → type <b>Desktop app</b>.</li>
+                                      <li>Copy the <b>Client ID</b> and <b>Client secret</b> here, then Save setup.</li>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <li>Open <a href="https://portal.azure.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>portal.azure.com</a> → <b>App registrations</b> → New registration.</li>
+                                      <li>Supported accounts: <b>Personal + work/school</b>.</li>
+                                      <li>Authentication → Add platform → <b>Mobile &amp; desktop</b> → redirect <code>http://localhost</code>.</li>
+                                      <li>Copy the <b>Application (client) ID</b> here, then Save setup. (No secret needed.)</li>
+                                    </>
+                                  )}
+                                </ol>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {isExpanded && !isCloud && (
                         <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder={name === 'local' ? 'C:\\Backups' : 'Path'} style={{ ...inpStyle, flex: 1 }} />
-                            {(name === 'gdrive' || name === 'onedrive' || name === 'dropbox') && <button style={btnStyle} disabled={busy} onClick={() => handleDetectCloud(name)}><Search size={14}/> Detect</button>}
+                            <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder={name === 'local' ? 'C:\\Backups' : 'D:\\NJ Backups'} style={{ ...inpStyle, flex: 1 }} />
                             {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
+                            {name === 'dropbox' && <button style={btnStyle} disabled={busy} onClick={handleDetectDropbox}><Search size={14}/> Detect</button>}
                             <button style={{ ...btnStyle, width: 100 }} disabled={testing[name]} onClick={() => handleTest(name, t.path)}><Wifi size={14}/> Test</button>
                             <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} onClick={() => handleSave(false)}>Save</button>
                           </div>
-                          
+
                           {name === 'usb' && usbList && (
                             <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
                               {usbList.map(d => (
@@ -543,59 +608,6 @@ export default function BackupSettings() {
                     </React.Fragment>
                   );
                 })}
-              </div>
-            )}
-
-            {/* --------------------------------------
-                TAB: AUTOMATION
-            -------------------------------------- */}
-            {activeTab === 'automation' && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 24, background: 'var(--surface)' }}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Zap size={16} color="var(--ink-soft)"/> Schedule &amp; Retention
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 16, alignItems: 'center', fontSize: 13, maxWidth: 400 }}>
-                  <span style={{ color: 'var(--ink-mid)' }}>Frequency</span>
-                  <select value={intervalDays} onChange={e => { const v = +e.target.value; setIntervalDays(v); handleSave(true, { interval_days: v }); }} style={{ ...inpStyle, cursor: 'pointer' }}>
-                    {INTERVALS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  
-                  <span style={{ color: 'var(--ink-mid)' }}>Keep Copies</span>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="number" min="1" max="365" value={keep} onChange={e => setKeep(e.target.value)} onBlur={() => handleSave(true)} style={{ ...inpStyle, width: 80 }} />
-                    <span style={{ color: 'var(--ink-soft)' }}>per drive</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* --------------------------------------
-                TAB: HISTORY TABLE/GRID
-            -------------------------------------- */}
-            {activeTab === 'history' && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 80px 100px 1fr', padding: '8px 12px', background: 'var(--bg-warm)', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line)' }}>
-                  <div>Time</div><div>Status</div><div>Target</div><div>Details</div>
-                </div>
-                {!status.recent?.length ? (
-                  <div style={{ padding: 16, fontSize: 13, color: 'var(--ink-soft)' }}>No activity logs found.</div>
-                ) : (
-                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-                    {status.recent.map((e, i) => {
-                      const destName = Object.entries(e.targets || {}).filter(([,v]) => v==='ok').map(([k]) => DEST[k]?.label || k)[0] || 'Unknown';
-                      return (
-                        <div key={i} style={{ display: 'grid', gridTemplateColumns: '140px 80px 100px 1fr', padding: '10px 12px', borderBottom: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
-                          <div style={{ color: 'var(--ink-mid)' }}>{fmtTime(e.created_iso)}</div>
-                          <div style={{ color: e.ok ? '#10B981' : '#EF4444', fontWeight: 600 }}>{e.ok ? 'SUCCESS' : 'FAILED'}</div>
-                          <div style={{ color: 'var(--ink-mid)' }}>{destName}</div>
-                          <div style={{ color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {e.ok ? `Backed up ${fmtB(e.db_bytes)}` : `Error: ${JSON.stringify(e.targets)}`}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             )}
 
@@ -674,174 +686,171 @@ export default function BackupSettings() {
                 )}
               </div>
             )}
-          </div>
 
-          {/* INLINE RESTORE PANEL (Appears dynamically below main content) */}
-          {showRestore && (
-            <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 20, background: 'var(--surface)', marginTop: 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                 <div style={{ fontSize: 14, fontWeight: 600 }}>Restore Snapshot</div>
-                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                   {/* Import mode selector — Merge (safe) is the default. */}
-                   <div style={{ display: 'flex', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
-                     {[
-                       { id: 'merge', label: 'Merge' },
-                       { id: 'replace', label: 'Replace' },
-                     ].map(m => (
-                       <button key={m.id} onClick={() => setRestoreMode(m.id)} title={m.id === 'merge' ? 'Keep existing, add new, update matching (nothing deleted)' : 'Delete existing records, then import (snapshot taken first)'}
-                         style={{
-                           padding: '4px 12px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
-                           background: restoreMode === m.id ? (m.id === 'replace' ? 'var(--red)' : 'var(--accent)') : 'var(--surface)',
-                           color: restoreMode === m.id ? '#fff' : 'var(--ink-soft)',
-                         }}>
-                         {m.label}
-                       </button>
-                     ))}
-                   </div>
-                   <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={handleOpenRestore}>Close</button>
-                   <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={() => fileRef.current?.click()}><Upload size={12}/> Import File</button>
-                   <input ref={fileRef} type="file" accept=".zip,.json,application/zip,application/json" onChange={handleRestoreFile} style={{ display:'none' }} />
-                 </div>
-              </div>
-              <div style={{ fontSize: 12, color: restoreMode === 'replace' ? '#EF4444' : 'var(--ink-soft)', marginBottom: 12 }}>
-                {restoreMode === 'replace'
-                  ? '⚠ Replace mode: existing records in the file’s scope are deleted before import (a safety snapshot is taken first).'
-                  : 'Merge mode (recommended): keeps existing records, adds new, updates matching. Nothing is deleted.'}
-              </div>
-              
-              {loadingFiles ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Loading...</div>
-              : !files.length ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>No backups found.</div>
-              : (
-                <div style={{ border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '6px 12px', background: 'var(--bg-warm)', fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)' }}>
-                    <div>Date</div><div>Target</div><div>Filename</div><div></div>
-                  </div>
-                  {files.map((f, i) => (
-                    <div key={i} style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '8px 12px', borderTop: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
-                      <div>{new Date(f.modified_iso).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
-                      <div style={{ color: 'var(--ink-mid)' }}>{DEST[f.target]?.label}</div>
-                      <div style={{ color: 'var(--ink-soft)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>{f.filename}</div>
-                      <button style={{ ...btnStyle, padding: '4px 8px', fontSize: 11 }} disabled={!!restoringP} onClick={() => handleRestoreFromPath(f.path, f.filename)}>
-                        {restoringP === f.path ? '...' : 'Restore'}
-                      </button>
-                    </div>
-                  ))}
+        {/* --------------------------------------
+            TAB: TOOLS — exports, metrics, restore, factory reset
+        -------------------------------------- */}
+        {activeTab === 'tools' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 24, alignItems: 'start' }}>
+
+              {/* Export & Utilities */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 16, background: 'var(--surface)' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--ink)' }}>
+                  Export &amp; Utilities
                 </div>
-              )}
-            </div>
-          )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadBackup}>
+                    <Download size={14} /> Export Full Backup (Both)
+                  </button>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
+                    onClick={async () => {
+                      try {
+                        const { blob, filename } = await fetchBackupBlob();
+                        const r = await shareFiles([blobToFile(blob, filename, 'application/zip')], { title: 'NJ India — full backup', text: 'All quotations, warranties & catalog' });
+                        showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
+                      } catch { showToast('Share failed', 'error'); }
+                    }}>
+                    <Share2 size={14} /> Share Full Backup (everything)
+                  </button>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadCatalogBackup}>
+                    <Download size={14} /> Export Catalog
+                    {uploadsInfo && (
+                      <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600 }}>
+                        {uploadsInfo.count} images · .zip
+                      </span>
+                    )}
+                  </button>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
+                    onClick={() => catalogRestoreRef.current?.click()}>
+                    <RotateCcw size={14} /> Restore Catalog
+                  </button>
+                  <input ref={catalogRestoreRef} type="file" accept=".zip,.json,application/zip,application/json" style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]; e.target.value = '';
+                      if (!file) return;
+                      const replace = restoreMode === 'replace';
+                      if (replace) {
+                        if (window.prompt(`REPLACE catalogue from "${file.name}".\n\nThis overwrites brands, classes, varieties, tools, warranty templates and settings with the file's contents (a safety snapshot is taken first). History (quotations/warranties) is NOT touched.\n\nType REPLACE to confirm:`) !== 'REPLACE') return;
+                      } else if (!window.confirm(`Restore catalogue from "${file.name}"?\nMerges brands, classes, varieties, tools, warranty templates, settings and images. History is never touched. Nothing is deleted.`)) {
+                        return;
+                      }
+                      setBusy(true);
+                      try {
+                        const r = await restoreCatalogFromFile(file, restoreMode);
+                        showToast(`Catalogue ${replace ? 'replaced' : 'restored'}, ${r.restored_images ?? 0} images. Reloading...`);
+                        setTimeout(() => window.location.reload(), 1400);
+                      } catch (err) { showToast(err.message || 'Restore failed', 'error'); setBusy(false); }
+                    }}
+                  />
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadHistoryBackup}>
+                    <Download size={14} /> Export History
+                  </button>
 
-          {/* Danger Zone (Moved to bottom of Left Pane) */}
-          <div style={{ border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 6, padding: '16px 20px', background: 'var(--surface)', marginTop: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-             <div>
-               <div style={{ fontSize: 14, fontWeight: 600, color: '#EF4444', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                 <Trash2 size={16}/> Factory Reset
-               </div>
-               <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
-                 Clear all history (Quotations & Warranties). Product Catalog is kept.
-               </div>
-             </div>
-             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <input value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type DELETE" style={{ ...inpStyle, width: 120, borderColor: 'rgba(239, 68, 68, 0.3)', textAlign: 'center' }} />
-                <button disabled={busy || resetConfirm !== 'DELETE'} onClick={handleReset} style={{ ...btnStyle, color: resetConfirm === 'DELETE' ? '#fff' : '#EF4444', background: resetConfirm === 'DELETE' ? '#EF4444' : 'transparent', borderColor: resetConfirm === 'DELETE' ? '#EF4444' : 'rgba(239, 68, 68, 0.3)' }}>
-                  Clear History
-                </button>
-             </div>
-          </div>
+                  <div style={{ height: '1px', background: 'var(--line)', margin: '4px 0' }}></div>
 
-        </div>
-
-        {/* ==========================================
-            RIGHT PANE (Compact Metrics Sidebar)
-        ========================================== */}
-        <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 24 }}>
-          
-          {/* Metrics Box */}
-          <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 16, background: 'var(--surface)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Database size={14} color="var(--ink-soft)"/> Database Metrics
-            </div>
-            
-            <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 8, letterSpacing: '-0.02em' }}>
-              {fmtB(health.db_bytes)}
-            </div>
-            
-            <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, marginBottom: 12 }}>
-              <div style={{ width: `${Math.min(100, Math.round(health.db_bytes / health.red_bytes * 100))}%`, height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
-            </div>
-            
-            <div style={{ fontSize: 12, color: 'var(--ink-mid)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Quotations</span> <span style={{ fontWeight: 600 }}>{health.counts.quotations}</span>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={handleOpenRestore}>
+                    <RotateCcw size={14} /> Restore Database
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Warranties</span> <span style={{ fontWeight: 600 }}>{health.counts.warranty_certificates}</span>
+
+              {/* Database Metrics */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 16, background: 'var(--surface)' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Database size={14} color="var(--ink-soft)"/> Database Metrics
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 8, letterSpacing: '-0.02em' }}>
+                  {fmtB(health.db_bytes)}
+                </div>
+                <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, marginBottom: 12 }}>
+                  <div style={{ width: `${Math.min(100, Math.round(health.db_bytes / health.red_bytes * 100))}%`, height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-mid)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Quotations</span> <span style={{ fontWeight: 600 }}>{health.counts.quotations}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Warranties</span> <span style={{ fontWeight: 600 }}>{health.counts.warranty_certificates}</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Utilities */}
-          <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 16, background: 'var(--surface)' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--ink)' }}>
-              Export & Utilities
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadBackup}>
-                <Download size={14} /> Export Full Backup (Both)
-              </button>
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
-                onClick={async () => {
-                  try {
-                    const { blob, filename } = await fetchBackupBlob();
-                    const r = await shareFiles([blobToFile(blob, filename, 'application/zip')], { title: 'NJ India — full backup', text: 'All quotations, warranties & catalog' });
-                    showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
-                  } catch { showToast('Share failed', 'error'); }
-                }}>
-                <Share2 size={14} /> Share Full Backup (everything)
-              </button>
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadCatalogBackup}>
-                <Download size={14} /> Export Catalog
-                {uploadsInfo && (
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600 }}>
-                    {uploadsInfo.count} images · .zip
-                  </span>
+            {/* Restore Snapshot panel (toggled by "Restore Database") */}
+            {showRestore && (
+              <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 20, background: 'var(--surface)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                   <div style={{ fontSize: 14, fontWeight: 600 }}>Restore Snapshot</div>
+                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                     {/* Import mode selector — Merge (safe) is the default. */}
+                     <div style={{ display: 'flex', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
+                       {[
+                         { id: 'merge', label: 'Merge' },
+                         { id: 'replace', label: 'Replace' },
+                       ].map(m => (
+                         <button key={m.id} onClick={() => setRestoreMode(m.id)} title={m.id === 'merge' ? 'Keep existing, add new, update matching (nothing deleted)' : 'Delete existing records, then import (snapshot taken first)'}
+                           style={{
+                             padding: '4px 12px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
+                             background: restoreMode === m.id ? (m.id === 'replace' ? 'var(--red)' : 'var(--accent)') : 'var(--surface)',
+                             color: restoreMode === m.id ? '#fff' : 'var(--ink-soft)',
+                           }}>
+                           {m.label}
+                         </button>
+                       ))}
+                     </div>
+                     <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={handleOpenRestore}>Close</button>
+                     <button style={{ ...btnStyle, fontSize: 12, padding: '4px 10px' }} onClick={() => fileRef.current?.click()}><Upload size={12}/> Import File</button>
+                     <input ref={fileRef} type="file" accept=".zip,.json,application/zip,application/json" onChange={handleRestoreFile} style={{ display:'none' }} />
+                   </div>
+                </div>
+                <div style={{ fontSize: 12, color: restoreMode === 'replace' ? '#EF4444' : 'var(--ink-soft)', marginBottom: 12 }}>
+                  {restoreMode === 'replace'
+                    ? '⚠ Replace mode: existing records in the file’s scope are deleted before import (a safety snapshot is taken first).'
+                    : 'Merge mode (recommended): keeps existing records, adds new, updates matching. Nothing is deleted.'}
+                </div>
+
+                {loadingFiles ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Loading...</div>
+                : !files.length ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>No backups found.</div>
+                : (
+                  <div style={{ border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '6px 12px', background: 'var(--bg-warm)', fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)' }}>
+                      <div>Date</div><div>Target</div><div>Filename</div><div></div>
+                    </div>
+                    {files.map((f, i) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '8px 12px', borderTop: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
+                        <div>{new Date(f.modified_iso).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                        <div style={{ color: 'var(--ink-mid)' }}>{DEST[f.target]?.label}</div>
+                        <div style={{ color: 'var(--ink-soft)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>{f.filename}</div>
+                        <button style={{ ...btnStyle, padding: '4px 8px', fontSize: 11 }} disabled={!!restoringP} onClick={() => handleRestoreFromPath(f.path, f.filename)}>
+                          {restoringP === f.path ? '...' : 'Restore'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </button>
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
-                onClick={() => catalogRestoreRef.current?.click()}>
-                <RotateCcw size={14} /> Restore Catalog
-              </button>
-              <input ref={catalogRestoreRef} type="file" accept=".zip,.json,application/zip,application/json" style={{ display: 'none' }}
-                onChange={async (e) => {
-                  const file = e.target.files?.[0]; e.target.value = '';
-                  if (!file) return;
-                  const replace = restoreMode === 'replace';
-                  if (replace) {
-                    if (window.prompt(`REPLACE catalogue from "${file.name}".\n\nThis overwrites brands, classes, varieties, tools, warranty templates and settings with the file's contents (a safety snapshot is taken first). History (quotations/warranties) is NOT touched.\n\nType REPLACE to confirm:`) !== 'REPLACE') return;
-                  } else if (!window.confirm(`Restore catalogue from "${file.name}"?\nMerges brands, classes, varieties, tools, warranty templates, settings and images. History is never touched. Nothing is deleted.`)) {
-                    return;
-                  }
-                  setBusy(true);
-                  try {
-                    const r = await restoreCatalogFromFile(file, restoreMode);
-                    showToast(`Catalogue ${replace ? 'replaced' : 'restored'}, ${r.restored_images ?? 0} images. Reloading...`);
-                    setTimeout(() => window.location.reload(), 1400);
-                  } catch (err) { showToast(err.message || 'Restore failed', 'error'); setBusy(false); }
-                }}
-              />
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadHistoryBackup}>
-                <Download size={14} /> Export History
-              </button>
+              </div>
+            )}
 
-              <div style={{ height: '1px', background: 'var(--line)', margin: '4px 0' }}></div>
-
-              <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={handleOpenRestore}>
-                <RotateCcw size={14} /> Restore Database
-              </button>
+            {/* Danger Zone */}
+            <div style={{ border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 6, padding: '16px 20px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+               <div>
+                 <div style={{ fontSize: 14, fontWeight: 600, color: '#EF4444', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                   <Trash2 size={16}/> Factory Reset
+                 </div>
+                 <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+                   Clear all history (Quotations & Warranties). Product Catalog is kept.
+                 </div>
+               </div>
+               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <input value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type DELETE" style={{ ...inpStyle, width: 120, borderColor: 'rgba(239, 68, 68, 0.3)', textAlign: 'center' }} />
+                  <button disabled={busy || resetConfirm !== 'DELETE'} onClick={handleReset} style={{ ...btnStyle, color: resetConfirm === 'DELETE' ? '#fff' : '#EF4444', background: resetConfirm === 'DELETE' ? '#EF4444' : 'transparent', borderColor: resetConfirm === 'DELETE' ? '#EF4444' : 'rgba(239, 68, 68, 0.3)' }}>
+                    Clear History
+                  </button>
+               </div>
             </div>
           </div>
-
-        </div>
+        )}
       </div>
     </div>
   );

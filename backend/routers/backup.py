@@ -387,18 +387,72 @@ def backup_health():
 
 
 # ── destination settings ─────────────────────────────────────────────────────
+def _settings_view(state):
+    return {
+        "targets": state["targets"],
+        "keep": state.get("keep"),
+        "interval_days": state.get("interval_days"),
+        "verify_interval_minutes": state.get("verify_interval_minutes"),
+        "auto_recover_enabled": state.get("auto_recover_enabled"),
+        "event_backup_enabled": state.get("event_backup_enabled"),
+    }
+
+
 @router.get("/api/backup/settings")
 def get_backup_settings():
-    state = backup_service.get_state()
-    return {"targets": state["targets"], "keep": state.get("keep"), "interval_days": state.get("interval_days")}
+    return _settings_view(backup_service.get_state())
 
 
 @router.put("/api/backup/settings")
 def put_backup_settings(body: dict = Body(...)):
     state = backup_service.update_settings(
-        targets=body.get("targets"), keep=body.get("keep"), interval_days=body.get("interval_days")
+        targets=body.get("targets"),
+        keep=body.get("keep"),
+        interval_days=body.get("interval_days"),
+        verify_interval_minutes=body.get("verify_interval_minutes"),
+        auto_recover_enabled=body.get("auto_recover_enabled"),
+        event_backup_enabled=body.get("event_backup_enabled"),
     )
-    return {"targets": state["targets"], "keep": state.get("keep"), "interval_days": state.get("interval_days")}
+    return _settings_view(state)
+
+
+# ── cloud accounts (Google Drive / OneDrive, real OAuth login) ────────────────
+import cloud_backup
+
+
+def _check_provider(provider: str):
+    if not cloud_backup.is_supported(provider):
+        raise HTTPException(status_code=404, detail=f"Unknown cloud provider: {provider}")
+
+
+@router.get("/api/backup/cloud/{provider}/status")
+def cloud_status(provider: str):
+    _check_provider(provider)
+    return cloud_backup.get_status(provider)
+
+
+@router.put("/api/backup/cloud/{provider}/config")
+def cloud_config(provider: str, body: dict = Body(...)):
+    """Save the developer-console Client ID (+ secret for Google) the user pastes in."""
+    _check_provider(provider)
+    cloud_backup.save_config(provider, body.get("client_id", ""), body.get("client_secret", ""))
+    return cloud_backup.get_status(provider)
+
+
+@router.post("/api/backup/cloud/{provider}/connect")
+def cloud_connect(provider: str):
+    """Open the browser, run the OAuth login, and store the account tokens.
+    Blocks until the user finishes (or the flow times out)."""
+    _check_provider(provider)
+    result = cloud_backup.connect(provider)
+    return {**result, **cloud_backup.get_status(provider)}
+
+
+@router.post("/api/backup/cloud/{provider}/disconnect")
+def cloud_disconnect(provider: str):
+    _check_provider(provider)
+    cloud_backup.disconnect(provider)
+    return cloud_backup.get_status(provider)
 
 
 # ── restore from an uploaded backup file (ZIP or JSON) ───────────────────────
@@ -514,3 +568,31 @@ def recovery_report(backup: str = ""):
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Smart Backup Health Dashboard
+# ════════════════════════════════════════════════════════════════════════════
+@router.get("/api/backup/dashboard")
+def backup_dashboard():
+    """Everything the Backup & Recovery dashboard needs in one call: health score,
+    headline status, and the recent change feed."""
+    state = backup_service.get_state()
+    return {
+        "health": backup_service.compute_health_score(),
+        "status": backup_service.compute_status(),
+        "change_journal": (state.get("change_journal") or [])[:20],
+        "recovery_log_count": len(state.get("recovery_log") or []),
+    }
+
+
+@router.get("/api/recovery/log")
+def recovery_log():
+    """The full Recovery History (newest first)."""
+    return {"log": backup_service.get_state().get("recovery_log") or []}
+
+
+@router.post("/api/backup/verify-now")
+def verify_now():
+    """Run a verification + auto-recovery cycle immediately and return the result."""
+    return backup_service.run_verification()

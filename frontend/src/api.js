@@ -16,43 +16,13 @@ export function mediaUrl(url) {
   return url;
 }
 
-// Auth token (set after login in the cloud deployment). When absent — i.e. the
-// local desktop app, which runs with auth disabled — no header is sent and
-// everything works exactly as before.
-export function getToken() {
-  try { return localStorage.getItem("nj_token") || ""; } catch { return ""; }
-}
-export function setToken(token) {
-  try {
-    if (token) localStorage.setItem("nj_token", token);
-    else localStorage.removeItem("nj_token");
-  } catch { /* ignore storage errors */ }
-}
-export function authHeader() {
-  const t = getToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
-
 async function req(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...authHeader(), ...opts.headers },
+    headers: { "Content-Type": "application/json", ...opts.headers },
     ...opts,
   });
   if (!res.ok) throw new Error(`API ${opts.method || "GET"} ${path} → ${res.status}`);
   return res.json();
-}
-
-// Auth endpoints (used by the cloud login screen in Phase 2).
-export async function login(username, password) {
-  const out = await req("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  if (out && out.token) setToken(out.token);
-  return out;
-}
-export async function getMe() {
-  return req("/api/auth/me");
 }
 
 export async function getConfig() {
@@ -95,17 +65,10 @@ export async function clearWarranties() {
   return req("/api/warranties", { method: "DELETE" });
 }
 
-// Live-sync heartbeat: returns { revision, server_time }. The app polls this and
-// refetches data whenever `revision` grows — so changes made on any device
-// (PC or phone) appear here automatically. See AppContext polling.
-export async function getSyncVersion() {
-  return req("/api/sync/version");
-}
-
 export async function downloadWarrantyDocx(warrantyId, warrantyData, filename) {
   const res = await fetch(`${BASE}/api/warranties/${encodeURIComponent(warrantyId)}/docx`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeader() },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(warrantyData || {}),
   });
   if (!res.ok) throw new Error(`DOCX download failed: ${res.status}`);
@@ -134,7 +97,7 @@ export async function downloadWarrantyDocx(warrantyId, warrantyData, filename) {
 export async function uploadImage(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${BASE}/api/uploads`, { method: "POST", body: fd, headers: { ...authHeader() } });
+  const res = await fetch(`${BASE}/api/uploads`, { method: "POST", body: fd });
   if (!res.ok) throw new Error("Upload failed");
   return res.json();
 }
@@ -290,6 +253,23 @@ export async function testConnection(path) {
   return req("/api/backup/test-connection", { method: "POST", body: JSON.stringify({ path }) });
 }
 
+// ── Cloud backup accounts (Google Drive / OneDrive — real OAuth login) ────────
+export async function cloudStatus(provider) {
+  return req(`/api/backup/cloud/${encodeURIComponent(provider)}/status`);
+}
+export async function saveCloudConfig(provider, clientId, clientSecret = "") {
+  return req(`/api/backup/cloud/${encodeURIComponent(provider)}/config`, {
+    method: "PUT", body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+  });
+}
+// Opens the system browser and blocks on the backend until login finishes.
+export async function cloudConnect(provider) {
+  return req(`/api/backup/cloud/${encodeURIComponent(provider)}/connect`, { method: "POST" });
+}
+export async function cloudDisconnect(provider) {
+  return req(`/api/backup/cloud/${encodeURIComponent(provider)}/disconnect`, { method: "POST" });
+}
+
 export async function listBackupFiles() {
   return req("/api/backup/list-files");
 }
@@ -313,4 +293,16 @@ export async function recoveryRecover(backup, selection) {
 }
 export function recoveryReportUrl(backupPath) {
   return `${BASE}/api/recovery/report${backupPath ? `?backup=${encodeURIComponent(backupPath)}` : ""}`;
+}
+
+// ── Smart Backup Health Dashboard ────────────────────────────────────────────
+export async function getBackupDashboard() {
+  return req("/api/backup/dashboard");
+}
+export async function getRecoveryLog() {
+  return req("/api/recovery/log");
+}
+// Run a verification + auto-recovery cycle right now.
+export async function verifyNow() {
+  return req("/api/backup/verify-now", { method: "POST" });
 }

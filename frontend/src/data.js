@@ -15,6 +15,7 @@ export const DEFAULT_DATA = {
     warrantyPrefix: "NJ-W",
     pinEnabled: false,
     pin: "1234",
+    installationEnabled: false,
     termsText: "1. All payments must be made in advance.\n2. Goods once sold will not be taken back.\n3. Subject to Kozhikode jurisdiction."
   },
   brands: [

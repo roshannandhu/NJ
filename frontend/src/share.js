@@ -70,50 +70,102 @@ function restoreFrame(s) {
 }
 
 // ── ONE PDF engine for everything ───────────────────────────────────────────
-// Preview, Download, Print and Share must all produce the SAME document. The NJ
-// quotation and warranty are designed as single A4 pages (the quotation uses
-// density tiers, the warranty an auto-fit layout). This generator captures the
-// element at natural size and lays it out on EXACTLY ONE A4 page: full width when
-// it fits, or scaled down to fit (aspect preserved, centred) if it would slightly
-// overflow — so it never spills a sliver onto an unwanted second page.
-export async function elementToPdf(el) {
+// Preview, Download, Print and Share must all produce the SAME document. Both the
+// quotation and the warranty are sized as A4 pages (794×1123px = exact A4 ratio at
+// 96dpi), so a page-sized document fills one page edge-to-edge. This generator
+// captures the element at natural size and:
+//   • fills ONE A4 page when the content is a page (or within ~5% — scaled to fit,
+//     so a tiny sliver never spills onto an unwanted second page), or
+//   • flows across multiple FULL-SIZE A4 pages when the content genuinely overflows
+//     (a long quotation), so nothing is ever shrunk to unreadable or clipped.
+// The warranty certificate is a fixed-height A4 box (794×1123) whose terms are
+// auto-scaled to fit (see WarrantyDocument.jsx), so its capture height ≈ one A4 and
+// it always lands in the single-page branch below — never a second page.
+// Capture one element to a canvas at natural full size (scale/ frame neutralised).
+async function _captureCanvas(el) {
   const saved = neutralizeScale(el);
   const savedFrame = stripFrame(el); // remove the page border/shadow from the capture only
   void el.offsetHeight; // force a synchronous reflow so the capture sees full size
   try {
+    // Sharper capture: up to 3× on hi-dpi displays, clamped so a tall multi-page
+    // quotation can't exceed safe browser canvas limits (≈16k px / side).
+    const wpx = el.scrollWidth, hpx = el.scrollHeight;
+    const scale = Math.max(1.5, Math.min(3, (window.devicePixelRatio || 1) * 2, 8192 / wpx, 12000 / hpx));
     const canvas = await window.html2canvas(el, {
-      scale: 2,
+      scale,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false,
-      windowWidth: el.scrollWidth,
-      windowHeight: el.scrollHeight,
+      windowWidth: wpx,
+      windowHeight: hpx,
     });
     if (!canvas.width || !canvas.height) throw new Error('Empty capture');
-
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pw = pdf.internal.pageSize.getWidth();   // 210mm
-    const ph = pdf.internal.pageSize.getHeight();  // 297mm
-
-    // Fit to a single page: full width if it fits, else scale down to the page
-    // height keeping aspect ratio, and centre horizontally.
-    const fullH = (canvas.height * pw) / canvas.width;
-    const s = fullH > ph ? ph / fullH : 1;
-    const imgW = pw * s;
-    const imgH = fullH * s;
-    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', (pw - imgW) / 2, 0, imgW, imgH);
-    return pdf;
+    return canvas;
   } finally {
     restoreFrame(savedFrame);
     restoreScale(saved);
   }
 }
 
+// Place one captured canvas onto the pdf, starting on the CURRENT page: fills one
+// A4 page when it's a page (or within ~5%), else flows across full-size pages.
+function _placeCanvas(pdf, canvas) {
+  const pw = pdf.internal.pageSize.getWidth();   // 210mm
+  const ph = pdf.internal.pageSize.getHeight();  // 297mm
+  const imgData = canvas.toDataURL('image/png');
+  const imgH = (canvas.height * pw) / canvas.width; // full-width height in mm
+
+  if (imgH <= ph * 1.05) {
+    const s = Math.min(1, ph / imgH);
+    const w = pw * s, h = imgH * s;
+    pdf.addImage(imgData, 'PNG', (pw - w) / 2, 0, w, h);
+  } else {
+    let heightLeft = imgH;
+    let position = 0;
+    pdf.addImage(imgData, 'PNG', 0, position, pw, imgH);
+    heightLeft -= ph;
+    while (heightLeft > 0) {
+      position -= ph;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, pw, imgH);
+      heightLeft -= ph;
+    }
+  }
+}
+
+export async function elementToPdf(el) {
+  const canvas = await _captureCanvas(el);
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  _placeCanvas(pdf, canvas);
+  return pdf;
+}
+
+// Multi-element variant: each element becomes its OWN A4 page (the quotation
+// sheet + one installation-guidance page per class). Capturing each element
+// separately gives perfectly clean page breaks (no tiling drift between pages).
+export async function elementsToPdf(els) {
+  const list = (els || []).filter(Boolean);
+  if (list.length <= 1) return elementToPdf(list[0]);
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  for (let i = 0; i < list.length; i++) {
+    if (i > 0) pdf.addPage();
+    const canvas = await _captureCanvas(list[i]);
+    _placeCanvas(pdf, canvas);
+  }
+  return pdf;
+}
+
 // Capture a DOM element into a PDF File for sharing — wraps the one engine above
 // so Share is byte-for-byte the same document as Download.
 export async function elementToPdfFile(el, filename) {
   const pdf = await elementToPdf(el);
+  return new File([pdf.output('blob')], filename, { type: 'application/pdf', lastModified: Date.now() });
+}
+
+export async function elementsToPdfFile(els, filename) {
+  const pdf = await elementsToPdf(els);
   return new File([pdf.output('blob')], filename, { type: 'application/pdf', lastModified: Date.now() });
 }
 

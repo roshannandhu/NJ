@@ -31,6 +31,7 @@ from pathlib import Path
 
 from database import DB_PATH, DATA_DIR, SessionLocal
 from models import AppConfig, BackupState, Quotation, WarrantyCertificate
+import cloud_backup  # OAuth cloud destinations (Google Drive / OneDrive)
 
 UPLOADS_DIR = DATA_DIR / "uploads"
 
@@ -43,6 +44,19 @@ PRE_RESTORE_PREFIX = "pre_restore_"
 SCHEDULER_CHECK_SECONDS = 1800    # how often the scheduler thread wakes (30 min)
 STARTUP_SKIP_IF_RECENT_SECONDS = 10 * 60  # avoid double backups on dev reloads
 
+# Event-backup debounce: coalesce a burst of edits into one backup so we never
+# write a full set per keystroke. After the last change we wait QUIET_SECONDS of
+# calm before snapshotting.
+EVENT_QUIET_SECONDS = 8
+EVENT_WORKER_TICK_SECONDS = 2
+CHANGE_JOURNAL_CAP = 500          # recent change descriptors kept for the dashboard
+
+# Scheduled verification: scan backups vs live data, auto-import what's missing.
+VERIFY_INTERVAL_DEFAULT_MIN = 60  # default: every hour
+VERIFY_INTERVALS_MIN = (15, 30, 60, 360, 1440, 10080)  # 15m/30m/1h/6h/daily/weekly
+VERIFY_LOOP_TICK_SECONDS = 30
+RECOVERY_LOG_CAP = 200
+
 # Health thresholds (bytes) for the DB-size meter.
 HEALTH_AMBER_BYTES = 50 * 1024 * 1024     # 50 MB
 HEALTH_RED_BYTES = 200 * 1024 * 1024      # 200 MB
@@ -52,6 +66,17 @@ _backup_lock = threading.Lock()   # serialises whole backup operations
 _state_lock = threading.Lock()    # serialises read-modify-write of BackupState
 _scheduler_stop = threading.Event()
 _scheduler_thread = None
+
+# Event-driven backup worker (debounced).
+_event_lock = threading.Lock()
+_event_dirty_since = None          # wall-clock time of the last change, or None
+_event_worker_stop = threading.Event()
+_event_worker_thread = None
+
+# Verification loop.
+_verify_stop = threading.Event()
+_verify_thread = None
+_verify_lock = threading.Lock()    # serialises run_verification()
 
 
 # ── small helpers ───────────────────────────────────────────────────────────
@@ -78,14 +103,16 @@ def default_local_dir():
 # ── persistent backup state (settings + log) ────────────────────────────────
 def default_state():
     return {
+        # Destinations the app supports. Local Disk + USB are plain folders;
+        # Google Drive and OneDrive are real OAuth cloud accounts (no "path" —
+        # the connection lives in cloud_backup's token store). NAS / Network
+        # Folder / Dropbox were removed: NAS/Network never actually networked
+        # (they created junk local folders) and Dropbox went unused.
         "targets": {
             "local": {"enabled": True, "path": str(default_local_dir())},
+            "usb": {"enabled": False, "path": ""},
             "gdrive": {"enabled": False, "path": ""},
             "onedrive": {"enabled": False, "path": ""},
-            "dropbox": {"enabled": False, "path": ""},
-            "usb": {"enabled": False, "path": ""},
-            "nas": {"enabled": False, "path": ""},
-            "network": {"enabled": False, "path": ""},
         },
         "keep": KEEP_DEFAULT,
         "interval_days": INTERVAL_DAYS_DEFAULT,
@@ -94,6 +121,14 @@ def default_state():
         "recent": [],             # list of manifest summaries (newest first)
         "catalog_changed_at": None,     # set whenever config is saved
         "last_catalog_backup_at": None, # set when uploads ZIP is included in backup
+        # ── Smart backup & recovery ──
+        "event_backup_enabled": True,   # debounced backup on every data change
+        "auto_recover_enabled": True,   # auto-import missing data at verification
+        "verify_interval_minutes": VERIFY_INTERVAL_DEFAULT_MIN,
+        "last_verification_iso": None,
+        "recovery_log": [],             # newest-first {date,item_type,record_id,action,source,result}
+        "change_journal": [],           # newest-first compact change descriptors
+        "recovered_total": 0,           # cumulative count of items auto-recovered
     }
 
 
@@ -102,15 +137,26 @@ def _merge_defaults(state):
     if not isinstance(state, dict):
         return base
     out = {**base, **state}
-    out["targets"] = {**base["targets"], **(state.get("targets") or {})}
+    # Rebuild targets strictly from the known set so destinations we no longer
+    # support (nas / network / dropbox) drop out of any old saved state instead
+    # of lingering in the UI and status.
+    saved_targets = state.get("targets") or {}
+    out["targets"] = {}
     for name, dflt in base["targets"].items():
-        out["targets"][name] = {**dflt, **(out["targets"].get(name) or {})}
+        out["targets"][name] = {**dflt, **(saved_targets.get(name) or {})}
     out["last_backup"] = state.get("last_backup") or {}
     out["recent"] = state.get("recent") or []
     out.setdefault("keep", KEEP_DEFAULT)
     out.setdefault("interval_days", INTERVAL_DAYS_DEFAULT)
     out.setdefault("catalog_changed_at", None)
     out.setdefault("last_catalog_backup_at", None)
+    out.setdefault("event_backup_enabled", True)
+    out.setdefault("auto_recover_enabled", True)
+    out.setdefault("verify_interval_minutes", VERIFY_INTERVAL_DEFAULT_MIN)
+    out.setdefault("last_verification_iso", None)
+    out["recovery_log"] = state.get("recovery_log") or []
+    out["change_journal"] = state.get("change_journal") or []
+    out.setdefault("recovered_total", state.get("recovered_total", 0) or 0)
     return out
 
 
@@ -144,7 +190,9 @@ def set_state(state):
         db.close()
 
 
-def update_settings(targets=None, keep=None, interval_days=None):
+def update_settings(targets=None, keep=None, interval_days=None,
+                    verify_interval_minutes=None, auto_recover_enabled=None,
+                    event_backup_enabled=None):
     """Persist destination settings from the UI. Returns the saved state."""
     with _state_lock:
         state = get_state()
@@ -170,6 +218,20 @@ def update_settings(targets=None, keep=None, interval_days=None):
                 state["interval_days"] = max(1, min(365, int(interval_days)))
             except (TypeError, ValueError):
                 pass
+        if verify_interval_minutes is not None:
+            try:
+                v = int(verify_interval_minutes)
+                # Snap to the nearest allowed interval so the UI can't persist a
+                # value the dropdown doesn't offer.
+                state["verify_interval_minutes"] = min(
+                    VERIFY_INTERVALS_MIN, key=lambda x: abs(x - v)
+                )
+            except (TypeError, ValueError):
+                pass
+        if auto_recover_enabled is not None:
+            state["auto_recover_enabled"] = bool(auto_recover_enabled)
+        if event_backup_enabled is not None:
+            state["event_backup_enabled"] = bool(event_backup_enabled)
         set_state(state)
         return state
 
@@ -180,6 +242,33 @@ def mark_catalog_changed():
         state = get_state()
         state["catalog_changed_at"] = _now_iso()
         set_state(state)
+
+
+def notify_change(item_type, action, record_id):
+    """Record a data change and mark the DB dirty so the debounced event worker
+    will snapshot it. Cheap and non-blocking — safe to call from request handlers.
+
+    item_type: "quotation" | "warranty" | "catalogue"
+    action:    "created" | "edited" | "deleted" | "cleared"
+    record_id: the affected id (or None for bulk/config changes)
+    """
+    global _event_dirty_since
+    entry = {
+        "iso": _now_iso(),
+        "item_type": item_type,
+        "action": action,
+        "record_id": record_id,
+    }
+    with _event_lock:
+        _event_dirty_since = time.time()
+    # Persist a compact descriptor for the dashboard "recent activity" feed.
+    try:
+        with _state_lock:
+            state = get_state()
+            state["change_journal"] = ([entry] + (state.get("change_journal") or []))[:CHANGE_JOURNAL_CAP]
+            set_state(state)
+    except Exception:
+        pass
 
 
 # ── payload (the JSON export — same shape as /api/backup & /api/restore) ─────
@@ -316,11 +405,24 @@ def _verify_db_integrity(path):
 
 
 def _target_dir_ok(path):
-    """(ok, message) — ensure a target directory exists and is writable."""
+    """(ok, message) — ensure a target directory exists and is writable.
+
+    A path must be a full drive path (``D:\\…``) or a UNC network share
+    (``\\\\server\\share\\…``). Without this guard a bare name such as
+    ``192.168.1.11`` was created as a *relative* folder next to the app and
+    falsely reported "Connection successful", instead of failing as an invalid
+    destination — so backups silently went nowhere useful.
+    """
     if not path:
         return False, "no path set"
     try:
         p = Path(path)
+    except Exception:
+        return False, "invalid path"
+    if not p.is_absolute():
+        return False, ("not a full folder path — use a drive like D:\\Backups "
+                       "or a network share \\\\server\\share")
+    try:
         p.mkdir(parents=True, exist_ok=True)
         probe = p / ".nj_write_test"
         probe.write_text("ok", encoding="utf-8")
@@ -481,12 +583,23 @@ def make_backup(reason="manual", force_catalog=False):
                 json_ok = True
             except Exception:
                 json_ok = False
+            # ZIP integrity: only meaningful when we actually wrote an uploads ZIP.
+            # testzip() returns the first bad member's name, or None if all good.
+            if uploads_count > 0:
+                try:
+                    with zipfile.ZipFile(tmp_uploads) as _zf:
+                        zip_ok = _zf.testzip() is None
+                except Exception:
+                    zip_ok = False
+            else:
+                zip_ok = True  # no ZIP to verify
             manifest["verify"] = {
                 "db_integrity": integrity,
                 "db_hash_match": _sha256(tmp_db) == manifest["sha256"]["db"],
                 "json_parse": json_ok,
+                "zip_integrity": zip_ok,
             }
-            verified = integrity == "ok" and json_ok
+            verified = integrity == "ok" and json_ok and zip_ok
 
             tmp_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -495,6 +608,19 @@ def make_backup(reason="manual", force_catalog=False):
             for name, cfg in state["targets"].items():
                 if not cfg.get("enabled"):
                     manifest["targets"][name] = "disabled"
+                    continue
+                # Cloud accounts (Google Drive / OneDrive): upload via their API
+                # instead of copying to a folder.
+                if cloud_backup.is_supported(name):
+                    if not cloud_backup.is_connected(name):
+                        manifest["targets"][name] = "unavailable (not signed in — connect the account in Settings)"
+                        continue
+                    files = [tmp_db, tmp_json, tmp_manifest]
+                    if uploads_count > 0:
+                        files.append(tmp_uploads)
+                    cok, cmsg = cloud_backup.upload_set(name, files, keep)
+                    manifest["targets"][name] = "ok" if cok else f"error ({cmsg})"
+                    any_target = any_target or cok
                     continue
                 ok, msg = _target_dir_ok(cfg.get("path", ""))
                 if not ok:
@@ -1110,6 +1236,314 @@ def _recovery_scan_if_changed():
         pass
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  Scheduled verification + smart auto-recovery
+#  Reuses analyze() (scan) and recover() (additive restore). Verification never
+#  deletes data; it only imports what is missing and, for genuine conflicts where
+#  the backup is provably newer, overwrites after archiving the current copy.
+# ════════════════════════════════════════════════════════════════════════════
+ARCHIVE_PREFIX = "archive_"
+
+
+def _log_recovery(entries):
+    """Prepend recovery-history rows (newest first), capped. Each row:
+    {date, item_type, record_id, action, source, result}."""
+    if not entries:
+        return
+    try:
+        with _state_lock:
+            state = get_state()
+            log = state.get("recovery_log") or []
+            state["recovery_log"] = (list(entries) + log)[:RECOVERY_LOG_CAP]
+            set_state(state)
+    except Exception:
+        pass
+
+
+def _bump_recovered_total(n):
+    if n <= 0:
+        return
+    try:
+        with _state_lock:
+            state = get_state()
+            state["recovered_total"] = int(state.get("recovered_total", 0) or 0) + int(n)
+            set_state(state)
+    except Exception:
+        pass
+
+
+def _record_version(obj):
+    """Best-effort version/timestamp pair for conflict comparison. Returns a
+    sortable tuple (version:int, updated_at:str). Missing fields sort lowest."""
+    if not isinstance(obj, dict):
+        return (0, "")
+    try:
+        ver = int(obj.get("version") or 0)
+    except (TypeError, ValueError):
+        ver = 0
+    updated = str(obj.get("updatedAt") or obj.get("updated_at") or "")
+    return (ver, updated)
+
+
+def _archive_records(quotations=None, warranties=None):
+    """Write the current copies of records about to be overwritten into an
+    ``archive_*`` folder on the local target, so an overwrite is itself
+    recoverable. Best-effort; returns the archive directory or None."""
+    quotations = quotations or []
+    warranties = warranties or []
+    if not quotations and not warranties:
+        return None
+    state = get_state()
+    local = state["targets"].get("local", {})
+    path = local.get("path") or str(default_local_dir())
+    ok, _ = _target_dir_ok(path)
+    if not ok:
+        return None
+    stem = ARCHIVE_PREFIX + datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = Path(path) / stem
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        if quotations:
+            (dest / "quotations.json").write_text(
+                json.dumps(quotations, ensure_ascii=False, indent=2), encoding="utf-8")
+        if warranties:
+            (dest / "warranty_certificates.json").write_text(
+                json.dumps(warranties, ensure_ascii=False, indent=2), encoding="utf-8")
+        _rotate(Path(path), KEEP_PRE_RESTORE, prefix=ARCHIVE_PREFIX)
+        return str(dest)
+    except Exception:
+        return None
+
+
+def auto_recover_missing(report):
+    """Additively import everything the scan flagged as missing (records, config
+    items, images). Reuses recover(); never deletes, never overwrites existing.
+    Returns the recover() applied-counts plus the log entries it produced."""
+    source = report.get("source") or {}
+    backup_path = source.get("file")
+    if not backup_path:
+        return {"applied": {}, "log": []}
+    lists = report.get("lists") or {}
+    selection = {
+        "quotation_ids": lists.get("all_missing_quotation_ids") or [],
+        "warranty_ids": lists.get("all_missing_warranty_ids") or [],
+        "config_items": {k: [it["id"] for it in v]
+                         for k, v in (lists.get("missing_config") or {}).items()},
+        "images": lists.get("missing_images") or [],
+        "uploads_zip_path": source.get("uploads_zip"),
+    }
+    has_work = (selection["quotation_ids"] or selection["warranty_ids"]
+                or any(selection["config_items"].values()) or selection["images"])
+    if not has_work:
+        return {"applied": {}, "log": []}
+
+    result = recover(backup_path, selection)
+    applied = result.get("applied") or {}
+    src_label = f"{source.get('target', 'backup')} ({Path(backup_path).name})"
+    now = _now_iso()
+    log = []
+    for m in (lists.get("missing_quotations") or []):
+        log.append({"date": now, "item_type": "Quotation", "record_id": m.get("id"),
+                    "action": "Imported quotation", "source": src_label, "result": "ok"})
+    for m in (lists.get("missing_warranties") or []):
+        log.append({"date": now, "item_type": "Warranty", "record_id": m.get("id"),
+                    "action": "Imported warranty", "source": src_label, "result": "ok"})
+    for key, items in (lists.get("missing_config") or {}).items():
+        for it in items:
+            log.append({"date": now, "item_type": f"Catalogue/{key}", "record_id": it.get("id"),
+                        "action": "Recovered catalogue item", "source": src_label, "result": "ok"})
+    for nm in (lists.get("missing_images") or []):
+        log.append({"date": now, "item_type": "Image", "record_id": nm,
+                    "action": "Recovered missing file", "source": src_label, "result": "ok"})
+    n = (applied.get("quotations", {}).get("added", 0)
+         + applied.get("warranties", {}).get("added", 0)
+         + applied.get("config_items", 0) + applied.get("images", 0))
+    _bump_recovered_total(n)
+    return {"applied": applied, "log": log}
+
+
+def resolve_conflicts(report):
+    """For records present in BOTH backup and live DB but differing, decide a
+    winner by (version, updatedAt). If the backup copy is strictly newer, archive
+    the current live copy then overwrite it. Otherwise keep the live copy (no
+    silent overwrite). Returns log entries."""
+    source = report.get("source") or {}
+    backup_path = source.get("file")
+    if not backup_path:
+        return []
+    lists = report.get("lists") or {}
+    conflict_q = [c.get("id") for c in (lists.get("conflict_quotations") or [])]
+    conflict_w = [c.get("id") for c in (lists.get("conflict_warranties") or [])]
+    if not conflict_q and not conflict_w:
+        return []
+
+    try:
+        payload = _load_backup_payload(backup_path)
+    except Exception:
+        return []
+    bq = {q.get("id"): q for q in (payload.get("quotations") or []) if isinstance(q, dict) and q.get("id")}
+    bw = {w.get("id"): w for w in (payload.get("warranty_certificates") or []) if isinstance(w, dict) and w.get("id")}
+
+    db = SessionLocal()
+    try:
+        live_q = {r.id: json.loads(r.data) for r in db.query(Quotation).filter(Quotation.id.in_(conflict_q)).all()} if conflict_q else {}
+        live_w = {r.id: json.loads(r.data) for r in db.query(WarrantyCertificate).filter(WarrantyCertificate.id.in_(conflict_w)).all()} if conflict_w else {}
+    finally:
+        db.close()
+
+    win_q, win_w = [], []          # ids where the backup wins (overwrite)
+    archive_q, archive_w = [], []  # current copies to archive first
+    log = []
+    src_label = f"{source.get('target', 'backup')} ({Path(backup_path).name})"
+    now = _now_iso()
+
+    for qid in conflict_q:
+        b, l = bq.get(qid), live_q.get(qid)
+        if b is None or l is None:
+            continue
+        if _record_version(b) > _record_version(l):
+            win_q.append(qid)
+            archive_q.append(l)
+            log.append({"date": now, "item_type": "Quotation", "record_id": qid,
+                        "action": "Resolved conflict — newer backup applied (older archived)",
+                        "source": src_label, "result": "ok"})
+        else:
+            log.append({"date": now, "item_type": "Quotation", "record_id": qid,
+                        "action": "Conflict — kept current (newer or equal)",
+                        "source": src_label, "result": "skipped"})
+    for wid in conflict_w:
+        b, l = bw.get(wid), live_w.get(wid)
+        if b is None or l is None:
+            continue
+        if _record_version(b) > _record_version(l):
+            win_w.append(wid)
+            archive_w.append(l)
+            log.append({"date": now, "item_type": "Warranty", "record_id": wid,
+                        "action": "Resolved conflict — newer backup applied (older archived)",
+                        "source": src_label, "result": "ok"})
+        else:
+            log.append({"date": now, "item_type": "Warranty", "record_id": wid,
+                        "action": "Conflict — kept current (newer or equal)",
+                        "source": src_label, "result": "skipped"})
+
+    if win_q or win_w:
+        _archive_records(quotations=archive_q, warranties=archive_w)
+        recover(backup_path, {
+            "overwrite_quotation_ids": win_q,
+            "overwrite_warranty_ids": win_w,
+        })
+    return log
+
+
+def run_verification(force=False):
+    """One verification cycle: scan the newest backup vs the live DB, then (if
+    auto-recover is on) import everything missing and resolve clear conflicts.
+    Updates last_verification_iso and the cached health snapshot. Never raises."""
+    with _verify_lock:
+        try:
+            report = analyze()
+        except Exception as e:
+            report = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+        log_rows = []
+        if report.get("ok"):
+            state = get_state()
+            if force or state.get("auto_recover_enabled", True):
+                try:
+                    log_rows += auto_recover_missing(report).get("log", [])
+                except Exception:
+                    pass
+                try:
+                    log_rows += resolve_conflicts(report)
+                except Exception:
+                    pass
+
+        if log_rows:
+            _log_recovery(log_rows)
+
+        with _state_lock:
+            state = get_state()
+            state["last_verification_iso"] = _now_iso()
+            set_state(state)
+        # Refresh the cached health snapshot after any recovery.
+        try:
+            compute_health_score(refresh=True)
+        except Exception:
+            pass
+        return {
+            "ok": bool(report.get("ok")),
+            "error": report.get("error"),
+            "summary": report.get("summary"),
+            "recovered": len(log_rows),
+            "log": log_rows,
+            "verified_iso": _now_iso(),
+        }
+
+
+def _verification_loop():
+    """Daemon: fire run_verification() every verify_interval_minutes."""
+    _verify_stop.wait(20)  # let startup settle
+    while not _verify_stop.is_set():
+        try:
+            state = get_state()
+            interval_min = int(state.get("verify_interval_minutes", VERIFY_INTERVAL_DEFAULT_MIN))
+            last = state.get("last_verification_iso")
+            days = _days_since(last)
+            due = (days is None) or (days * 1440.0 >= interval_min)
+            if due:
+                run_verification()
+        except Exception:
+            pass
+        _verify_stop.wait(VERIFY_LOOP_TICK_SECONDS)
+
+
+def start_verification_loop():
+    global _verify_thread
+    if _verify_thread and _verify_thread.is_alive():
+        return
+    _verify_stop.clear()
+    _verify_thread = threading.Thread(target=_verification_loop, name="nj-verify", daemon=True)
+    _verify_thread.start()
+
+
+def stop_verification_loop():
+    _verify_stop.set()
+
+
+# ── event-driven debounced backup worker ─────────────────────────────────────
+def _event_worker_loop():
+    """Daemon: when changes have settled (no new change for EVENT_QUIET_SECONDS)
+    and event backups are enabled, take one coalesced backup."""
+    while not _event_worker_stop.is_set():
+        try:
+            global _event_dirty_since
+            with _event_lock:
+                dirty = _event_dirty_since
+            if dirty is not None and (time.time() - dirty) >= EVENT_QUIET_SECONDS:
+                if get_state().get("event_backup_enabled", True):
+                    make_backup_safe("event")
+                # Clear only if no newer change arrived while we were backing up.
+                with _event_lock:
+                    if _event_dirty_since == dirty:
+                        _event_dirty_since = None
+        except Exception:
+            pass
+        _event_worker_stop.wait(EVENT_WORKER_TICK_SECONDS)
+
+
+def start_event_worker():
+    global _event_worker_thread
+    if _event_worker_thread and _event_worker_thread.is_alive():
+        return
+    _event_worker_stop.clear()
+    _event_worker_thread = threading.Thread(target=_event_worker_loop, name="nj-event-backup", daemon=True)
+    _event_worker_thread.start()
+
+
+def stop_event_worker():
+    _event_worker_stop.set()
+
+
 # ── status / health for the UI ───────────────────────────────────────────────
 def _days_since(iso):
     if not iso:
@@ -1127,6 +1561,29 @@ def compute_status():
     targets = {}
     for name, cfg in state["targets"].items():
         path = cfg.get("path", "")
+        if cloud_backup.is_supported(name):
+            # Cloud account: "available" means a connected, signed-in account.
+            cs = cloud_backup.get_status(name)
+            if not cs["configured"]:
+                avail, msg = False, "not set up"
+            elif not cs["connected"]:
+                avail, msg = False, "not connected"
+            else:
+                avail, msg = True, (cs["email"] or "connected")
+            targets[name] = {
+                "enabled": bool(cfg.get("enabled")),
+                "path": "",
+                "available": avail,
+                "message": msg,
+                "cloud": True,
+                "configured": cs["configured"],
+                "connected": cs["connected"],
+                "email": cs["email"],
+                "free_bytes": None,
+                "backup_count": 0,
+                "folder_size_bytes": 0,
+            }
+            continue
         avail, msg = (False, "no path set")
         if path:
             avail, msg = _target_dir_ok(path)
@@ -1198,6 +1655,130 @@ def compute_health():
         "red_bytes": HEALTH_RED_BYTES,
         "warnings": warnings,
     }
+
+
+def _enabled_targets(state):
+    return {n: c for n, c in state["targets"].items() if c.get("enabled")}
+
+
+def _target_reachable(name, cfg):
+    """True if an enabled target can currently receive a backup."""
+    if cloud_backup.is_supported(name):
+        try:
+            return cloud_backup.is_connected(name)
+        except Exception:
+            return False
+    ok, _ = _target_dir_ok(cfg.get("path", "")) if cfg.get("path") else (False, "")
+    return ok
+
+
+def compute_health_score(refresh=False):
+    """A single 0–100 health score for the Backup Health Dashboard plus the
+    headline facts (last backup / verification, files & database protected). The
+    result is cached in state so the dashboard loads instantly; pass refresh=True
+    to recompute (done after every verification)."""
+    state = get_state()
+    if not refresh and isinstance(state.get("health"), dict):
+        return state["health"]
+
+    now_iso = _now_iso()
+    last_backup = state.get("last_success_iso")
+    last_verify = state.get("last_verification_iso")
+    interval_days = int(state.get("interval_days", INTERVAL_DAYS_DEFAULT))
+    verify_min = int(state.get("verify_interval_minutes", VERIFY_INTERVAL_DEFAULT_MIN))
+
+    factors = []
+
+    # 1) Backup recency (30): full credit within the interval, decaying after.
+    bdays = _days_since(last_backup)
+    if bdays is None:
+        backup_pts, bmsg = 0, "No backup yet"
+    elif bdays <= interval_days:
+        backup_pts, bmsg = 30, "Backup is current"
+    else:
+        backup_pts = max(0, int(30 * (1 - min(1.0, (bdays - interval_days) / (interval_days or 1)))))
+        bmsg = "Backup is overdue"
+    factors.append({"name": "Backup recency", "points": backup_pts, "max": 30, "detail": bmsg})
+
+    # 2) Verification recency (20).
+    vdays = _days_since(last_verify)
+    verify_days = verify_min / 1440.0
+    if vdays is None:
+        verify_pts, vmsg = 0, "No verification yet"
+    elif vdays <= max(verify_days * 2, verify_days + 0.01):
+        verify_pts, vmsg = 20, "Verification is current"
+    else:
+        verify_pts, vmsg = 8, "Verification is overdue"
+    factors.append({"name": "Verification recency", "points": verify_pts, "max": 20, "detail": vmsg})
+
+    # 3) Destinations reachable (20).
+    enabled = _enabled_targets(state)
+    reachable = [n for n, c in enabled.items() if _target_reachable(n, c)]
+    if not enabled:
+        dest_pts, dmsg = 0, "No destinations enabled"
+    elif len(reachable) == len(enabled):
+        dest_pts, dmsg = 20, f"{len(reachable)}/{len(enabled)} destinations reachable"
+    else:
+        dest_pts = int(20 * len(reachable) / len(enabled))
+        dmsg = f"{len(reachable)}/{len(enabled)} destinations reachable"
+    factors.append({"name": "Destinations", "points": dest_pts, "max": 20, "detail": dmsg})
+
+    # 4) Last backup verified ok + DB integrity (15).
+    recent = state.get("recent") or []
+    last_ok = bool(recent[0].get("ok")) if recent else False
+    try:
+        integrity_ok = _verify_db_integrity(DB_PATH) == "ok"
+    except Exception:
+        integrity_ok = False
+    integ_pts = (8 if last_ok else 0) + (7 if integrity_ok else 0)
+    factors.append({"name": "Integrity", "points": integ_pts, "max": 15,
+                    "detail": ("Verified" if (last_ok and integrity_ok) else "Needs a verified backup")})
+
+    # 5) Nothing left unrecovered (15) — read the last cached scan summary.
+    summary = (state.get("last_scan") or {}).get("summary") or {}
+    outstanding = (summary.get("missing_quotations", 0) + summary.get("missing_warranties", 0)
+                   + summary.get("missing_config", 0) + summary.get("missing_images", 0))
+    if outstanding == 0:
+        miss_pts, mmsg = 15, "No missing data"
+    else:
+        miss_pts, mmsg = max(0, 15 - min(15, outstanding)), f"{outstanding} item(s) missing"
+    factors.append({"name": "Completeness", "points": miss_pts, "max": 15, "detail": mmsg})
+
+    score = backup_pts + verify_pts + dest_pts + integ_pts + miss_pts
+    label = "Healthy" if score >= 90 else "Needs attention" if score >= 60 else "At risk"
+
+    files_protected = _uploads_file_count()
+    backup_sets = sum(
+        _count_sets(c["path"])
+        for n, c in enabled.items()
+        if c.get("path") and _target_reachable(n, c)
+    )
+
+    health = {
+        "score_pct": score,
+        "label": label,
+        "last_backup_iso": last_backup,
+        "last_verification_iso": last_verify,
+        "files_protected": files_protected,
+        "backup_sets": backup_sets,
+        "database_protected": bool(last_ok and integrity_ok),
+        "db_integrity_ok": integrity_ok,
+        "missing_outstanding": outstanding,
+        "recovered_total": int(state.get("recovered_total", 0) or 0),
+        "auto_recover_enabled": bool(state.get("auto_recover_enabled", True)),
+        "event_backup_enabled": bool(state.get("event_backup_enabled", True)),
+        "verify_interval_minutes": verify_min,
+        "factors": factors,
+        "computed_iso": now_iso,
+    }
+    try:
+        with _state_lock:
+            st = get_state()
+            st["health"] = health
+            set_state(st)
+    except Exception:
+        pass
+    return health
 
 
 # ── scheduler (stdlib threads, no extra deps) ────────────────────────────────

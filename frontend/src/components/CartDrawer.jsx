@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAppContext } from '../AppContext';
 import { X, Minus, Plus, Trash2 } from 'lucide-react';
 import NumberField from './NumberField';
@@ -25,10 +24,9 @@ export default function CartDrawer() {
         zIndex: 999, opacity: cartOpen ? 1 : 0, pointerEvents: cartOpen ? 'auto' : 'none', transition: 'opacity 0.3s'
       }} onClick={() => setCartOpen(false)} />
 
-      {/* Drawer — width caps to the viewport on phones so it never overflows */}
+      {/* Drawer */}
       <div className="glass-dark" style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(480px, 100vw)',
-        maxWidth: '100vw', boxSizing: 'border-box',
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: '480px',
         zIndex: 1000, boxShadow: '-20px 0 60px rgba(0,0,0,0.2)',
         transform: cartOpen ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.4s cubic-bezier(0.19, 1, 0.22, 1)',

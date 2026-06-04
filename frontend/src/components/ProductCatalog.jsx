@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 
 export default function ProductCatalog() {
-  const { data, addToCart, setCartOpen } = useAppContext();
+  const { data, addToCart } = useAppContext();
 
   // State to track selected colors and quantities for each variety
   // Keyed by variety ID

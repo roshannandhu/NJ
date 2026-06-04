@@ -2213,18 +2213,3 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 6px; transition: background 0.2s; }
 ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
-
-/* ════════════════════════════════════════════════════════════════════════
-   Phone responsive overrides (added for phone-view support). Appended last so
-   they win by source order at equal specificity when the viewport is small.
-   ════════════════════════════════════════════════════════════════════════ */
-@media (max-width: 600px) {
-  /* Product cards: one per row — the 360px-min track overflows a phone screen */
-  .qd-product-grid { grid-template-columns: 1fr; }
-  /* Variety cards: tighter so two fit side-by-side instead of overflowing */
-  .qd-variety-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
-  /* Reduce the grey tap-highlight flash on phones */
-  button, a { -webkit-tap-highlight-color: transparent; }
-  /* Guard: never let a stray fixed-width child scroll the whole app sideways */
-  html, body, #root { max-width: 100%; overflow-x: hidden; }
-}

@@ -1,12 +1,6 @@
-import React from 'react';
-import { useAppContext } from '../AppContext';
-
 export default function StatsBar() {
-  const { data } = useAppContext();
-  
   // Dummy logic matching original HTML
   const totalQuotes = 0; // Replace with actual data logic later
-  const totalRev = 0;
   const warrantiesIssued = 0;
   const todayQuotes = 0;
 

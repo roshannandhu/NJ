@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { DEFAULT_DATA } from './data';
-import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus, getSyncVersion, getMe, login as apiLogin, setToken } from './api';
+import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus } from './api';
 
 const AppContext = createContext();
 
@@ -55,13 +55,6 @@ export function AppProvider({ children }) {
 
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
-
-  // Cloud auth state. On the local desktop auth is disabled, so authChecked
-  // flips true immediately and needsLogin stays false — nothing changes.
-  const [authChecked, setAuthChecked] = useState(false);
-  const [needsLogin, setNeedsLogin] = useState(false);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
   const [backupStatus, setBackupStatus] = useState(null);
   const [reminderDismissed, setReminderDismissed] = useState(false);
 
@@ -91,108 +84,69 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Track the latest view without resetting the poll interval, so a background
-  // sync can avoid clobbering in-progress Settings edits.
-  const currentViewRef = useRef(currentView);
-  useEffect(() => { currentViewRef.current = currentView; }, [currentView]);
-
-  // Last data revision seen from the server (api getSyncVersion). null until the
-  // first successful load.
-  const lastRevisionRef = useRef(null);
-
-  // Apply the warranty-content backfill + one-time parent-brand migration to a
-  // freshly fetched config. Returns the normalized cfg and whether a migration
-  // happened (so the caller can persist it once).
-  const normalizeConfig = (cfg) => {
-    let brandMigrated = false;
-    if (cfg && cfg.warranties) {
-      cfg.warranties = cfg.warranties.map(w => {
-        const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
-        if (!def) return w; // custom warranty added by the user — leave as-is
-        const merged = { ...w };
-        // Backfill editable content only when empty (preserve user edits)
-        if (!merged.sections || merged.sections.length === 0) {
-          merged.sections = def.sections;
-          merged.opening = merged.opening || def.opening;
-        }
-        if (!merged.seriesTable || merged.seriesTable.length === 0) {
-          merged.seriesTable = def.seriesTable || [];
-        }
-        // Structural display flags are user-customizable in the Warranty Builder.
-        // Preserve an explicit saved choice (true/false); only backfill from the
-        // definition when the flag is absent (legacy configs).
-        if (merged.showSeriesTable === undefined) merged.showSeriesTable = def.showSeriesTable;
-        if (merged.heatoutTable === undefined && def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
-        return merged;
-      });
-    }
-    // ── Parent Brand migration (idempotent, automatic) ──────────────────
-    // Existing catalogs have no brand layer. Ensure a default "NJ" brand exists
-    // and every class is assigned to a brand. Persisted by the caller only when
-    // something actually changed, so this runs at most once per catalog.
-    if (cfg) {
-      let brands = Array.isArray(cfg.brands) ? cfg.brands : [];
-      if (brands.length === 0) {
-        brands = [{ id: 'nj', name: 'NJ', logo: '', description: 'NJ India in-house roofing brand.', order: 0, active: true }];
-        brandMigrated = true;
-      }
-      const defaultBrandId = brands[0].id;
-      const classes = (cfg.classes || []).map(c => {
-        if (!c.brandId) { brandMigrated = true; return { ...c, brandId: defaultBrandId }; }
-        return c;
-      });
-      cfg = { ...cfg, brands, classes };
-    }
-    return { cfg, brandMigrated };
-  };
-
-  // Load data from the backend. quotations + warranties are always refreshed;
-  // config is skipped when includeConfig is false (e.g. while the user edits
-  // Settings) so a background sync never overwrites unsaved catalogue edits.
-  const loadData = async ({ includeConfig = true } = {}) => {
-    const quotations = (await listQuotations()).map(normalizeCartSpelling);
-    const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
-    if (includeConfig) {
-      const { cfg, brandMigrated } = normalizeConfig(await getConfig());
-      setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
-      if (brandMigrated && cfg) {
-        // Save the migrated catalog back so the brand layer is durable.
-        saveConfig({
-          company: cfg.company, settings: cfg.settings, brands: cfg.brands,
-          classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,
-        }).catch(() => { /* will retry on next explicit save */ });
-      }
-    } else {
-      setData(prev => ({ ...prev, quotations, warranty_certificates }));
-    }
-    setBackendOffline(false);
-  };
-
-  // Load data + prime the sync revision + check backups. Used after the auth
-  // check passes (or immediately on the desktop where auth is off).
-  const initData = async () => {
-    await loadData({ includeConfig: true });
-    try { lastRevisionRef.current = (await getSyncVersion()).revision; } catch { /* sync optional */ }
-    refreshBackupStatus();
-    // The on-launch auto-backup runs in the background; re-check shortly so the
-    // "protected" state shows without needing a manual reload.
-    setTimeout(refreshBackupStatus, 6000);
-  };
-
-  // Initial load — gate data fetching on the auth check so the cloud app shows a
-  // login screen (instead of 401 errors) before any data request is made.
   useEffect(() => {
     (async () => {
       try {
-        const me = await getMe();
-        setAuthRequired(!!me.auth_required);
-        if (me.auth_required && !me.authenticated) {
-          // Cloud, not logged in → show the login screen, load nothing yet.
-          setNeedsLogin(true);
-          return;
+        let cfg = await getConfig();
+        const quotations = (await listQuotations()).map(normalizeCartSpelling);
+        const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
+
+        if (cfg && cfg.warranties) {
+          cfg.warranties = cfg.warranties.map(w => {
+            const def = DEFAULT_DATA.warranties.find(dw => dw.id === w.id);
+            if (!def) return w; // custom warranty added by the user — leave as-is
+            const merged = { ...w };
+            // Backfill editable content only when empty (preserve user edits)
+            if (!merged.sections || merged.sections.length === 0) {
+              merged.sections = def.sections;
+              merged.opening = merged.opening || def.opening;
+            }
+            if (!merged.seriesTable || merged.seriesTable.length === 0) {
+              merged.seriesTable = def.seriesTable || [];
+            }
+            // Structural display flags are now user-customizable in the Warranty
+            // Builder. Preserve an explicit saved choice (true/false); only
+            // backfill from the definition when the flag is absent (legacy
+            // configs), which fixes the warranty-period table going missing on
+            // older saved configs (e.g. Docke, Ceramic).
+            if (merged.showSeriesTable === undefined) merged.showSeriesTable = def.showSeriesTable;
+            if (merged.heatoutTable === undefined && def.heatoutTable !== undefined) merged.heatoutTable = def.heatoutTable;
+            return merged;
+          });
         }
-        setCurrentUser(me.username || null);
-        await initData();
+
+        // ── Parent Brand migration (idempotent, automatic) ──────────────────
+        // Existing catalogs have no brand layer. Ensure a default "NJ" brand
+        // exists and every class is assigned to a brand. Persist only if we
+        // actually changed something, so this runs at most once per catalog.
+        let brandMigrated = false;
+        if (cfg) {
+          let brands = Array.isArray(cfg.brands) ? cfg.brands : [];
+          if (brands.length === 0) {
+            brands = [{ id: 'nj', name: 'NJ', logo: '', description: 'NJ India in-house roofing brand.', order: 0, active: true }];
+            brandMigrated = true;
+          }
+          const defaultBrandId = brands[0].id;
+          const classes = (cfg.classes || []).map(c => {
+            if (!c.brandId) { brandMigrated = true; return { ...c, brandId: defaultBrandId }; }
+            return c;
+          });
+          cfg = { ...cfg, brands, classes };
+        }
+
+        setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
+        setBackendOffline(false);
+        if (brandMigrated && cfg) {
+          // Save the migrated catalog back so the brand layer is durable.
+          saveConfig({
+            company: cfg.company, settings: cfg.settings, brands: cfg.brands,
+            classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,
+          }).catch(() => { /* will retry on next explicit save */ });
+        }
+        refreshBackupStatus();
+        // The on-launch auto-backup runs in the background; re-check shortly so
+        // the "protected" state shows without needing a manual reload.
+        setTimeout(refreshBackupStatus, 6000);
       } catch {
         // Hard failure: the backend (the real data store) is unreachable, so the
         // app is showing blank seed defaults. Make this loud and blocking instead
@@ -200,46 +154,8 @@ export function AppProvider({ children }) {
         // saved over the real data.
         setBackendOffline(true);
         showToast("Backend offline — your data is NOT loaded", "error");
-      } finally {
-        setAuthChecked(true);
       }
     })();
-  }, []);
-
-  // Cloud login: authenticate, store the token, then load data. Throws on bad
-  // credentials so the Login screen can show an error.
-  const doLogin = async (username, password) => {
-    const out = await apiLogin(username, password); // sets token or throws
-    setCurrentUser(out.username || username);
-    setNeedsLogin(false);
-    setBackendOffline(false);
-    await initData();
-  };
-
-  const logout = () => {
-    setToken('');
-    setCurrentUser(null);
-    if (authRequired) setNeedsLogin(true);
-  };
-
-  // ── Live sync ──────────────────────────────────────────────────────────
-  // Poll the server's data revision every 5s; when it grows (another device —
-  // PC or phone — saved a quotation, warranty, or catalogue change), refetch so
-  // this screen updates automatically. Config refresh is skipped while editing
-  // Settings to protect unsaved edits. This is the local proof of the live
-  // 2-way-sync architecture (one backend = single source of truth).
-  useEffect(() => {
-    const id = setInterval(async () => {
-      try {
-        const { revision } = await getSyncVersion();
-        if (lastRevisionRef.current === null) { lastRevisionRef.current = revision; return; }
-        if (revision !== lastRevisionRef.current) {
-          lastRevisionRef.current = revision;
-          await loadData({ includeConfig: currentViewRef.current !== 'settings' });
-        }
-      } catch { /* transient network/backend blip — retry next tick */ }
-    }, 5000);
-    return () => clearInterval(id);
   }, []);
 
   const persistConfig = async (nextData = data) => {
@@ -322,7 +238,6 @@ export function AppProvider({ children }) {
     backendOffline,
     backupStatus, refreshBackupStatus,
     askSaveLocation, setAskSaveLocation,
-    authChecked, needsLogin, authRequired, currentUser, doLogin, logout,
   };
 
   const days = backupStatus?.days_since_last_backup;

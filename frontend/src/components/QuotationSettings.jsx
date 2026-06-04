@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import {
-  DollarSign, FileText, Sliders, ChevronDown, ChevronUp,
-  CheckCircle, AlertCircle, Info, Edit3, Tag, Layers,
+  DollarSign, FileText, Sliders,
+  CheckCircle, Tag, Layers,
   ToggleLeft, ToggleRight, Save, Image as ImageIcon, X, Trash2, Star
 } from 'lucide-react';
 
@@ -57,16 +57,6 @@ const DEFAULT_CLASS_TERMS = {
     "Valid for 30 days from date of issue.",
     "Goods once sold will not be returned.",
   ].join('\n'),
-};
-
-// Default per-class product spec labels used in Table 1
-const DEFAULT_CLASS_SPECS = {
-  laminated: "NJ PREMIUM LAMINATED SHINGLES\n35 years warranty · 10 years free service",
-  stone_coated: "NJ STONE COATED METAL TILES\nOne Bundle : 72 sq/ft — 12 Tiles\nRidge : 1.3 RFT — 1 tile\n50 years Warranty · 10 years free service",
-  heatout: "NJ PREMIUM HEAT OUT CEILING\nHigh thermal insulation & ceiling panel technology\n25 years graduated warranty",
-  ceramic: "NJ PREMIUM CERAMIC ROOF TILES\n30 years warranty · 10 years free service",
-  docke: "DOCKE PIE BITUMEN SHINGLES\n30 years warranty · 10 years free service",
-  default: "Standard Roofing Products",
 };
 
 // Section helper component
@@ -132,75 +122,8 @@ function Toggle({ checked, onChange, label, desc }) {
   );
 }
 
-// Expandable per-class "Class Description" block (shown in Table 1 of the quotation).
-function ClassDescriptionBlock({ label, color, specValue, onSpecChange }) {
-  const [open, setOpen] = useState(false);
-
-  const inputStyle = {
-    padding: '12px 14px', border: '1.5px solid var(--line)', borderRadius: 'var(--radius)',
-    fontSize: '13px', fontFamily: 'var(--font-mono)', lineHeight: '1.7', resize: 'vertical',
-    background: 'var(--bg)', color: 'var(--ink)', width: '100%', boxSizing: 'border-box',
-    transition: 'border-color 0.2s',
-  };
-
-  const lineCount = (specValue || '').split('\n').filter(l => l.trim()).length;
-
-  return (
-    <div style={{
-      border: `1.5px solid ${open ? color : 'var(--line)'}`,
-      borderRadius: 'var(--radius-lg)', overflow: 'hidden',
-      transition: 'border-color 0.2s',
-    }}>
-      {/* Header */}
-      <div
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '16px 20px', cursor: 'pointer',
-          background: open ? `${color}08` : 'var(--surface)',
-          transition: 'background 0.2s',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '10px', height: '10px', borderRadius: '50%',
-            background: color, flexShrink: 0,
-          }} />
-          <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>{label}</span>
-          <span style={{
-            fontSize: '11px', fontWeight: 600, color, background: `${color}15`,
-            padding: '3px 8px', borderRadius: '20px',
-          }}>
-            {lineCount} line{lineCount === 1 ? '' : 's'}
-          </span>
-        </div>
-        {open ? <ChevronUp size={18} color="var(--ink-soft)" /> : <ChevronDown size={18} color="var(--ink-soft)" />}
-      </div>
-
-      {/* Expanded body */}
-      {open && (
-        <div style={{ padding: '20px', borderTop: `1px solid var(--line)`, background: 'var(--surface)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Class Description
-            </label>
-            <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginBottom: '6px' }}>
-              Text shown in the "Product Details" table on the printed quotation. First line is the
-              product title; each following line = one line in the cell.
-            </div>
-            <textarea
-              rows={4}
-              value={specValue}
-              onChange={e => onSpecChange(e.target.value)}
-              style={inputStyle}
-              placeholder="Product name on first line, then specs..."
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// (Per-class Class Description + Installation Guidance editing moved to
+//  Products & Catalog → class → Edit. See ProductsClassesSettings.jsx.)
 
 // A single editable bank-account card (CHANGE 4).
 function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onSetDefault }) {
@@ -334,7 +257,6 @@ export default function QuotationSettings() {
   const { data, setData, showToast, persistConfig } = useAppContext();
 
   const initSettings = data.settings || {};
-  const initCompany  = data.company  || {};
 
   // Maps a class name to the legacy keyword key — used ONLY to seed defaults and
   // to backfill existing keyword-keyed configs when migrating to id-keying.
@@ -363,8 +285,6 @@ export default function QuotationSettings() {
   // Seed a block's value: saved-by-id → saved-by-keyword → keyword default → generic default.
   const seedTerms = (key, name) =>
     initSettings.classTerms?.[key] ?? initSettings.classTerms?.[keywordKey(name)] ?? DEFAULT_CLASS_TERMS[keywordKey(name)] ?? DEFAULT_CLASS_TERMS.default;
-  const seedSpecs = (key, name) =>
-    initSettings.classSpecs?.[key] ?? initSettings.classSpecs?.[keywordKey(name)] ?? DEFAULT_CLASS_SPECS[keywordKey(name)] ?? DEFAULT_CLASS_SPECS.default;
 
   // Financial settings
   const [settings, setSettings] = useState({
@@ -381,6 +301,7 @@ export default function QuotationSettings() {
     footerNote:        initSettings.footerNote        ?? 'Generated via NJ Quotation System',
     showProductImage:  initSettings.showProductImage  ?? true,
     showClassSpecBox:  initSettings.showClassSpecBox  ?? true,
+    installationEnabled: initSettings.installationEnabled ?? false,
     quotationLogo:     initSettings.quotationLogo     ?? '',
     // Single common Terms & Conditions applied to every NEW quotation. Seeded from any
     // existing default-class terms (or the PDF default) so it is never empty on first load.
@@ -404,13 +325,6 @@ export default function QuotationSettings() {
     return obj;
   });
 
-  // Per-class product spec labels — keyed by class.id (+ 'default').
-  const [classSpecs, setClassSpecs] = useState(() => {
-    const obj = {};
-    classBlocks.forEach(b => { obj[b.key] = seedSpecs(b.key, b.name); });
-    return obj;
-  });
-
   const [saved, setSaved] = useState(false);
 
   const handleImageUpload = (e) => {
@@ -431,7 +345,6 @@ export default function QuotationSettings() {
         ...data.settings,
         ...settings,
         classTerms,   // preserved unchanged for old-quotation backward compatibility
-        classSpecs,
         banks: orderedBanks,
       },
     };
@@ -441,12 +354,6 @@ export default function QuotationSettings() {
     setSaved(true);
     showToast('Quotation settings saved ✓');
     setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleResetSpec = (classKey, name) => {
-    const kk = keywordKey(name);
-    setClassSpecs(prev => ({ ...prev, [classKey]: DEFAULT_CLASS_SPECS[kk] ?? DEFAULT_CLASS_SPECS.default }));
-    showToast(`Reset ${name || classKey} description to default`);
   };
 
   // ── Bank account handlers (CHANGE 4) ──────────────────────────────────────
@@ -683,6 +590,12 @@ export default function QuotationSettings() {
             label="Show Product Image in Table 1"
             desc="Include product thumbnail in the right column of the product details table"
           />
+          <Toggle
+            checked={settings.installationEnabled}
+            onChange={v => setSettings(s => ({ ...s, installationEnabled: v }))}
+            label="Installation Guidance Page"
+            desc="Append a separate PDF page per class showing its installation guidance. Default for new quotations; can be toggled per quotation at checkout. Set each class's text in Products & Catalog → class → Edit."
+          />
         </div>
 
         <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -798,57 +711,8 @@ export default function QuotationSettings() {
         </div>
       </Section>
 
-      {/* ── Section 3: Per-Class Class Descriptions ── */}
-      <Section
-        icon={<FileText size={20} />}
-        title="Per-Class Class Descriptions"
-        subtitle="Each product class has its own description shown in the &quot;Product Details&quot; table (Table 1) of the printed quotation."
-        accent="#059669"
-      >
-        {/* Info box */}
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', gap: '12px',
-          padding: '14px 18px', marginBottom: '20px',
-          background: 'var(--accent-soft)', border: '1px solid var(--line)',
-          borderRadius: 'var(--radius)', fontSize: '13px', color: 'var(--ink)',
-        }}>
-          <Info size={16} color="var(--accent)" style={{ flexShrink: 0, marginTop: '1px' }} />
-          <div>
-            <strong>How it works:</strong> Every product class below — including any class you add in
-            <em> Products &amp; Catalog</em> — has its own Class Description. When a quotation is generated,
-            the matching class's description appears in the product details table. Any unmatched item falls
-            back to the <strong>Default</strong> block. Terms &amp; Conditions are now managed once in the
-            <strong> Common Terms &amp; Conditions</strong> section above.
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {classBlocks.map(({ key, label, color, name }) => (
-            <div key={key}>
-              <ClassDescriptionBlock
-                label={label}
-                color={color}
-                specValue={classSpecs[key]}
-                onSpecChange={val => setClassSpecs(prev => ({ ...prev, [key]: val }))}
-              />
-              {/* Reset to default link */}
-              <div style={{ textAlign: 'right', marginTop: '4px' }}>
-                <button
-                  onClick={() => handleResetSpec(key, name)}
-                  style={{
-                    background: 'none', border: 'none', color: color,
-                    fontSize: '11px', fontWeight: 600, cursor: 'pointer',
-                    textDecoration: 'underline', padding: '2px 4px',
-                    opacity: 0.8,
-                  }}
-                >
-                  ↺ Reset to default description
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
+      {/* Per-class Class Description + Installation Guidance are now edited in
+          Products & Catalog → (class) → Edit, alongside the class itself. */}
 
       {/* ── Save Button ── */}
       <div style={{

@@ -151,7 +151,6 @@ export default function QuotationDesk() {
     const price = getItemPrice(item);
     const qty = getSelectedQty(item);
     const activeImage = colorInfo?.image || item.image;
-    const cardColor = colorInfo?.hex || cls.color || '#8a857a';
 
     return (
       <article key={item.id} className="qd2-card" style={{ '--i': index }}>
@@ -267,54 +266,56 @@ export default function QuotationDesk() {
               <strong>No {toolsActive ? 'tools' : 'classes'} yet</strong>
               <span>Add them in Settings.</span>
             </div>
-          ) : brandGroups.map(({ brand, items }) => {
-            const brandKey = brand?.id || 'orphan';
-            const isOpen = openBrandId === brandKey;
-            return (
-            <div className="qd2-brand-group" key={brandKey}>
-              <button
-                type="button"
-                className={`qd2-brand-head${isOpen ? ' is-open' : ''}`}
-                onClick={() => toggleBrand(brand, items)}
-                aria-expanded={isOpen}
-              >
-                {brand?.logo
-                  ? <img src={mediaUrl(brand.logo)} alt="" />
-                  : <span className="qd2-brand-mark">{(brand?.name || 'O').charAt(0).toUpperCase()}</span>}
-                <span className="qd2-brand-name">{brand?.name || 'Other'}</span>
-                <span className="qd2-brand-count">{items.length}</span>
-                <ChevronRight size={16} className="qd2-brand-chev" />
-              </button>
-              <div className={`qd2-brand-classes${isOpen ? ' is-open' : ''}`}>
-                <div className="qd2-brand-classes-inner">
-                  {items.map(cls => {
-                    const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
-                    return (
-                      <button
-                        key={cls.id}
-                        type="button"
-                        className={`qd2-class${cls.id === activeClassId && !normalizedSearch ? ' is-active' : ''}`}
-                        onClick={() => { setActiveClassId(cls.id); setSearch(''); }}
-                      >
-                        <div className="qd2-class-thumb" style={cls.logo ? { backgroundImage: `url("${escapeCssUrl(cls.logo)}")` } : { background: cls.color || '#8a857a' }}>
-                          {!cls.logo && (cls.name || '?').charAt(0).toUpperCase()}
-                        </div>
-                        <div className="qd2-class-copy">
-                          <h4>{cls.name}</h4>
-                          <p>{cls.subtitle || 'Product class'}</p>
-                          <div className="qd2-class-meta">
-                            <span className="qd2-count-chip">{classVarietyCount(cls.id)}</span>
-                            {warranty && <span className="qd2-shield"><ShieldCheck size={10} /> Warranty</span>}
+          ) : (
+            brandGroups.map(({ brand, items }) => {
+              const brandKey = brand?.id || 'orphan';
+              const isOpen = openBrandId === brandKey;
+              return (
+              <div className="qd2-brand-group" key={brandKey}>
+                <button
+                  type="button"
+                  className={`qd2-brand-head${isOpen ? ' is-open' : ''}`}
+                  onClick={() => toggleBrand(brand, items)}
+                  aria-expanded={isOpen}
+                >
+                  {brand?.logo
+                    ? <img src={mediaUrl(brand.logo)} alt="" />
+                    : <span className="qd2-brand-mark">{(brand?.name || 'O').charAt(0).toUpperCase()}</span>}
+                  <span className="qd2-brand-name">{brand?.name || 'Other'}</span>
+                  <span className="qd2-brand-count">{items.length}</span>
+                  <ChevronRight size={16} className="qd2-brand-chev" />
+                </button>
+                <div className={`qd2-brand-classes${isOpen ? ' is-open' : ''}`}>
+                  <div className="qd2-brand-classes-inner">
+                    {items.map(cls => {
+                      const warranty = (data.warranties || []).find(w => w.id === cls.warrantyId);
+                      return (
+                        <button
+                          key={cls.id}
+                          type="button"
+                          className={`qd2-class${cls.id === activeClassId && !normalizedSearch ? ' is-active' : ''}`}
+                          onClick={() => { setActiveClassId(cls.id); setSearch(''); }}
+                        >
+                          <div className="qd2-class-thumb" style={cls.logo ? { backgroundImage: `url("${escapeCssUrl(cls.logo)}")` } : { background: cls.color || '#8a857a' }}>
+                            {!cls.logo && (cls.name || '?').charAt(0).toUpperCase()}
                           </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                          <div className="qd2-class-copy">
+                            <h4>{cls.name}</h4>
+                            <p>{cls.subtitle || 'Product class'}</p>
+                            <div className="qd2-class-meta">
+                              <span className="qd2-count-chip">{classVarietyCount(cls.id)}</span>
+                              {warranty && <span className="qd2-shield"><ShieldCheck size={10} /> Warranty</span>}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </aside>
 

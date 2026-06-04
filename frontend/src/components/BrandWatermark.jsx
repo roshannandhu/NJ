@@ -1,4 +1,3 @@
-import React from 'react';
 
 // ── Brand watermark (faint, centred, behind the document content) ────────────
 // Renders a single decent watermark of the product's brand. Logo-only by design:

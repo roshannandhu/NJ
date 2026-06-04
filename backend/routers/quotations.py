@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from database import get_db
 from models import Quotation, WarrantyCertificate
-import sync_state
+import backup_service
 
 router = APIRouter()
 
@@ -41,17 +41,25 @@ def save_quotation(body: dict = Body(...)):
     db = next(get_db())
     try:
         row = db.query(Quotation).filter(Quotation.id == qid).first()
-        if row is None:
+        is_new = row is None
+        if is_new:
             row = Quotation(id=qid)
             db.add(row)
+        # Bump version on every edit so recovery can tell which copy is newer.
+        new_version = 1 if is_new else (row.version or 1) + 1
+        now = datetime.utcnow()
         row.customer_name = customer.get("name", "")
         row.grand_total = body.get("grandTotal", 0)
         row.date = body.get("date", "")
+        row.version = new_version
+        row.updated_at = now
+        # Mirror version/updatedAt into the JSON blob so they survive in backups.
+        body["version"] = new_version
+        body["updatedAt"] = now.isoformat()
         row.data = json.dumps(body)
-        row.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(row)
-        sync_state.bump()
+        backup_service.notify_change("quotation", "created" if is_new else "edited", qid)
         return json.loads(row.data)
     finally:
         db.close()
@@ -68,7 +76,8 @@ def delete_quotation(qid: str):
             WarrantyCertificate.quotation_id == qid
         ).delete()
         db.commit()
-        sync_state.bump()
+        if deleted:
+            backup_service.notify_change("quotation", "deleted", qid)
         return {"status": "deleted" if deleted else "not_found"}
     finally:
         db.close()
@@ -83,7 +92,7 @@ def clear_quotations():
         db.query(Quotation).delete()
         db.query(WarrantyCertificate).delete()
         db.commit()
-        sync_state.bump()
+        backup_service.notify_change("quotation", "cleared", None)
         return {"status": "cleared"}
     finally:
         db.close()

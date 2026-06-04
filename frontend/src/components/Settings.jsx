@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { ShieldCheck, Briefcase, FileText, ShoppingBag, Lock, Download, Award, Settings as SettingsIcon, Check } from 'lucide-react';
 
@@ -6,7 +6,6 @@ import ProductsClassesSettings from './ProductsClassesSettings';
 import BrandsSettings from './BrandsSettings';
 import WarrantiesSettings from './WarrantiesSettings';
 import QuotationSettings from './QuotationSettings';
-import BackupSettings from './BackupSettings';
 import './Settings.css';
 
 // Canonical toggle used across the settings shell.
@@ -20,7 +19,7 @@ function SetToggle({ checked, onChange, title, desc }) {
 }
 
 export default function Settings() {
-  const { data, setData, showToast, persistConfig, askSaveLocation, setAskSaveLocation } = useAppContext();
+  const { data, setData, showToast, persistConfig, askSaveLocation, setAskSaveLocation, setCurrentView } = useAppContext();
   const [activeModule, setActiveModule] = useState('brands');
 
   const [company, setCompany] = useState(data.company || {});
@@ -36,7 +35,7 @@ export default function Settings() {
     { id: 'warranties', label: 'Warranty Builder',   desc: `${data.warranties?.length || 0} templates`, icon: <ShieldCheck size={18} /> },
     { id: 'company',    label: 'Company Profile',    desc: company.name ? 'Configured' : 'Needs setup',  icon: <Briefcase size={18} /> },
     { id: 'quotation',  label: 'Quotation Specs',    desc: settings.taxEnabled ? 'Tax enabled' : 'No tax', icon: <FileText size={18} /> },
-    { id: 'security',   label: 'Security & Backup',  desc: settings.pinEnabled ? 'PIN active' : 'Unsecured', icon: <Lock size={18} /> },
+    { id: 'security',   label: 'Security',          desc: settings.pinEnabled ? 'PIN active' : 'Unsecured', icon: <Lock size={18} /> },
   ];
 
   const handleSaveCompany = () => {
@@ -116,7 +115,15 @@ export default function Settings() {
         </div>
       </div>
 
-      <BackupSettings />
+      <div className="set-section">
+        <div className="set-section-head">
+          <div className="set-ico"><ShieldCheck size={18} /></div>
+          <div><h2>Backups &amp; Data Safety</h2><p>Automatic backups, cloud accounts, verification and recovery now live on their own page.</p></div>
+        </div>
+        <div className="set-section-body">
+          <button className="set-btn" onClick={() => setCurrentView('backup')}>Open Backup &amp; Recovery</button>
+        </div>
+      </div>
     </div>
   );
 

@@ -1,13 +1,11 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3 } from 'lucide-react';
 import { clearQuotations, clearWarranties } from '../api';
-import useIsMobile from '../useIsMobile';
 
 export default function History({ type }) {
-  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, activeTab, setActiveTab, showToast } = useAppContext();
+  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, setActiveTab, showToast } = useAppContext();
   const [search, setSearch] = useState('');
-  const isMobile = useIsMobile();
 
   const isQuotation = type === 'quotations';
   
@@ -144,11 +142,11 @@ export default function History({ type }) {
       {/* Database Results Container */}
       <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
         
-        {/* Table Header Row (hidden on phone — rows become stacked cards) */}
-        <div style={{
-          display: isMobile ? 'none' : 'grid',
-          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px',
-          background: 'var(--bg-warm)',
+        {/* Table Header Row */}
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px', 
+          background: 'var(--bg-warm)', 
           padding: '16px 24px', 
           fontSize: '11px', 
           textTransform: 'uppercase', 
@@ -180,14 +178,12 @@ export default function History({ type }) {
               <div 
                 key={i} 
                 onClick={() => handleView(row)}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: isMobile ? '1fr' : (isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px'),
-                  rowGap: isMobile ? '6px' : 0,
-                  padding: isMobile ? '14px 16px' : '18px 24px',
-                  borderBottom: '1px solid var(--line-soft)',
-                  alignItems: isMobile ? 'start' : 'center',
-                  textAlign: isMobile ? 'left' : undefined,
+                style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px', 
+                  padding: '18px 24px', 
+                  borderBottom: '1px solid var(--line-soft)', 
+                  alignItems: 'center', 
                   transition: 'background-color 0.2s',
                   cursor: 'pointer'
                 }}

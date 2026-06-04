@@ -1,11 +1,11 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { Image as ImageIcon, FileSignature, ShieldAlert, Stamp, Plus, Trash2, ShieldCheck, Save } from 'lucide-react';
 import { DEFAULT_DATA } from '../data';
 
 export default function WarrantiesSettings() {
   const { data, setData, showToast, persistConfig } = useAppContext();
-  
+
   // Resolve active warranties array, preserving saved edits while filling any missing defaults.
   const warranties = useMemo(() => {
     const source = data.warranties?.length ? data.warranties : DEFAULT_DATA.warranties;
@@ -21,6 +21,18 @@ export default function WarrantiesSettings() {
   }, [data.warranties]);
 
   const companyName = data.company?.name || 'NJ India Trading Pvt. Ltd.';
+
+  // Warrantor company title — one shared value across all warranties, printed on
+  // every certificate. Defaults to the company name; persisted to settings.
+  const [warrantorName, setWarrantorName] = useState(data.settings?.warrantorName ?? '');
+  useEffect(() => { setWarrantorName(data.settings?.warrantorName ?? ''); }, [data.settings?.warrantorName]);
+  const saveWarrantorName = () => {
+    const val = warrantorName.trim();
+    if (val === (data.settings?.warrantorName ?? '')) return;
+    const next = { ...data, settings: { ...data.settings, warrantorName: val } };
+    setData(next); persistConfig(next);
+    showToast('Warrantor company title saved', 'success');
+  };
 
   const [activeId, setActiveId] = useState(warranties[0].id);
   
@@ -121,7 +133,7 @@ export default function WarrantiesSettings() {
   };
 
   return (
-    <div style={{ display: 'flex', gap: '32px', height: 'calc(100vh - 120px)', padding: '24px 40px', overflow: 'hidden', background: 'var(--bg)' }}>
+    <div style={{ display: 'flex', gap: '32px', height: 'calc(100vh - 120px)', padding: '24px 40px', overflow: 'hidden', background: 'var(--bg)', flexDirection: 'row' }}>
       
       {/* Left Pane: Template Selector */}
       <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', paddingRight: '4px' }}>
@@ -197,7 +209,7 @@ export default function WarrantiesSettings() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#F4EFE6', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
         
         {/* Editor Toolbar */}
-        <div style={{ padding: '18px 32px', background: 'var(--surface)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+        <div style={{ padding: '18px 32px', background: 'var(--surface)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', zIndex: 10 }}>
           <div>
             <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--ink)', fontFamily: 'var(--font-display)' }}>
               Live WYSIWYG Document Editor
@@ -254,7 +266,7 @@ export default function WarrantiesSettings() {
             maxWidth: '800px', 
             background: '#FAF6EF', 
             boxShadow: '0 12px 32px rgba(30, 25, 20, 0.05)', 
-            padding: '48px', 
+            padding: '48px',
             minHeight: '1100px', 
             display: 'flex', 
             flexDirection: 'column',
@@ -269,8 +281,8 @@ export default function WarrantiesSettings() {
             </div>
 
             {/* HEADER AREA */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #C2410C', paddingBottom: '20px', marginBottom: '24px' }}>
-              <div style={{ flex: 1, paddingRight: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0', borderBottom: '2px solid #C2410C', paddingBottom: '20px', marginBottom: '24px' }}>
+              <div style={{ flex: 1, paddingRight: '20px', width: '100%' }}>
                 <span style={{ fontSize: '9px', fontWeight: '800', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C2410C', display: 'block', marginBottom: '4px' }}>
                   WARRANTY TITLE HEADER
                 </span>
@@ -332,7 +344,15 @@ export default function WarrantiesSettings() {
                 <span style={{ fontSize: '9px', fontWeight: '800', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-soft)', display: 'block', marginTop: '14px', marginBottom: '4px' }}>
                   WARRANTOR COMPANY TITLE
                 </span>
-                <div style={{ fontSize: '11px', fontWeight: 700 }}>{companyName}</div>
+                <input
+                  value={warrantorName}
+                  onChange={e => setWarrantorName(e.target.value)}
+                  onBlur={saveWarrantorName}
+                  placeholder={companyName}
+                  title="Shown as 'Warrantor' on every warranty certificate"
+                  style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink)', border: 'none', background: 'transparent', width: '100%', textAlign: 'right', padding: '4px 0', borderBottom: '1px dashed var(--line)', outline: 'none' }}
+                />
+                <span style={{ fontSize: '9px', color: 'var(--ink-soft)', display: 'block', marginTop: '2px' }}>Shown on every certificate · blank = company name</span>
               </div>
             </div>
 

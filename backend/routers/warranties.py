@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from database import get_db
 from models import WarrantyCertificate, Quotation
-import sync_state
+import backup_service
 
 router = APIRouter()
 
@@ -61,17 +61,23 @@ def save_warranty(body: dict = Body(...)):
             .filter(WarrantyCertificate.id == wid)
             .first()
         )
-        if row is None:
+        is_new = row is None
+        if is_new:
             row = WarrantyCertificate(id=wid)
             db.add(row)
+        new_version = 1 if is_new else (row.version or 1) + 1
+        now = datetime.utcnow()
         row.quotation_id = quotation_id
         row.customer_name = customer.get("name", "")
         row.date = body.get("date", "")
+        row.version = new_version
+        row.updated_at = now
+        body["version"] = new_version
+        body["updatedAt"] = now.isoformat()
         row.data = json.dumps(body)
-        row.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(row)
-        sync_state.bump()
+        backup_service.notify_change("warranty", "created" if is_new else "edited", wid)
         return json.loads(row.data)
     finally:
         db.close()
@@ -83,7 +89,7 @@ def clear_warranties():
     try:
         db.query(WarrantyCertificate).delete()
         db.commit()
-        sync_state.bump()
+        backup_service.notify_change("warranty", "cleared", None)
         return {"status": "cleared"}
     finally:
         db.close()
@@ -102,7 +108,8 @@ def delete_warranty(wid: str):
             .delete()
         )
         db.commit()
-        sync_state.bump()
+        if deleted:
+            backup_service.notify_change("warranty", "deleted", wid)
         return {"status": "deleted" if deleted else "not_found"}
     finally:
         db.close()

@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft } from 'lucide-react';
 

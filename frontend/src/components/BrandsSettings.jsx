@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { mediaUrl, uploadImage } from '../api';
 import { Plus, Trash2, Image as ImageIcon, X, ToggleLeft, ToggleRight, Save, Award, ArrowUp, ArrowDown } from 'lucide-react';
