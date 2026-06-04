@@ -58,7 +58,14 @@ export default function QuotationDesk() {
   const railClasses = toolsActive ? toolClasses : tileClasses;
 
   // Group the rail's classes under their parent brand (brand order preserved).
+  // Tools & accessories NEVER belong to a brand — in the Tools tab they are shown
+  // as one flat, brandless group (no brand accordion). Note `brandOf` always
+  // resolves to *some* brand via its fallback, so tools must be excluded here
+  // explicitly rather than relying on a null brandId.
   const brandGroups = React.useMemo(() => {
+    if (toolsActive) {
+      return toolClasses.length ? [{ brand: null, items: toolClasses }] : [];
+    }
     const groups = [];
     for (const b of brands) {
       const items = railClasses.filter(c => brandOf(c) === b.id);
@@ -67,7 +74,7 @@ export default function QuotationDesk() {
     const orphan = railClasses.filter(c => !brands.some(b => b.id === brandOf(c)));
     if (orphan.length) groups.push({ brand: null, items: orphan });
     return groups;
-  }, [brands, railClasses]);
+  }, [brands, railClasses, toolsActive, toolClasses]);
 
   // Clear (never auto-pick) a stale selection so the rail opens fully collapsed:
   // first load shows only brands, and switching tabs never forces a class open.
@@ -269,9 +276,12 @@ export default function QuotationDesk() {
           ) : (
             brandGroups.map(({ brand, items }) => {
               const brandKey = brand?.id || 'orphan';
-              const isOpen = openBrandId === brandKey;
+              // Tools tab: flat, brandless list — no brand header, always expanded.
+              const flat = toolsActive;
+              const isOpen = flat ? true : openBrandId === brandKey;
               return (
               <div className="qd2-brand-group" key={brandKey}>
+                {!flat && (
                 <button
                   type="button"
                   className={`qd2-brand-head${isOpen ? ' is-open' : ''}`}
@@ -285,6 +295,7 @@ export default function QuotationDesk() {
                   <span className="qd2-brand-count">{items.length}</span>
                   <ChevronRight size={16} className="qd2-brand-chev" />
                 </button>
+                )}
                 <div className={`qd2-brand-classes${isOpen ? ' is-open' : ''}`}>
                   <div className="qd2-brand-classes-inner">
                     {items.map(cls => {
@@ -329,7 +340,7 @@ export default function QuotationDesk() {
               {activeBrand?.name && <>{activeBrand.name} <ChevronRight size={14} /> </>}
               <b>{activeClass.name}</b> <span className="qd2-cnt">· {gridItems.length} products</span>
             </div>
-          ) : <div className="qd2-crumb">Select a brand</div>}
+          ) : <div className="qd2-crumb">{toolsActive ? 'Select a tool or accessory' : 'Select a brand'}</div>}
 
           <div className="qd2-search">
             <Search size={16} />
@@ -353,8 +364,8 @@ export default function QuotationDesk() {
         {!normalizedSearch && !activeClass ? (
           <div className="qd2-empty">
             <div className="qd2-empty-icon">{toolsActive ? <Wrench size={26} /> : <Layers size={26} />}</div>
-            <strong>Select a {toolsActive ? 'tool brand' : 'brand'} to begin</strong>
-            <span>Pick a brand on the left to reveal its classes, then choose one.</span>
+            <strong>Select a {toolsActive ? 'tool or accessory' : 'brand'} to begin</strong>
+            <span>{toolsActive ? 'Pick a tool / accessory class on the left.' : 'Pick a brand on the left to reveal its classes, then choose one.'}</span>
           </div>
         ) : gridItems.length === 0 ? (
           <div className="qd2-empty">
