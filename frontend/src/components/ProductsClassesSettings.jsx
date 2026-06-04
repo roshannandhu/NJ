@@ -144,7 +144,10 @@ export default function ProductsClassesSettings() {
   const activeBrand = activeClass && activeClass.type !== 'tools' ? sortedBrands.find(b => b.id === brandOf(activeClass)) : null;
   const modalClass = data.classes.find(c => c.id === editClassId);
   const editVar = data.varieties.find(v => v.id === editVarId);
-  const editVarTools = activeClass?.type === 'tools';
+  // Base the variety editor on the variety's OWN class (not the page's active
+  // class) so the modal stays correct after the variety is moved to another class.
+  const editVarClass = data.classes.find(c => c.id === editVar?.classId);
+  const editVarTools = (editVarClass?.type || activeClass?.type) === 'tools';
 
   const statusEl = () => saveStatus === 'pending'
     ? <span className="pc-saving"><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</span>
@@ -212,6 +215,24 @@ export default function ProductsClassesSettings() {
                     <div className="set-grid">
                       <div className="set-field span2"><span className="set-label">Variety Name</span>
                         <input className="set-input" value={editVar.name} onChange={e => updateVariety(editVar.id, { name: e.target.value })} /></div>
+                      <div className="set-field span2"><span className="set-label">Class</span>
+                        <select className="set-select" value={editVar.classId || ''}
+                          title="Move this variety to a different class (added it under the wrong one? fix it here)"
+                          onChange={e => updateVariety(editVar.id, { classId: e.target.value })}>
+                          {sortedBrands.map(b => {
+                            const cls = productClassesOf(b.id);
+                            return cls.length ? (
+                              <optgroup key={b.id} label={b.name}>
+                                {cls.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </optgroup>
+                            ) : null;
+                          })}
+                          {toolClasses.length > 0 && (
+                            <optgroup label="Tools & Accessories">
+                              {toolClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </optgroup>
+                          )}
+                        </select></div>
                       <div className="set-field"><span className="set-label">Base Price (₹)</span>
                         <input className="set-input" type="number" value={editVar.basePrice} onChange={e => updateVariety(editVar.id, { basePrice: parseFloat(e.target.value) || 0 })} /></div>
                       <div className="set-field"><span className="set-label">Unit</span>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3 } from 'lucide-react';
-import { clearQuotations, clearWarranties } from '../api';
+import { clearQuotations, clearWarranties, deleteQuotation, deleteWarranty } from '../api';
 
 export default function History({ type }) {
   const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, setActiveTab, showToast } = useAppContext();
@@ -60,6 +60,52 @@ export default function History({ type }) {
     setActiveQuotation(quotation);
     if (setActiveTab) setActiveTab(cert.warrantyNo || cert.id);
     setCurrentView('quotation_document');
+  };
+
+  // Delete ONE record. Mirrors the backend's behaviour locally so the on-screen
+  // list matches the database without a refetch:
+  //   • Quotation → backend cascades to its warranty certificates, so we also drop
+  //     every cert whose quotationId is this quotation.
+  //   • Warranty → delete the single cert (keyed on its id, not warrantyNo). If it
+  //     is a standalone "warranty only" cert, its hidden backing quotation is
+  //     deleted too (deleteQuotation cascades) so no orphan is left behind.
+  const handleDeleteRow = async (row) => {
+    if (isQuotation) {
+      const linked = (data.warranty_certificates || []).filter(w => w.quotationId === row.id);
+      const extra = linked.length ? `\n\nIts ${linked.length} linked warranty certificate${linked.length === 1 ? '' : 's'} will also be deleted.` : '';
+      if (!window.confirm(`Delete quotation ${row.id}? This cannot be undone.${extra}`)) return;
+      try {
+        await deleteQuotation(row.id);
+      } catch {
+        showToast('Backend sync failed', 'error');
+      }
+      setData(prev => ({
+        ...prev,
+        quotations: (prev.quotations || []).filter(q => q.id !== row.id),
+        warranty_certificates: (prev.warranty_certificates || []).filter(w => w.quotationId !== row.id),
+      }));
+      showToast('Quotation deleted', 'success');
+      return;
+    }
+
+    // Warranty row.
+    const certId = row.id || row.warrantyNo;
+    const label = row.warrantyNo || row.id;
+    if (!window.confirm(`Delete warranty certificate ${label}? This cannot be undone.`)) return;
+    // A standalone "warranty only" cert is backed by a hidden quotation — remove it too.
+    const backing = (data.quotations || []).find(q => q.id === row.quotationId && q.warrantyOnly);
+    try {
+      await deleteWarranty(certId);
+      if (backing) await deleteQuotation(backing.id);
+    } catch {
+      showToast('Backend sync failed', 'error');
+    }
+    setData(prev => ({
+      ...prev,
+      warranty_certificates: (prev.warranty_certificates || []).filter(w => (w.id || w.warrantyNo) !== certId),
+      quotations: backing ? (prev.quotations || []).filter(q => q.id !== backing.id) : prev.quotations,
+    }));
+    showToast('Warranty deleted', 'success');
   };
 
   const handleClearHistory = async () => {
@@ -300,6 +346,24 @@ export default function History({ type }) {
                     }}
                   >
                     <Eye size={13}/> View
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteRow(row); }}
+                    className="btn-secondary"
+                    title={isQuotation ? 'Delete this quotation' : 'Delete this warranty certificate'}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '12px',
+                      gap: '6px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'white',
+                      border: '1px solid var(--red)',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      color: 'var(--red)'
+                    }}
+                  >
+                    <Trash2 size={13}/>
                   </button>
                 </div>
               </div>
