@@ -431,6 +431,16 @@ const WC_CSS = `
     overflow: hidden; border: 1px solid #d8d8d8; box-shadow: 0 4px 32px rgba(0,0,0,0.10);
     display: flex; flex-direction: column;
   }
+  /* Thin certificate frame, inset from the page edge so it prints/exports too
+     (the .wc-doc border above is screen-only and stripped in print). Absolutely
+     positioned so it is NOT pulled into the flex flow, and sits in the margin
+     gutter so it never overlaps the content. */
+  .wc-doc::before {
+    content: ''; position: absolute;
+    top: 14px; right: 14px; bottom: 14px; left: 14px;
+    border: 1.5px solid #8b1a1a; border-radius: 3px;
+    pointer-events: none; z-index: 1;
+  }
   .wc-doc .wc-header { text-align: center; padding-bottom: 10px; border-bottom: 1px solid #e2e2e2; flex-shrink: 0; }
   /* BrandWatermark emits .wd-wm / .wd-wm-logo — style them here so the faint
      watermark stays centred (the old .warranty-doc .wd-wm rule no longer matches

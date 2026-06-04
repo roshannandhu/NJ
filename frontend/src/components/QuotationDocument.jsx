@@ -1731,14 +1731,12 @@ function QuotationDocumentInner() {
               else if (_n.includes('pie') || _n.includes('bitumen') || _n.includes('docke')) _fb = 'docke';
               _matched = data.warranties?.find(w => w.id === _fb);
             }
-            const tmpl = _matched ? { ..._matched, ..._stored } : { ..._stored };
-            if (_matched) {
-              if (!tmpl.sections || tmpl.sections.length === 0) { tmpl.sections = _matched.sections; tmpl.opening = tmpl.opening || _matched.opening; }
-              tmpl.showSeriesTable = _matched.showSeriesTable;
-              tmpl.seriesTable = (_matched.seriesTable && _matched.seriesTable.length) ? _matched.seriesTable : (tmpl.seriesTable || []);
-              if (_matched.heatoutTable !== undefined) tmpl.heatoutTable = _matched.heatoutTable;
-              if (!tmpl.id) tmpl.id = _matched.id;
-            }
+            // Mirror the LIVE template (logo, seal, signature, opening, terms,
+            // tables, duration) so template edits always reflect here; fall back to
+            // the frozen snapshot only when the template was deleted. (Same rule as
+            // WarrantyDocument.) Per-customer data stays in activeCert.certData.
+            const tmpl = _matched ? { ..._matched } : { ..._stored };
+            if (!tmpl.id) tmpl.id = _tid || _stored.id;
             const cd = activeCert.certData || {};
 
             return (

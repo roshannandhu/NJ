@@ -12,7 +12,7 @@ import WarrantyCertificate from './WarrantyCertificate';
 // ═══════════════════════════════════════════════════════════════════════════
 export default function WarrantyDocument() {
   const {
-    activeWarranty: doc, data, setData, setCurrentView,
+    activeWarranty: doc, data, setData, setCurrentView, persistConfig,
     setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, setActiveTab, setGenerateIntent, showToast
   } = useAppContext();
 
@@ -46,17 +46,14 @@ export default function WarrantyDocument() {
     else if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) fallbackId = 'docke';
     matched = data.warranties?.find(w => w.id === fallbackId);
   }
-  let template = matched ? { ...matched, ...storedTpl } : { ...storedTpl };
-  if (matched) {
-    if (!template.sections || template.sections.length === 0) {
-      template.sections = matched.sections;
-      template.opening = template.opening || matched.opening;
-    }
-    template.showSeriesTable = matched.showSeriesTable;
-    template.seriesTable = (matched.seriesTable && matched.seriesTable.length) ? matched.seriesTable : (template.seriesTable || []);
-    if (matched.heatoutTable !== undefined) template.heatoutTable = matched.heatoutTable;
-    if (!template.id) template.id = matched.id;
-  }
+  // Certificates always MIRROR the live template — logo, seal, signature,
+  // opening, terms/sections, tables and duration all come from the current
+  // warranty template, so editing a template instantly updates every certificate
+  // of that type. Per-customer data lives in doc.customer / doc.certData (never in
+  // the template), so it is untouched. Only when the template was deleted do we
+  // fall back to the snapshot frozen on the certificate.
+  let template = matched ? { ...matched } : { ...storedTpl };
+  if (!template.id) template.id = tplId || storedTpl.id;
 
   const customer = doc.customer || {};
   const certData = doc.certData || {};
@@ -77,15 +74,27 @@ export default function WarrantyDocument() {
     });
     createWarranty(updatedDoc).catch(() => {});
   };
+  // Terms are owned by the template (certificates mirror it), so editing the
+  // opening/sections on a certificate updates the underlying warranty template —
+  // and therefore every certificate of this type — and is persisted to config.
+  // Customer / certificate fields stay per-certificate.
+  const updateTemplate = (patch) => {
+    const tid = template.id;
+    if (!tid) { showToast && showToast('This certificate has no template to edit', 'error'); return; }
+    const nextWarranties = (data.warranties || []).map(w => w.id === tid ? { ...w, ...patch } : w);
+    const nextData = { ...data, warranties: nextWarranties };
+    setData(nextData);
+    persistConfig(nextData);
+  };
   const edit = {
-    onUpdateOpening: (v) => persistWarranty({ ...doc, template: { ...template, opening: v } }),
+    onUpdateOpening: (v) => updateTemplate({ opening: v }),
     onUpdateSection: (idx, field, value) => {
       const s = [...(template.sections || [])];
       s[idx] = { ...s[idx], [field]: value };
-      persistWarranty({ ...doc, template: { ...template, sections: s } });
+      updateTemplate({ sections: s });
     },
-    onAddSection: () => persistWarranty({ ...doc, template: { ...template, sections: [...(template.sections || []), { title: 'New Section', content: '', isBullets: false }] } }),
-    onRemoveSection: (idx) => persistWarranty({ ...doc, template: { ...template, sections: (template.sections || []).filter((_, i) => i !== idx) } }),
+    onAddSection: () => updateTemplate({ sections: [...(template.sections || []), { title: 'New Section', content: '', isBullets: false }] }),
+    onRemoveSection: (idx) => updateTemplate({ sections: (template.sections || []).filter((_, i) => i !== idx) }),
     onUpdateCustomerField: (field, value) => persistWarranty({ ...doc, customer: { ...customer, [field]: value } }),
     onUpdateCertField: (field, value) => persistWarranty({ ...doc, certData: { ...certData, [field]: value } }),
   };
