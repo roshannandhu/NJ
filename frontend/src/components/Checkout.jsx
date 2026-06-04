@@ -115,10 +115,16 @@ export default function Checkout() {
 
   const finalizeGeneration = async () => {
 
-    // What to produce was chosen on the Desk: 'quote' (quotation only),
-    // 'both' (quotation + warranty), or 'warranty' (standalone warranty only).
-    // Editing an existing quotation is always a plain quote finalize.
-    const intent = activeQuotationId ? 'quote' : (generateIntent || 'quote');
+    // What to produce was chosen at the Checkout entry point: 'quote' (quotation
+    // only), 'both' (quotation + warranty), or 'warranty' (standalone warranty
+    // only). Honour that explicit choice. Every path into Checkout sets
+    // generateIntent — the Desk buttons, CartDrawer, and the "Edit in Checkout"
+    // actions all set it, and loadQuotationForEdit sets 'quote' — so we must NOT
+    // force 'quote' just because activeQuotationId happens to be set. Doing that
+    // silently turned a "Warranty Only" action into a plain quotation whenever
+    // the user had generated anything earlier in the same session (the active id
+    // lingers across "Back to Desk"), so no warranty was created.
+    const intent = generateIntent || 'quote';
 
     // Validate BEFORE minting/saving anything: a warranty-only finalize needs at
     // least one warranty-eligible product. (Doing this before the id is minted
@@ -136,8 +142,14 @@ export default function Checkout() {
     // the backend (which upserts by id) UPDATES the existing quotation instead
     // of inserting a duplicate. A brand-new id is only minted for a fresh draft
     // (activeQuotationId is null until the first generate; cleared by "New").
-    const qNo = activeQuotationId || `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
-    const isRegenerate = !!activeQuotationId;
+    //
+    // A standalone warranty-only finalize is backed by its OWN hidden quotation,
+    // so it must NEVER reuse — and overwrite — the active quotation draft: doing
+    // so would clobber a real quotation (marking it warrantyOnly and zeroing its
+    // total). So warranty-only always mints a fresh id; only quote/both reuse it.
+    const reuseId = intent !== 'warranty' ? activeQuotationId : null;
+    const qNo = reuseId || `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
+    const isRegenerate = !!reuseId;
     setActiveQuotationId(qNo);
 
     // When updating an existing quotation, build ON TOP of it so per-quotation
