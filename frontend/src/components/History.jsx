@@ -130,6 +130,15 @@ export default function History({ type }) {
     }
   };
 
+  // Square icon-button base for the per-row actions (kept compact so up to four
+  // actions fit the Actions column without spilling into neighbouring columns).
+  const iconBtn = {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: '32px', height: '32px', flexShrink: 0, padding: 0,
+    borderRadius: 'var(--radius-sm)', background: 'white',
+    border: '1px solid var(--line)', cursor: 'pointer',
+  };
+
   return (
     <div className="animate-fade-up" style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 160px)' }}>
       
@@ -191,7 +200,7 @@ export default function History({ type }) {
         {/* Table Header Row */}
         <div style={{ 
           display: 'grid', 
-          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px', 
+          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px', 
           background: 'var(--bg-warm)', 
           padding: '16px 24px', 
           fontSize: '11px', 
@@ -226,7 +235,7 @@ export default function History({ type }) {
                 onClick={() => handleView(row)}
                 style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 110px' : '160px 1.5fr 1.5fr 120px 110px', 
+                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px', 
                   padding: '18px 24px', 
                   borderBottom: '1px solid var(--line-soft)', 
                   alignItems: 'center', 
@@ -289,81 +298,41 @@ export default function History({ type }) {
                   {dateVal}
                 </div>
                 
-                {/* Actions */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                {/* Actions — compact icon buttons so they never overflow the
+                    column (text labels for 3-4 actions used to spill into the
+                    Date / Grand Total columns). Tooltips carry the meaning. */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                   {isQuotation && rowCerts.length > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openWarranty(row, rowCerts[0]); }}
-                      className="btn-secondary"
                       title="Open the warranty certificate for this quotation"
-                      style={{
-                        padding: '8px 12px',
-                        fontSize: '12px',
-                        gap: '6px',
-                        borderRadius: 'var(--radius-sm)',
-                        background: 'white',
-                        border: '1px solid var(--line)',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        color: '#15803d'
-                      }}
+                      style={{ ...iconBtn, color: '#15803d' }}
                     >
-                      <ShieldCheck size={13}/> Warranty
+                      <ShieldCheck size={15}/>
                     </button>
                   )}
                   {isQuotation && (
                     <button
                       onClick={(e) => { e.stopPropagation(); loadQuotationForEdit(row); }}
-                      className="btn-secondary"
                       title="Edit this quotation (loads it into Checkout)"
-                      style={{
-                        padding: '8px 12px',
-                        fontSize: '12px',
-                        gap: '6px',
-                        borderRadius: 'var(--radius-sm)',
-                        background: 'white',
-                        border: '1px solid var(--line)',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        color: 'var(--accent)'
-                      }}
+                      style={{ ...iconBtn, color: 'var(--accent)' }}
                     >
-                      <Edit3 size={13}/> Edit
+                      <Edit3 size={15}/>
                     </button>
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); handleView(row); }}
-                    className="btn-secondary"
-                    style={{
-                      padding: '8px 14px',
-                      fontSize: '12px',
-                      gap: '6px',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'white',
-                      border: '1px solid var(--line)',
-                      cursor: 'pointer',
-                      fontWeight: 600
-                    }}
+                    title="View"
+                    style={{ ...iconBtn, color: 'var(--ink)' }}
                   >
-                    <Eye size={13}/> View
+                    <Eye size={15}/>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDeleteRow(row); }}
-                    className="btn-secondary"
                     title={isQuotation ? 'Delete this quotation' : 'Delete this warranty certificate'}
-                    style={{
-                      padding: '8px 12px',
-                      fontSize: '12px',
-                      gap: '6px',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'white',
-                      border: '1px solid var(--red)',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      color: 'var(--red)'
-                    }}
+                    style={{ ...iconBtn, color: 'var(--red)', borderColor: 'var(--red)' }}
                   >
-                    <Trash2 size={13}/>
+                    <Trash2 size={15}/>
                   </button>
                 </div>
               </div>
