@@ -1,8 +1,9 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2 } from 'lucide-react';
-import { downloadWarrantyDocx, createWarranty, mediaUrl } from '../api';
+import { downloadWarrantyDocx, createWarranty } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { watermarkBrandForItems } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -97,28 +98,6 @@ export default function WarrantyDocument() {
     onRemoveSection: (idx) => updateTemplate({ sections: (template.sections || []).filter((_, i) => i !== idx) }),
     onUpdateCustomerField: (field, value) => persistWarranty({ ...doc, customer: { ...customer, [field]: value } }),
     onUpdateCertField: (field, value) => persistWarranty({ ...doc, certData: { ...certData, [field]: value } }),
-  };
-
-  // ── Dominant brand for the faint watermark ──────────────────────────────────
-  const getDominantBrand = (list) => {
-    const counts = new Map();
-    (list || []).forEach((it, idx) => {
-      const cls = data.classes?.find(c => c.name === it.className);
-      const brandId = it.brandId || cls?.brandId;
-      if (!brandId) return;
-      const nm = it.brandName || (data.brands || []).find(b => b.id === brandId)?.name || '';
-      const cur = counts.get(brandId);
-      if (cur) cur.count++; else counts.set(brandId, { count: 1, firstIdx: idx, name: nm });
-    });
-    if (!counts.size) return null;
-    let best = null;
-    for (const [id, v] of counts) {
-      if (!best || v.count > best.count || (v.count === best.count && v.firstIdx < best.firstIdx)) best = { id, ...v };
-    }
-    const brand = (data.brands || []).find(b => b.id === best.id);
-    const logo = brand?.logo ? mediaUrl(brand.logo) : '';
-    const name = best.name || brand?.name || '';
-    return (name || logo) ? { id: best.id, name, logo } : null;
   };
 
   const downloadPDF = async () => {
@@ -222,7 +201,7 @@ export default function WarrantyDocument() {
         <WarrantyCertificate
           template={template}
           openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-          brand={getDominantBrand(items)}
+          brand={watermarkBrandForItems(items, data)}
           variant="customer"
           customer={customer}
           certData={certData}

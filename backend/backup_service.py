@@ -358,12 +358,43 @@ def _apply_config(cfg_row, new_cfg, mode):
                 merged[item["id"]] = item
         old_cfg[key] = list(merged.values())
 
-    for scalar in ("company", "settings"):
-        if scalar in new_cfg and isinstance(new_cfg[scalar], dict):
-            base = old_cfg.get(scalar) if isinstance(old_cfg.get(scalar), dict) else {}
-            old_cfg[scalar] = {**base, **new_cfg[scalar]}
-        elif scalar in new_cfg:
-            old_cfg[scalar] = new_cfg[scalar]
+    # company is a flat object — a shallow merge is correct.
+    if "company" in new_cfg:
+        if isinstance(new_cfg["company"], dict):
+            base = old_cfg.get("company") if isinstance(old_cfg.get("company"), dict) else {}
+            old_cfg["company"] = {**base, **new_cfg["company"]}
+        else:
+            old_cfg["company"] = new_cfg["company"]
+
+    # settings holds NESTED structures (the `banks` list and the `classTerms`
+    # object) that a plain shallow merge would clobber/drop — which is why bank
+    # details and Terms & Conditions appeared "missing" after a catalogue restore.
+    # Deep-merge them: union banks by id (the same rule used for the top-level
+    # catalogue lists) and merge classTerms by key, so a restore reliably ADDS
+    # banks + T&C and never wipes existing ones.
+    if "settings" in new_cfg:
+        if isinstance(new_cfg["settings"], dict):
+            base = old_cfg.get("settings") if isinstance(old_cfg.get("settings"), dict) else {}
+            new_settings = new_cfg["settings"]
+            merged = {**base, **new_settings}
+
+            old_banks = base.get("banks") if isinstance(base.get("banks"), list) else []
+            new_banks = new_settings.get("banks") if isinstance(new_settings.get("banks"), list) else []
+            if old_banks or new_banks:
+                by_id = {b.get("id"): b for b in old_banks if isinstance(b, dict) and b.get("id")}
+                for b in new_banks:
+                    if isinstance(b, dict) and b.get("id"):
+                        by_id[b["id"]] = b
+                merged["banks"] = list(by_id.values())
+
+            old_ct = base.get("classTerms") if isinstance(base.get("classTerms"), dict) else {}
+            new_ct = new_settings.get("classTerms") if isinstance(new_settings.get("classTerms"), dict) else {}
+            if old_ct or new_ct:
+                merged["classTerms"] = {**old_ct, **new_ct}
+
+            old_cfg["settings"] = merged
+        else:
+            old_cfg["settings"] = new_cfg["settings"]
 
     cfg_row.data = json.dumps(old_cfg)
 

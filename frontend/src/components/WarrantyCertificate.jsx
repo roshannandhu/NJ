@@ -19,7 +19,7 @@ import { Edit3, Check } from 'lucide-react';
 // ════════════════════════════════════════════════════════════════════════════
 
 const COL_GAP = 22;
-const SEAL_BOX = 110;
+const SEAL_BOX = 140;
 const MIN_SCALE = 0.42;   // floor: shrink this far so even very long terms fit one page (no clipping)
 const MAX_SCALE = 1.95;   // ceiling: grow this far to FILL the page when terms are short (no gaps)
 
@@ -94,9 +94,12 @@ function Seal({ template, idBase = 'wc' }) {
     (src.startsWith('data:image/') || src.startsWith('http') || src.startsWith('/'));
 
   if (validImg && failedSrc !== src) {
+    // Size by max-width/height with auto dimensions (NOT object-fit): html2canvas
+    // ignores object-fit and would stretch a non-square seal to the box, distorting
+    // it in the exported PDF. With intrinsic sizing the capture keeps true aspect.
     return (
       <img src={src} alt="Seal" onError={() => setFailedSrc(src)}
-        style={{ width: SEAL_BOX, height: SEAL_BOX, objectFit: 'contain', display: 'block' }} />
+        style={{ maxWidth: SEAL_BOX, maxHeight: SEAL_BOX, width: 'auto', height: 'auto', display: 'block' }} />
     );
   }
 
@@ -446,9 +449,9 @@ const WC_CSS = `
      watermark stays centred (the old .warranty-doc .wd-wm rule no longer matches
      this .wc-doc root). */
   .wc-doc .wd-wm { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-30deg);
-    font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none; color: rgba(0,0,0,0.028);
+    font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none; color: rgba(0,0,0,0.07);
     white-space: nowrap; letter-spacing: 0.1em; font-family: 'Times New Roman', serif; z-index: 0; }
-  .wc-doc .wd-wm-logo { max-width: 55%; max-height: 50%; object-fit: contain; opacity: 0.06; filter: grayscale(100%); display: block; margin: 0 auto; }
+  .wc-doc .wd-wm-logo { max-width: 55%; max-height: 50%; object-fit: contain; opacity: 0.10; filter: grayscale(100%); display: block; margin: 0 auto; }
 
   .wc-logo { font-family: 'Playfair Display', Georgia, serif; font-size: 60pt; font-weight: 900; letter-spacing: 0.04em; color: #111; margin: 0; line-height: 1.02; }
   .wc-logo-sub { font-size: 9pt; letter-spacing: 0.28em; text-transform: uppercase; color: #444; font-weight: 700; margin: 2px 0 0; font-family: 'Times New Roman', Times, Georgia, serif; }
@@ -464,7 +467,7 @@ const WC_CSS = `
   .wc-term-para { margin: 0 0 calc(5px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-bullet { display: flex; gap: 6px; margin: 0 0 calc(4px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-dot { color: #8b1a1a; flex-shrink: 0; }
-  .wc-term-seal { position: absolute; right: 0; bottom: 0; width: ${SEAL_BOX}px; height: ${SEAL_BOX}px; }
+  .wc-term-seal { position: absolute; right: 0; bottom: 0; width: ${SEAL_BOX}px; height: ${SEAL_BOX}px; display: flex; align-items: flex-end; justify-content: flex-end; }
   .wc-measure { position: absolute; left: -99999px; top: 0; visibility: hidden; pointer-events: none; }
 
   .wc-edit-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
@@ -500,12 +503,12 @@ const WC_CSS = `
   .wc-terms-click:hover { outline: 1px dashed rgba(139,26,26,0.25); border-radius: 3px; }
 
   .wc-doc .wc-footer { flex-shrink: 0; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e2e2; display: flex; justify-content: flex-end; }
-  .wc-sig-block { text-align: center; font-size: 10pt; color: #555; width: 260px; }
+  .wc-sig-block { text-align: center; font-size: 10pt; color: #555; width: 320px; }
   /* Fixed-height area the signature image sits in, resting ON the line below. */
-  .wc-sig-area { height: 46px; display: flex; align-items: flex-end; justify-content: center; }
-  .wc-sig-img { max-height: 46px; max-width: 230px; object-fit: contain; display: block; }
-  .wc-sig-line { border-bottom: 1px solid #111; width: 240px; margin: 2px auto 0; }
-  .wc-sig-name { color: #111; font-weight: 700; font-size: 10.5pt; padding-top: 5px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
+  .wc-sig-area { height: 62px; display: flex; align-items: flex-end; justify-content: center; }
+  .wc-sig-img { max-height: 62px; max-width: 300px; object-fit: contain; display: block; }
+  .wc-sig-line { border-bottom: 1px solid #111; width: 300px; margin: 2px auto 0; }
+  .wc-sig-name { color: #111; font-weight: 700; font-size: 12pt; padding-top: 5px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
 
   @media print {
     @page { size: A4 portrait; margin: 0; }

@@ -5,6 +5,7 @@ import { downloadWarrantyDocx, mediaUrl, createQuotation, createWarranty, upload
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
 import BrandWatermark from './BrandWatermark';
+import { watermarkBrandForItems } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
@@ -541,32 +542,9 @@ function QuotationDocumentInner() {
     return (name || logo) ? { name, logo } : null;
   };
 
-  // Resolve the DOMINANT brand across a set of line items for the watermark: the
-  // brand with the most items wins, ties broken by first appearance. Returns
-  // { id, name, logo(URL) } or null when no item carries a brand. Mirrors
-  // getBrandForClass's snapshot rule (per-item brandName wins; logo from the live
-  // brand record resolved through mediaUrl).
-  const getDominantBrand = (items) => {
-    const list = items || [];
-    const counts = new Map();
-    list.forEach((it, idx) => {
-      const cls = data.classes?.find(c => c.name === it.className);
-      const brandId = it.brandId || cls?.brandId;
-      if (!brandId) return;
-      const nm = it.brandName || (data.brands || []).find(b => b.id === brandId)?.name || '';
-      const cur = counts.get(brandId);
-      if (cur) cur.count++; else counts.set(brandId, { count: 1, firstIdx: idx, name: nm });
-    });
-    if (!counts.size) return null;
-    let best = null;
-    for (const [id, v] of counts) {
-      if (!best || v.count > best.count || (v.count === best.count && v.firstIdx < best.firstIdx)) best = { id, ...v };
-    }
-    const brand = (data.brands || []).find(b => b.id === best.id);
-    const logo = brand?.logo ? mediaUrl(brand.logo) : '';
-    const name = best.name || brand?.name || '';
-    return (name || logo) ? { id: best.id, name, logo } : null;
-  };
+  // Brand watermark across a set of line items: a single brand renders its faint
+  // logo; two or more brands render the combined "Brand1 × Brand2" text. Shared
+  // with the warranty view via ../brands (watermarkBrandForItems).
 
   // Table 1: Class Description cell. Priority: per-quotation override →
   // settings.classSpecs (string form) → legacy object form → hard fallback.
@@ -866,13 +844,13 @@ function QuotationDocumentInner() {
           position: absolute; top: 50%; left: 50%;
           transform: translate(-50%,-50%) rotate(-30deg);
           font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none;
-          color: rgba(0,0,0,0.028); white-space: nowrap; letter-spacing: 0.1em;
+          color: rgba(0,0,0,0.07); white-space: nowrap; letter-spacing: 0.1em;
           font-family: 'Times New Roman', serif;
         }
         /* Brand-logo watermark: single, centred, faint, grayscale — never tiled. */
         .wd-wm-logo {
           max-width: 55%; max-height: 50%; width: auto; height: auto;
-          object-fit: contain; opacity: 0.06; filter: grayscale(100%);
+          object-fit: contain; opacity: 0.10; filter: grayscale(100%);
           display: block; margin: 0 auto;
         }
 
@@ -1200,7 +1178,7 @@ function QuotationDocumentInner() {
               }}>
 
               {/* ── Brand watermark (faint, behind content; nothing if no brand) ── */}
-              <BrandWatermark brand={getDominantBrand(doc.items)} fallbackText="" />
+              <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />
 
               {/* ── HEADER ── */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: D.divMb }}>
@@ -1690,8 +1668,8 @@ function QuotationDocumentInner() {
                     display: 'flex', flexDirection: 'column',
                     boxShadow: '0 20px 40px rgba(0,0,0,0.07)', border: '1px solid #E5E7EB',
                   }}>
-                    <BrandWatermark brand={getDominantBrand(doc.items)} fallbackText="" />
-                    <div style={{ borderBottom: '2px solid #1A1A1A', paddingBottom: '14px', marginBottom: '24px' }}>
+                    <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />
+        <div style={{ borderBottom: '2px solid #1A1A1A', paddingBottom: '14px', marginBottom: '24px' }}>
                       <div style={{ fontSize: '12px', letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c2410c', fontWeight: 700 }}>Installation Guide</div>
                       <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '4px' }}>{c.name}</div>
                     </div>
@@ -1743,7 +1721,7 @@ function QuotationDocumentInner() {
             <WarrantyCertificate
               template={tmpl}
               openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-              brand={getDominantBrand(activeCert?.items || doc.items)}
+              brand={watermarkBrandForItems(activeCert?.items || doc.items, data)}
               variant="certificate"
               customer={activeCert.customer || {}}
               certData={cd}
