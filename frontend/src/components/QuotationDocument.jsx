@@ -44,21 +44,129 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   );
 }
 
-// Density presets, smallest item-count first. The sheet is a fixed-width A4 page
-// (794×1123px); the auto-fit effect picks the loosest tier whose content still fits
-// one page, stepping denser (and finally dropping the product-image table in `micro`)
-// only when it must. Values feed plain inline styles (padding/font), so they survive
-// the html2canvas capture — unlike a CSS transform, which the PDF engine neutralises.
-const DENSITY_TIERS = ['normal', 'medium', 'compact', 'ultra', 'micro'];
-const DENSITY = {
-  normal:  { pad: '40px 50px', headerH: '90px', headerFont: '42px', h1: '22px', hdrInfo: '11px', rowPad: '13px 8px', rowFont: '13px', subFont: '11px', tblMb: '24px', tcMt: '28px', footMt: '36px', specH: '110px', specPad: '18px 24px', tcLineH: '1.65', tcFs: '12px', termsFs: '12px', termsLH: '1.65', termsMb: '5px', divMb: '12px', custMb: '20px' },
-  medium:  { pad: '28px 40px', headerH: '72px', headerFont: '34px', h1: '19px', hdrInfo: '10px', rowPad: '9px 7px',  rowFont: '12px', subFont: '10px', tblMb: '18px', tcMt: '20px', footMt: '22px', specH: '80px',  specPad: '12px 18px', tcLineH: '1.5',  tcFs: '11px', termsFs: '11px', termsLH: '1.55', termsMb: '4px', divMb: '10px', custMb: '14px' },
-  compact: { pad: '18px 30px', headerH: '60px', headerFont: '28px', h1: '16px', hdrInfo: '9.5px', rowPad: '7px 6px',  rowFont: '11px', subFont: '9px',  tblMb: '14px', tcMt: '16px', footMt: '16px', specH: '64px',  specPad: '8px 14px',  tcLineH: '1.4',  tcFs: '10px', termsFs: '10px', termsLH: '1.5',  termsMb: '3px', divMb: '8px',  custMb: '10px' },
-  ultra:   { pad: '12px 24px', headerH: '50px', headerFont: '24px', h1: '14px', hdrInfo: '9px',   rowPad: '5px 5px',  rowFont: '10px', subFont: '8.5px',tblMb: '10px', tcMt: '12px', footMt: '12px', specH: '52px',  specPad: '6px 10px',  tcLineH: '1.3',  tcFs: '9px',  termsFs: '9.5px',termsLH: '1.4',  termsMb: '2px', divMb: '6px',  custMb: '8px'  },
-  micro:   { pad: '10px 20px', headerH: '44px', headerFont: '20px', h1: '13px', hdrInfo: '8.5px', rowPad: '3px 4px',  rowFont: '9px',  subFont: '8px',  tblMb: '8px',  tcMt: '8px',  footMt: '8px',  specH: '44px',  specPad: '5px 8px',   tcLineH: '1.25', tcFs: '8.5px',termsFs: '8.5px',termsLH: '1.3',  termsMb: '1.5px',divMb: '5px',  custMb: '6px'  },
+// ── Single-page "fit engine" for the quotation sheet ─────────────────────────
+// The sheet is a fixed A4 page (794×1123px, overflow:hidden). The header band
+// (logo + company details) is a FIXED size on every quotation. Everything below
+// — the whole body, INCLUDING terms & conditions — is scaled by one continuous
+// CSS variable `--q-fit`, applied to every font/padding/margin/image size via
+// calc(). A measure-and-converge layout effect grows short content to fill the
+// page and shrinks long content so it never spills to page 2. Because the scale
+// is font/length based (not a CSS transform, which the PDF engine neutralises),
+// the exported PDF matches the screen exactly. Mirrors WarrantyCertificate's
+// --wc-term-scale engine, but simpler: the fixed header means the available
+// height is constant, so `ideal = qFit × avail / natural` is a near-direct solve.
+const QFIT = (n) => `calc(${n}px * var(--q-fit, 1))`;
+// Fixed header band sizes (never scale) — the loosest legacy tier's values.
+const HDR = { h: '90px', font: '42px', h1: '22px', info: '11px', lh: 1.65, divMb: '12px' };
+// Fixed page padding (defines the A4 margins; excluded from the scaled body).
+const PAGE_PAD = '40px 50px';
+// Body sizes, each scaled by --q-fit. Line-heights stay unitless (they already
+// scale with the font). Terms font matches the line-item rows ("same size as the
+// quotation details"). Markup references these as `D.*` (see `const D = QD`).
+const QD = {
+  rowPad:  `${QFIT(13)} ${QFIT(8)}`,
+  rowFont: QFIT(13),
+  subFont: QFIT(11),
+  tblMb:   QFIT(24),
+  tcMt:    QFIT(28),
+  footMt:  QFIT(36),
+  specH:   QFIT(110),
+  specPad: `${QFIT(18)} ${QFIT(24)}`,
+  tcLineH: 1.65,
+  tcFs:    QFIT(12),
+  termsFs: QFIT(13),
+  termsLH: 1.6,
+  termsMb: QFIT(5),
+  custMb:  QFIT(20),
 };
-// Loosest tier index to start from, by raw item count. Auto-fit only ever steps denser.
-const baseDensityIdx = (n) => (n <= 4 ? 0 : n <= 8 ? 1 : n <= 13 ? 2 : 3);
+// Fit-engine tunables. Q_MAX caps how large a sparse quote grows (so a 1-item
+// quote fills the page without looking comical); Q_MIN is the densest a long
+// quote shrinks to before the clip guard accepts it. Damped to absorb the small
+// non-linearities from image boxes and text re-wrapping at the column edges.
+const Q_MIN = 0.42, Q_MAX = 1.6, Q_DAMP = 0.6, Q_ITER_MAX = 18, A4 = 1123;
+
+// One installation-guide page: its own fixed A4 (overflow:hidden, so content and
+// the brand watermark are clipped to the page — same as the quotation sheet and
+// warranty certificate). The header band (label + class name) and footer are a
+// FIXED size; the guidance body is scaled by a per-page --q-fit so short guidance
+// grows to fill the page and long guidance shrinks to one page. Each page owns its
+// own fit loop (one per in-cart class), mirroring the quotation engine above.
+function InstallPage({ c, brand, companyName, docId, onSave }) {
+  const pageRef = React.useRef(null);
+  const bodyRef = React.useRef(null);
+  const [iFit, setIFit] = React.useState(1);
+  const [tick, setTick] = React.useState(0);
+  const stRef = React.useRef({ iter: 0, frozen: false });
+
+  // Reset to 1 for a different class; re-arm (keep scale) when its text/fonts change.
+  React.useLayoutEffect(() => { stRef.current = { iter: 0, frozen: false }; setIFit(1); }, [c.key]);
+  React.useLayoutEffect(() => { stRef.current = { iter: 0, frozen: false }; }, [c.text, tick]);
+
+  React.useLayoutEffect(() => {
+    const st = stRef.current;
+    if (st.frozen) return;
+    const page = pageRef.current, body = bodyRef.current;
+    if (!page || !body) return;
+    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
+    const headEl = page.querySelector('.nj-install-head');
+    const footEl = page.querySelector('.nj-install-foot');
+    const headH = headEl ? headEl.offsetHeight : 0;
+    const footH = footEl ? footEl.offsetHeight : 0;
+    const cs = getComputedStyle(page);
+    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const avail = A4 - padV - headH - footH - 2;   // CONSTANT — header/footer fixed
+    const natural = body.scrollHeight;
+    if (natural < 1 || avail < 40) return;
+    st.iter += 1;
+    const ideal = iFit * (avail / natural);
+    if (natural > avail) {
+      if (iFit <= Q_MIN + 0.0005) { st.frozen = true; return; }
+      setIFit(+Math.max(Q_MIN, ideal).toFixed(3));
+      return;
+    }
+    const next = +Math.min(Q_MAX, Math.max(Q_MIN, iFit + (ideal - iFit) * Q_DAMP)).toFixed(3);
+    if (st.iter >= Q_ITER_MAX || Math.abs(next - iFit) < 0.004) { st.frozen = true; return; }
+    setIFit(next);
+  }, [iFit, c.text, tick]);
+
+  React.useEffect(() => {
+    let alive = true;
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (alive) setTick(t => t + 1); });
+    return () => { alive = false; };
+  }, []);
+
+  return (
+    <div ref={pageRef} className="nj-install-page" style={{
+      width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
+      background: '#FFFFFF', color: '#1A1A1A', padding: '64px',
+      fontFamily: '"Inter", system-ui, sans-serif', position: 'relative',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      boxShadow: '0 20px 40px rgba(0,0,0,0.07)', border: '1px solid #E5E7EB',
+    }}>
+      <BrandWatermark brand={brand} fallbackText="" />
+      <div className="nj-install-head" style={{ flexShrink: 0, borderBottom: '2px solid #1A1A1A', paddingBottom: '14px', marginBottom: '24px' }}>
+        <div style={{ fontSize: '12px', letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c2410c', fontWeight: 700 }}>Installation Guide</div>
+        <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '4px' }}>{c.name}</div>
+      </div>
+      <div ref={bodyRef} style={{ flexShrink: 0, fontSize: QFIT(14.5), lineHeight: 1.75, color: '#27272a', '--q-fit': iFit }}>
+        <EditableCell
+          value={c.text}
+          onSave={onSave}
+          multiline
+          placeholder="click to add installation guidance"
+          renderValue={(val) => <div style={{ whiteSpace: 'pre-wrap' }}>{val}</div>}
+          style={{ display: 'block', width: '100%' }}
+        />
+      </div>
+      {/* Spacer pins the footer to the bottom; shrinks to ~0 as the body fills. */}
+      <div style={{ flex: '1 1 auto' }} />
+      <div className="nj-install-foot" style={{ flexShrink: 0, marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #E5E7EB', fontSize: '11px', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
+        <span>{companyName}</span>
+        <span>Quotation {docId}</span>
+      </div>
+    </div>
+  );
+}
 
 function QuotationDocumentInner() {
   const {
@@ -254,36 +362,111 @@ function QuotationDocumentInner() {
 
 
   const quotationSheetRef = React.useRef(null);
-  // Auto-fit: the loosest density tier that keeps the sheet within one A4 page.
-  // `null` = use the item-count base; the effect steps it denser as needed.
-  const [densityOverride, setDensityOverride] = React.useState(null);
-  // Reset to the item-count base whenever the document changes (layout effect +
-  // declared first, so a new doc never paints at the previous doc's denser tier).
-  React.useLayoutEffect(() => { setDensityOverride(null); }, [generatedDoc]);
+  const qBodyRef = React.useRef(null);
+  // Continuous body scale (the value of the `--q-fit` CSS variable on `.q-body`).
+  const [qFit, setQFit] = React.useState(1);
+  // Last-resort content reduction: when a quote is so dense it can't fit even at
+  // the minimum scale, the SUPPLEMENTARY "Product details with image" table is
+  // dropped so the ESSENTIAL items + total + terms are always visible (they must
+  // never be clipped). Mirrors the old densest tier, which also dropped it.
+  const [dropSpec, setDropSpec] = React.useState(false);
+  // Bumped once fonts / images finish loading, to re-fit against final heights.
+  const [qFontTick, setQFontTick] = React.useState(0);
+  // Per-content convergence budget. `frozen` stops re-entry once we've settled or
+  // hit the floor, so the loop can never cascade renders.
+  const qFitStRef = React.useRef({ iter: 0, frozen: false });
 
+  // Reset the scale to 1 for a genuinely different document (new/imported/loaded
+  // quotation), keyed on id so an inline edit re-fits from the CURRENT scale
+  // instead of snapping back to 1 (no flicker).
+  React.useLayoutEffect(() => {
+    qFitStRef.current = { iter: 0, frozen: false };
+    setQFit(1);
+    setDropSpec(false);
+  }, [generatedDoc?.id]);
+
+  // Re-arm the convergence budget whenever the document content (any edit), the
+  // font/image tick, or the dropped-spec state changes — WITHOUT resetting the
+  // scale — so edits and the content-reduction step re-fit smoothly.
+  React.useLayoutEffect(() => {
+    qFitStRef.current = { iter: 0, frozen: false };
+  }, [generatedDoc, qFontTick, dropSpec]);
+
+  // The fit loop: measure the body's natural height against the constant space
+  // below the fixed header, then grow (to fill) or shrink (to never overflow).
+  React.useLayoutEffect(() => {
+    const st = qFitStRef.current;
+    if (st.frozen) return;
+    const body = qBodyRef.current, sheet = quotationSheetRef.current;
+    if (!body || !sheet) return;
+    // Never re-fit mid-edit (would reflow under the caret).
+    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
+
+    const headerEl = sheet.querySelector('.q-header-band');
+    const headerH = headerEl ? headerEl.offsetHeight : 0;
+    const cs = getComputedStyle(sheet);
+    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const avail = A4 - headerH - padV - 2;        // CONSTANT — header is fixed
+    const natural = body.scrollHeight;             // moves with --q-fit
+    if (natural < 1 || avail < 40) return;
+
+    st.iter += 1;
+    const ideal = qFit * (avail / natural);
+
+    // Clip guard: while the body overflows the page, always shrink (never accept
+    // an overflowing scale until we're already at the floor).
+    if (natural > avail) {
+      if (qFit <= Q_MIN + 0.0005) {
+        // Can't shrink further. As a last resort, drop the supplementary product-
+        // detail image table so the items + total + terms are never clipped, then
+        // let the loop re-fit (and grow) the lighter body.
+        const canDropSpec = settings.showClassSpecBox !== false && tileClasses.length > 0 && !dropSpec;
+        if (canDropSpec) { setDropSpec(true); return; }
+        st.frozen = true; return;
+      }
+      setQFit(+Math.max(Q_MIN, ideal).toFixed(3));
+      return;
+    }
+    // Fits — damped step toward filling the page.
+    const next = +Math.min(Q_MAX, Math.max(Q_MIN, qFit + (ideal - qFit) * Q_DAMP)).toFixed(3);
+    if (st.iter >= Q_ITER_MAX || Math.abs(next - qFit) < 0.004) { st.frozen = true; return; }
+    setQFit(next);
+  }, [qFit, generatedDoc, qFontTick, dropSpec]);
+
+  // Re-fit once web fonts are ready (font metrics change line wrapping/heights).
+  React.useEffect(() => {
+    let alive = true;
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (alive) setQFontTick(t => t + 1); });
+    return () => { alive = false; };
+  }, []);
+
+  // Re-fit once the body's images (thumbnails, brand logo, bank QR) finish loading
+  // — the first measure often runs before they have size, under-filling the page.
+  React.useEffect(() => {
+    const body = qBodyRef.current;
+    if (!body) return;
+    const imgs = Array.from(body.querySelectorAll('img'));
+    if (imgs.every(im => im.complete)) return;
+    let done = false;
+    const onDone = () => {
+      if (done) return;
+      if (imgs.every(im => im.complete)) { done = true; setQFontTick(t => t + 1); }
+    };
+    imgs.forEach(im => { im.addEventListener('load', onDone); im.addEventListener('error', onDone); });
+    return () => imgs.forEach(im => { im.removeEventListener('load', onDone); im.removeEventListener('error', onDone); });
+  }, [generatedDoc]);
+
+  // Preview-fit (screen only): scale the settled 794px sheet down to its on-screen
+  // pane. This is a CSS transform, which the PDF engine neutralises per capture,
+  // so the export stays full-size. Kept separate from the fit loop, which measures
+  // untransformed layout heights and is unaffected by this.
   React.useLayoutEffect(() => {
     const el = quotationSheetRef.current;
     if (!el) return;
-    // Always reset any preview scale before measuring natural layout.
     el.style.transform = 'none';
     el.style.transformOrigin = 'top center';
     el.style.marginBottom = '0';
-    // Don't re-densify or shrink while the user is editing a field on the sheet.
     if (document.body.getAttribute('data-quotation-editing') === 'true') return;
-
-    const A4_PX = 1123; // A4 height at 96dpi
-    const baseIdx = baseDensityIdx(generatedDoc?.items?.length || 0);
-    const curIdx = densityOverride != null ? densityOverride : baseIdx;
-
-    // 1) Content-fit — if the sheet overflows one page, step to a denser tier and
-    //    let the re-render re-measure. Stops at the densest tier.
-    if (el.scrollHeight > A4_PX + 2 && curIdx < DENSITY_TIERS.length - 1) {
-      setDensityOverride(curIdx + 1);
-      return;
-    }
-
-    // 2) Preview-fit — scale the settled 794px sheet down to fit its on-screen pane.
-    //    The PDF engine neutralises this transform, so export stays full-size.
     const parent = el.parentElement;
     const availW = parent ? parent.clientWidth : el.offsetWidth;
     const naturalW = el.offsetWidth;
@@ -294,7 +477,7 @@ function QuotationDocumentInner() {
       el.style.transformOrigin = 'top center';
       el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
     }
-  }, [generatedDoc, densityOverride]);
+  }, [generatedDoc, qFit]);
 
   // ── Per-class product image: click-to-upload + Ctrl+V paste ────────────────
   // `imgTargetKey` is the class image box the user last clicked; Ctrl+V drops a
@@ -1157,22 +1340,19 @@ function QuotationDocumentInner() {
             <>
             {/* ── VIEW A: PRINTABLE QUOTATION SHEET (inline editable) ── */}
             {(() => {
-              const itemCount = doc.items.length;
-              // Density tier comes from the auto-fit effect (loosest tier that fits one
-              // A4 page), seeded from the item count. See DENSITY at module scope.
-              const tierIdx = densityOverride != null ? densityOverride : baseDensityIdx(itemCount);
-              const tier = DENSITY_TIERS[tierIdx];
-              const D = DENSITY[tier];
+              // Body sizes are scaled by the `--q-fit` variable on `.q-body`; the
+              // header band uses fixed `HDR` constants. See the fit engine above.
+              const D = QD;
               return (
             <div
               className="printable-sheet"
               id="quotationSheet"
               ref={quotationSheetRef}
               style={{
-                width: '794px', maxWidth: '794px', minHeight: '1123px', boxSizing: 'border-box',
-                display: 'flex', flexDirection: 'column', overflow: 'visible',
+                width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
+                display: 'flex', flexDirection: 'column', overflow: 'hidden',
                 background: '#FFFFFF',
-                padding: D.pad, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
+                padding: PAGE_PAD, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
                 color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
                 border: '1px solid #E5E7EB', position: 'relative',
               }}>
@@ -1180,10 +1360,11 @@ function QuotationDocumentInner() {
               {/* ── Brand watermark (faint, behind content; nothing if no brand) ── */}
               <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />
 
-              {/* ── HEADER ── */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: D.divMb }}>
+              {/* ── HEADER BAND (FIXED size on every quotation — never scaled) ── */}
+              <div className="q-header-band" style={{ flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: HDR.divMb }}>
                 <div style={{
-                  width: D.headerH, height: D.headerH, border: '1px solid #E5E7EB', borderRadius: '14px',
+                  width: HDR.h, height: HDR.h, border: '1px solid #E5E7EB', borderRadius: '14px',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                   background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0,
                   overflow: 'hidden', padding: settings.quotationLogo ? '8px' : 0, boxSizing: 'border-box',
@@ -1197,7 +1378,7 @@ function QuotationDocumentInner() {
                   ) : (
                     <>
                       <div style={{
-                        fontSize: D.headerFont, fontWeight: '900', lineHeight: '1',
+                        fontSize: HDR.font, fontWeight: '900', lineHeight: '1',
                         background: `linear-gradient(135deg, ${PLUM} 0%, #3a506b 100%)`,
                         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                       }}>N</div>
@@ -1209,10 +1390,10 @@ function QuotationDocumentInner() {
                 </div>
 
                 <div style={{ textAlign: 'right' }}>
-                  <h1 style={{ fontSize: D.h1, fontWeight: '900', margin: '0 0 4px 0', letterSpacing: '-0.01em', color: '#1A1A1A', textTransform: 'uppercase' }}>
+                  <h1 style={{ fontSize: HDR.h1, fontWeight: '900', margin: '0 0 4px 0', letterSpacing: '-0.01em', color: '#1A1A1A', textTransform: 'uppercase' }}>
                     {company.name || 'NJ India Trading Pvt. Ltd.'}
                   </h1>
-                  <div style={{ fontSize: D.hdrInfo, lineHeight: D.tcLineH, color: '#555' }}>
+                  <div style={{ fontSize: HDR.info, lineHeight: HDR.lh, color: '#555' }}>
                     {(company.address || 'KNH Building, Neelithod Bridge, Parakkal\nRamanattukara PO, Kozhikode — 673633')
                       .split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}
                     Ph: {company.phone || '+91 73566 08633'} &nbsp;|&nbsp; {company.website || 'www.njindia.in'}
@@ -1221,7 +1402,10 @@ function QuotationDocumentInner() {
               </div>
 
               {/* Thick divider */}
-              <div style={{ borderBottom: '2.5px solid #1A1A1A', marginBottom: D.divMb }} />
+              <div style={{ borderBottom: '2.5px solid #1A1A1A', marginBottom: HDR.divMb }} />
+              </div>
+              {/* ── SCALABLE BODY (everything below the header fits to one page) ── */}
+              <div className="q-body" ref={qBodyRef} style={{ '--q-fit': qFit, flexShrink: 0 }}>
 
               {/* Customer + Date */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px', fontSize: D.tcFs }}>
@@ -1247,13 +1431,13 @@ function QuotationDocumentInner() {
               </div>
 
               {/* TABLE 1 — PRODUCT DETAILS WITH IMAGE */}
-              {settings.showClassSpecBox !== false && tier !== 'micro' && tileClasses.length > 0 && (
+              {settings.showClassSpecBox !== false && tileClasses.length > 0 && !dropSpec && (
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb, pageBreakInside: 'avoid' }}>
                   <thead>
                     <tr>
                       <th colSpan="2" style={{
                         ...TB, background: PLUM, color: '#FFFFFF',
-                        padding: tier === 'normal' ? '10px 16px' : '7px 12px', fontWeight: '800', fontSize: D.subFont,
+                        padding: `${QFIT(10)} ${QFIT(16)}`, fontWeight: '800', fontSize: D.subFont,
                         textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.1em',
                       }}>
                         PRODUCT DETAILS WITH IMAGE
@@ -1288,7 +1472,7 @@ function QuotationDocumentInner() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '6px' }}>
                                   {brand.logo && (
                                     <img src={mediaUrl(brand.logo)} alt={brand.name} crossOrigin="anonymous"
-                                      style={{ height: tier === 'normal' ? '20px' : '16px', width: 'auto', maxWidth: '70px', objectFit: 'contain', display: 'block' }} />
+                                      style={{ height: QFIT(20), width: 'auto', maxWidth: QFIT(70), objectFit: 'contain', display: 'block' }} />
                                   )}
                                   {brand.name && (
                                     <span style={{ fontSize: D.subFont, fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: PLUM }}>
@@ -1367,17 +1551,19 @@ function QuotationDocumentInner() {
 
               {/* TABLE 2 — ITEMISED ESTIMATE (image + actual/offer pricing) */}
               {(() => {
-                const thumb = tier === 'normal' ? 46 : tier === 'medium' ? 38 : tier === 'compact' ? 30 : 24;
+                // Base thumbnail size; rendered scaled by --q-fit (QFIT). All column
+                // widths scale by the same factor so the table stays aligned.
+                const thumb = 46;
                 // Build columns dynamically; the OFFER PRICE column only appears
                 // when at least one line carries an offer (keeps it uncluttered).
                 const cols = [
-                  { key: 'si',     label: 'SI NO',        align: 'center', w: tier === 'ultra' ? '32px' : '44px' },
-                  { key: 'img',    label: 'IMAGE',        align: 'center', w: `${thumb + 16}px` },
+                  { key: 'si',     label: 'SI NO',        align: 'center', w: QFIT(44) },
+                  { key: 'img',    label: 'IMAGE',        align: 'center', w: QFIT(thumb + 16) },
                   { key: 'prod',   label: 'PRODUCT',      align: 'left',   w: 'auto' },
-                  { key: 'qty',    label: 'QTY',          align: 'center', w: tier === 'ultra' ? '64px' : '84px' },
-                  { key: 'actual', label: 'ACTUAL PRICE', align: 'right',  w: tier === 'ultra' ? '78px' : '98px' },
-                  ...(docAnyOffer ? [{ key: 'offer', label: 'OFFER PRICE', align: 'right', w: tier === 'ultra' ? '78px' : '98px' }] : []),
-                  { key: 'total',  label: 'TOTAL',        align: 'right',  w: tier === 'ultra' ? '86px' : '106px' },
+                  { key: 'qty',    label: 'QTY',          align: 'center', w: QFIT(84) },
+                  { key: 'actual', label: 'ACTUAL PRICE', align: 'right',  w: QFIT(98) },
+                  ...(docAnyOffer ? [{ key: 'offer', label: 'OFFER PRICE', align: 'right', w: QFIT(98) }] : []),
+                  { key: 'total',  label: 'TOTAL',        align: 'right',  w: QFIT(106) },
                 ];
                 return (
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb }}>
@@ -1386,7 +1572,7 @@ function QuotationDocumentInner() {
                     {cols.map(col => (
                       <th key={col.key} style={{
                         ...TB, background: PLUM, color: '#FFFFFF',
-                        padding: tier === 'normal' ? '11px 10px' : tier === 'medium' ? '8px 8px' : '6px 6px',
+                        padding: `${QFIT(11)} ${QFIT(10)}`,
                         textAlign: col.align, fontWeight: '800', fontSize: D.subFont,
                         letterSpacing: '0.05em', textTransform: 'uppercase', width: col.w,
                       }}>
@@ -1407,13 +1593,13 @@ function QuotationDocumentInner() {
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
                         {i + 1}
                       </td>
-                      <td style={{ ...TB, padding: '4px', textAlign: 'center', verticalAlign: 'middle' }}>
-                        <div style={{ width: thumb, height: thumb, margin: '0 auto', borderRadius: '5px', overflow: 'hidden', border: '1px solid #E5E7EB', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <td style={{ ...TB, padding: QFIT(4), textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ width: QFIT(thumb), height: QFIT(thumb), margin: '0 auto', borderRadius: '5px', overflow: 'hidden', border: '1px solid #E5E7EB', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {imgSrc ? (
                             <img src={imgSrc} alt={item.name} crossOrigin="anonymous"
                               style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                           ) : (
-                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: brandColor, opacity: 0.85, color: '#FFFFFF', fontWeight: '800', fontSize: `${Math.round(thumb / 2.6)}px` }}>
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: brandColor, opacity: 0.85, color: '#FFFFFF', fontWeight: '800', fontSize: QFIT(Math.round(thumb / 2.6)) }}>
                               {(item.name || '?').trim().charAt(0).toUpperCase()}
                             </div>
                           )}
@@ -1460,7 +1646,7 @@ function QuotationDocumentInner() {
               })()}
 
               {/* Add line item (edit affordance, hidden in print/PDF) */}
-              <div className="q-edit-only" data-html2canvas-ignore="true" style={{ marginTop: `-${D.tblMb}`, marginBottom: D.tblMb }}>
+              <div className="q-edit-only" data-html2canvas-ignore="true" style={{ marginTop: `calc(-1 * ${D.tblMb})`, marginBottom: D.tblMb }}>
                 <button onClick={addItemRow}
                   style={{ padding: '6px 12px', border: '1.5px dashed #c9b3c0', borderRadius: '6px', background: 'transparent', color: PLUM, fontWeight: 700, fontSize: D.subFont, cursor: 'pointer' }}>
                   + Add line item
@@ -1468,7 +1654,7 @@ function QuotationDocumentInner() {
               </div>
 
               {/* ── PAYMENT (left, plain text) + TOTALS (right) ── */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: tier === 'ultra' || tier === 'micro' ? '16px' : '28px', marginBottom: D.tblMb }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: QFIT(28), marginBottom: D.tblMb }}>
 
                 {/* Payment block (left) — plain text, no box. Structured bank → legacy → picker. */}
                 <div style={{ flex: '1 1 auto', minWidth: 0, paddingRight: '8px' }}>
@@ -1490,13 +1676,13 @@ function QuotationDocumentInner() {
                         ['upiId', 'UPI', docBank.upiId],
                       ].filter(([, , v]) => v);
                       return (
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', border: '1px solid #1A1A1A', borderRadius: '4px', padding: tier === 'normal' ? '12px 14px' : '8px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', border: '1px solid #1A1A1A', borderRadius: '4px', padding: `${QFIT(12)} ${QFIT(14)}` }}>
                           <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                             {(docBank.logo || docBank.bankName) && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
                                 {docBank.logo && (
                                   <img src={docBank.logo} alt="" crossOrigin="anonymous"
-                                    style={{ height: tier === 'normal' ? '22px' : '18px', width: 'auto', maxWidth: '90px', objectFit: 'contain', display: 'block' }} />
+                                    style={{ height: QFIT(22), width: 'auto', maxWidth: QFIT(90), objectFit: 'contain', display: 'block' }} />
                                 )}
                                 <span style={{ fontSize: D.rowFont, fontWeight: '800', color: '#1A1A1A' }}>
                                   <EditableCell value={docBank.bankName} onSave={v => updateBankField('bankName', v)} placeholder="bank name" />
@@ -1518,7 +1704,7 @@ function QuotationDocumentInner() {
                           </div>
                           {docBank.qr && (
                             <img src={docBank.qr} alt="Payment QR" crossOrigin="anonymous"
-                              style={{ width: tier === 'normal' ? '78px' : tier === 'medium' ? '66px' : '54px', height: 'auto', objectFit: 'contain', flexShrink: 0 }} />
+                              style={{ width: QFIT(78), height: 'auto', objectFit: 'contain', flexShrink: 0 }} />
                           )}
                         </div>
                       );
@@ -1537,16 +1723,16 @@ function QuotationDocumentInner() {
                 </div>
 
                 {/* Totals block (right) */}
-                <div style={{ minWidth: tier === 'ultra' || tier === 'micro' ? '220px' : '280px', flexShrink: 0, border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ minWidth: QFIT(280), flexShrink: 0, border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
 
                   {/* Actual Total + You Save — only when product offers exist */}
                   {docAnyOffer && docSavings > 0 && (
                     <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
                         <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>Actual Total</span>
                         <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#999', fontFamily: 'var(--font-mono)', marginLeft: '24px', textDecoration: 'line-through' }}>{curr}{docActualSubtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
                         <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a' }}>You Save</span>
                         <span style={{ fontSize: D.tcFs, fontWeight: '800', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{docSavings.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
@@ -1554,14 +1740,14 @@ function QuotationDocumentInner() {
                   )}
 
                   {/* Subtotal (labelled "Offer Total" when offers are present) */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
                     <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>{docAnyOffer && docSavings > 0 ? 'Offer Total' : 'Subtotal'}</span>
                     <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
                   {/* Discount */}
                   {doc.discountEnabled && doc.discountAmount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
                       <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#16a34a' }}>Discount {doc.discountType === 'percent' ? `(${doc.discountValue}%)` : '(Fixed)'}</span>
                       <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{doc.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
@@ -1569,16 +1755,16 @@ function QuotationDocumentInner() {
 
                   {/* GST */}
                   {(doc.taxEnabled ?? settings.taxEnabled) && doc.taxAmount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '9px 14px' : '6px 10px', background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
                       <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#555' }}>GST ({doc.taxRate}%)</span>
                       <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.taxAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
 
                   {/* Grand Total */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: tier === 'normal' ? '12px 14px' : '8px 10px', background: PLUM }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(12)} ${QFIT(14)}`, background: PLUM }}>
                     <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>TOTAL</span>
-                    <span style={{ fontSize: tier === 'normal' ? '16px' : D.rowFont, fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    <span style={{ fontSize: QFIT(16), fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
                 </div>
@@ -1597,12 +1783,12 @@ function QuotationDocumentInner() {
                 </div>
               </div>
 
-              {/* Terms and Conditions — 2-col for medium+ */}
+              {/* Terms and Conditions — always 2-column, scaled with the body (D.*) */}
               <div style={{ marginTop: D.tcMt }}>
                 <h4 style={{
                   color: '#E53E3E', fontSize: D.subFont, fontWeight: '900',
                   letterSpacing: '0.08em', textTransform: 'uppercase',
-                  marginBottom: tier === 'normal' ? '10px' : '6px', borderBottom: '2px solid #1A1A1A', paddingBottom: '4px',
+                  marginBottom: QFIT(10), borderBottom: '2px solid #1A1A1A', paddingBottom: '4px',
                 }}>
                   Terms and Conditions :
                 </h4>
@@ -1612,46 +1798,37 @@ function QuotationDocumentInner() {
                   multiline
                   placeholder="click to add terms (one per line)"
                   style={{ display: 'block', width: '100%' }}
-                  renderValue={() => (
-                    tier === 'normal' ? (
-                      <ol style={{ margin: 0, paddingLeft: '16px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                        {quotationTerms.map((term, i) => (
-                          <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                        ))}
-                      </ol>
-                    ) : (
-                      (() => {
-                        const terms = quotationTerms;
-                        const mid = Math.ceil(terms.length / 2);
-                        return (
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 20px' }}>
-                            <ol style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                              {terms.slice(0, mid).map((term, i) => (
-                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                              ))}
-                            </ol>
-                            <ol start={mid + 1} style={{ margin: 0, paddingLeft: '14px', fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                              {terms.slice(mid).map((term, i) => (
-                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                              ))}
-                            </ol>
-                          </div>
-                        );
-                      })()
-                    )
-                  )}
+                  renderValue={() => {
+                    const terms = quotationTerms;
+                    const mid = Math.ceil(terms.length / 2);
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `0 ${QFIT(20)}` }}>
+                        <ol style={{ margin: 0, paddingLeft: QFIT(14), fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
+                          {terms.slice(0, mid).map((term, i) => (
+                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                          ))}
+                        </ol>
+                        <ol start={mid + 1} style={{ margin: 0, paddingLeft: QFIT(14), fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
+                          {terms.slice(mid).map((term, i) => (
+                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    );
+                  }}
                 />
               </div>
 
               {/* Footer */}
               <div style={{
-                borderTop: '2px solid #1A1A1A', marginTop: D.footMt, paddingTop: tier === 'normal' ? '14px' : '8px',
+                borderTop: '2px solid #1A1A1A', marginTop: D.footMt, paddingTop: QFIT(14),
                 fontSize: D.subFont, color: '#777', display: 'flex', justifyContent: 'space-between', fontWeight: 500,
               }}>
                 <div>Valid for <EditableCell value={doc.validityDays ?? settings.validityDays ?? 30} numeric onSave={v => updateField('validityDays', v)} style={{ width: '40px', textAlign: 'center' }} /> days from date of issue.</div>
                 <div>{settings.footerNote || 'NJ Quotation System'}</div>
               </div>
 
+              </div>{/* ── /SCALABLE BODY ── */}
             </div>
             );
             })()}
@@ -1661,33 +1838,14 @@ function QuotationDocumentInner() {
             {installClasses.length > 0 && (
               <div ref={installPagesRef} className="nj-install-pages" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '24px', transformOrigin: 'top center' }}>
                 {installClasses.map((c, i) => (
-                  <div key={c.key || i} className="nj-install-page" style={{
-                    width: '794px', maxWidth: '794px', minHeight: '1123px', boxSizing: 'border-box',
-                    background: '#FFFFFF', color: '#1A1A1A', padding: '64px',
-                    fontFamily: '"Inter", system-ui, sans-serif', position: 'relative',
-                    display: 'flex', flexDirection: 'column',
-                    boxShadow: '0 20px 40px rgba(0,0,0,0.07)', border: '1px solid #E5E7EB',
-                  }}>
-                    <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />
-        <div style={{ borderBottom: '2px solid #1A1A1A', paddingBottom: '14px', marginBottom: '24px' }}>
-                      <div style={{ fontSize: '12px', letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c2410c', fontWeight: 700 }}>Installation Guide</div>
-                      <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '4px' }}>{c.name}</div>
-                    </div>
-                    <div style={{ fontSize: '14.5px', lineHeight: 1.75, color: '#27272a', flex: 1 }}>
-                      <EditableCell
-                        value={c.text}
-                        onSave={v => updateInstallOverride(c.key, v)}
-                        multiline
-                        placeholder="click to add installation guidance"
-                        renderValue={(val) => <div style={{ whiteSpace: 'pre-wrap' }}>{val}</div>}
-                        style={{ display: 'block', width: '100%' }}
-                      />
-                    </div>
-                    <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #E5E7EB', fontSize: '11px', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{company.name || 'NJ India'}</span>
-                      <span>Quotation {doc.id}</span>
-                    </div>
-                  </div>
+                  <InstallPage
+                    key={c.key || i}
+                    c={c}
+                    brand={watermarkBrandForItems(doc.items, data)}
+                    companyName={company.name || 'NJ India'}
+                    docId={doc.id}
+                    onSave={v => updateInstallOverride(c.key, v)}
+                  />
                 ))}
               </div>
             )}
