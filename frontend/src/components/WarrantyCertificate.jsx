@@ -81,49 +81,82 @@ function TermBlock({ b, first }) {
   return <div className="wc-term-para">{b.text}</div>;
 }
 
-// Company stamp / seal. Prefers an uploaded image (sealImage) but ALWAYS falls
-// back to the drawn SVG stamp — so the seal is never missing, even when the
-// stored sealImage is blank or a broken value. Arc IDs are made unique per
-// instance (idBase) so two certificates on screen can't collide their textPaths.
-function Seal({ template, idBase = 'wc' }) {
-  // Remember which src failed (not a bare bool) so a new sealImage auto-retries
-  // without needing an effect to reset state.
-  const [failedSrc, setFailedSrc] = React.useState(null);
-  const src = template.sealImage;
-  const validImg = typeof src === 'string' &&
-    (src.startsWith('data:image/') || src.startsWith('http') || src.startsWith('/'));
+// Drawn NJ India stamp as a SELF-CONTAINED SVG data URL — the fallback seal when
+// no image is uploaded. Rendered through the same crisp <img> path as an uploaded
+// seal (see Seal/FittedImg) instead of the flaky inline-<svg> path that dropped it
+// from the exported PDF. Made data-URL-safe: explicit xmlns + a large SQUARE
+// width/height (600px ≥ the 140px box × the 3× capture scale, so the rasterised
+// text stays sharp) + viewBox so the intrinsic ratio is 1:1, and xlink:href on the
+// arcs so the curved text renders when the SVG is loaded as a standalone image.
+// IDs are local to this one document, so the single shared string can back every
+// certificate without collisions.
+const DRAWN_SEAL_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"' +
+  ' width="600" height="600" viewBox="0 0 82 82" preserveAspectRatio="xMidYMid meet">' +
+  '<circle cx="41" cy="41" r="39" fill="none" stroke="#8b1a1a" stroke-width="2"/>' +
+  '<circle cx="41" cy="41" r="34" fill="none" stroke="#8b1a1a" stroke-width="1"/>' +
+  '<circle cx="41" cy="41" r="33" fill="#fef9f9"/>' +
+  '<path id="njSealTop" d="M 9,41 A 32,32 0 0,1 73,41" fill="none"/>' +
+  '<text font-size="5.2" font-family="Arial, sans-serif" font-weight="900" fill="#8b1a1a" letter-spacing="0.5">' +
+  '<textPath xlink:href="#njSealTop" startOffset="50%" text-anchor="middle">NOUFAL &amp; JABBAR INTERNATIONAL LLP</textPath></text>' +
+  '<path id="njSealBot" d="M 9,41 A 32,32 0 0,0 73,41" fill="none"/>' +
+  '<text font-size="5" font-family="Arial, sans-serif" font-weight="700" fill="#8b1a1a" letter-spacing="0.3">' +
+  '<textPath xlink:href="#njSealBot" startOffset="50%" text-anchor="middle">Bypass Road · Ramanattukara</textPath></text>' +
+  '<text x="41" y="37" text-anchor="middle" font-size="9" font-family="\'Times New Roman\', serif" font-weight="900" fill="#8b1a1a">NJ</text>' +
+  '<text x="41" y="46" text-anchor="middle" font-size="4.5" font-family="Arial, sans-serif" font-weight="700" fill="#8b1a1a" letter-spacing="0.5">INDIA</text>' +
+  '<text x="41" y="54" text-anchor="middle" font-size="4" font-family="Arial, sans-serif" font-weight="700" fill="#8b1a1a" letter-spacing="0.3">NJINDIA.IN</text>' +
+  '</svg>';
+const DRAWN_SEAL_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(DRAWN_SEAL_SVG)}`;
 
-  if (validImg && failedSrc !== src) {
-    // Size by max-width/height with auto dimensions (NOT object-fit): html2canvas
-    // ignores object-fit and would stretch a non-square seal to the box, distorting
-    // it in the exported PDF. With intrinsic sizing the capture keeps true aspect.
-    return (
-      <img src={src} alt="Seal" onError={() => setFailedSrc(src)}
-        style={{ maxWidth: SEAL_BOX, maxHeight: SEAL_BOX, width: 'auto', height: 'auto', display: 'block' }} />
-    );
-  }
+const isImgSrc = (s) => typeof s === 'string' &&
+  (s.startsWith('data:image/') || s.startsWith('http') || s.startsWith('/'));
 
-  const safeBase = String(idBase).replace(/[^a-zA-Z0-9_-]/g, '');
-  const topId = `${safeBase}-sealTop`;
-  const botId = `${safeBase}-sealBot`;
-  return (
-    <svg viewBox="0 0 82 82" style={{ width: SEAL_BOX, height: SEAL_BOX, display: 'block' }}>
-      <circle cx="41" cy="41" r="39" fill="none" stroke="#8b1a1a" strokeWidth="2"/>
-      <circle cx="41" cy="41" r="34" fill="none" stroke="#8b1a1a" strokeWidth="1"/>
-      <circle cx="41" cy="41" r="33" fill="#fef9f9"/>
-      <path id={topId} d="M 9,41 A 32,32 0 0,1 73,41" fill="none"/>
-      <text fontSize="5.2" fontFamily="Arial, sans-serif" fontWeight="900" fill="#8b1a1a" letterSpacing="0.5">
-        <textPath href={`#${topId}`} startOffset="50%" textAnchor="middle">NOUFAL &amp; JABBAR INTERNATIONAL LLP</textPath>
-      </text>
-      <path id={botId} d="M 9,41 A 32,32 0 0,0 73,41" fill="none"/>
-      <text fontSize="5" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">
-        <textPath href={`#${botId}`} startOffset="50%" textAnchor="middle">Bypass Road · Ramanattukara</textPath>
-      </text>
-      <text x="41" y="37" textAnchor="middle" fontSize="9" fontFamily="'Times New Roman', serif" fontWeight="900" fill="#8b1a1a">NJ</text>
-      <text x="41" y="46" textAnchor="middle" fontSize="4.5" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.5">INDIA</text>
-      <text x="41" y="54" textAnchor="middle" fontSize="4" fontFamily="Arial, sans-serif" fontWeight="700" fill="#8b1a1a" letterSpacing="0.3">NJINDIA.IN</text>
-    </svg>
-  );
+// Render an uploaded image as an <img> at EXPLICIT pixel dimensions, fitted
+// (contain) inside a maxW×maxH box, falling back to `fallbackSrc` if `src` is
+// missing/broken. This is the html2canvas-safe AND sharp way to place these
+// images in the exported PDF:
+//   • Definite width/height is the only sizing html2canvas measures reliably — a
+//     max-width/auto <img> in a flex box captured at zero size, so the seal &
+//     signature VANISHED from the PDF.
+//   • An <img> is drawn straight into the scaled capture (crisp); a CSS background
+//     is rasterised at 1× then upscaled by the 3× capture → blurry.
+//   • Fitting to the image's natural aspect means a non-square upload is never
+//     stretched to an oval.
+// The natural size is read via a preload (also how a broken src is detected — an
+// <img> onError can't fire inside an html2canvas clone, so we resolve up-front).
+function FittedImg({ src, fallbackSrc = null, maxW, maxH, alt = '', style = {} }) {
+  const [meta, setMeta] = React.useState(null); // { url, w, h }
+  React.useEffect(() => {
+    let alive = true;
+    const load = (url, onFail) => {
+      const im = new Image();
+      im.onload = () => { if (alive) setMeta({ url, w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); };
+      im.onerror = onFail;
+      im.src = url;
+    };
+    const useFallback = () => {
+      if (isImgSrc(fallbackSrc)) load(fallbackSrc, () => { if (alive) setMeta(null); });
+      else if (alive) setMeta(null);
+    };
+    if (isImgSrc(src)) load(src, useFallback);
+    else useFallback();
+    return () => { alive = false; };
+  }, [src, fallbackSrc]);
+
+  if (!meta) return null;
+  const fit = Math.min(maxW / meta.w, maxH / meta.h);
+  const w = Math.max(1, Math.round(meta.w * fit));
+  const h = Math.max(1, Math.round(meta.h * fit));
+  return <img src={meta.url} alt={alt} width={w} height={h} style={{ width: w, height: h, display: 'block', ...style }} />;
+}
+
+// Company stamp / seal. Prefers the uploaded image (template.sealImage) and ALWAYS
+// falls back to the drawn NJ India stamp, fitted into the square SEAL_BOX so an
+// uploaded non-square seal keeps its true aspect (no oval) and the drawn fallback
+// stays a perfect circle.
+function Seal({ template }) {
+  return <FittedImg src={template.sealImage} fallbackSrc={DRAWN_SEAL_URL}
+    maxW={SEAL_BOX} maxH={SEAL_BOX} alt="Company Seal" />;
 }
 
 // ── Details block: customer variant (editable) ──────────────────────────────
@@ -182,7 +215,6 @@ export default function WarrantyCertificate({
   customer = {}, certData = {}, fallbackDate = '', invoiceFallback = '',
   edit = null, domId = 'warrantyDoc',
 }) {
-  const sealId = React.useId();
   const [editingTerms, setEditingTerms] = React.useState(false);
   const [fontTick, setFontTick] = React.useState(0);
   const [fit, setFit] = React.useState({ scale: 1, split: null });
@@ -362,7 +394,7 @@ export default function WarrantyCertificate({
             <div className="wc-term-col" style={{ '--wc-term-scale': fit.scale, paddingBottom: SEAL_BOX + 16 }}>{col2Blocks.map((b, i) => <TermBlock key={`c2-${split + i}`} b={b} first={i === 0} />)}</div>
           </div>
           {/* Seal pinned to the bottom-right end of the terms (above the tables). */}
-          <div className="wc-term-seal"><Seal template={template} idBase={sealId} /></div>
+          <div className="wc-term-seal"><Seal template={template} /></div>
         </div>
       )}
 
@@ -413,9 +445,9 @@ export default function WarrantyCertificate({
       <div className="wc-footer">
         <div className="wc-sig-block">
           <div className="wc-sig-area">
-            {template.signImage && (
-              <img src={template.signImage} alt="Signature" className="wc-sig-img" />
-            )}
+            {/* Same crisp, html2canvas-safe <img> sizing as the seal, so the
+                signature can't vanish, distort or blur in the exported PDF. */}
+            <FittedImg src={template.signImage} maxW={300} maxH={62} alt="Signature" />
           </div>
           <div className="wc-sig-line" />
           <div className="wc-sig-name">Seller's Signature</div>
@@ -504,9 +536,10 @@ const WC_CSS = `
 
   .wc-doc .wc-footer { flex-shrink: 0; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e2e2; display: flex; justify-content: flex-end; }
   .wc-sig-block { text-align: center; font-size: 10pt; color: #555; width: 320px; }
-  /* Fixed-height area the signature image sits in, resting ON the line below. */
+  /* Fixed-height area the signature image sits in, resting ON the line below.
+     The signature <img> is sized inline by FittedImg (definite dims = crisp +
+     reliable in the html2canvas capture). */
   .wc-sig-area { height: 62px; display: flex; align-items: flex-end; justify-content: center; }
-  .wc-sig-img { max-height: 62px; max-width: 300px; object-fit: contain; display: block; }
   .wc-sig-line { border-bottom: 1px solid #111; width: 300px; margin: 2px auto 0; }
   .wc-sig-name { color: #111; font-weight: 700; font-size: 12pt; padding-top: 5px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
 
