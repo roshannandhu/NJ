@@ -348,17 +348,6 @@ def usb_drives():
         return {"drives": []}
 
 
-# ── native "choose folder" picker (Local Disk / USB destinations) ────────────
-@router.post("/api/backup/choose-folder")
-def choose_folder(body: dict = Body(default={})):
-    """Open the OS folder dialog and return the picked absolute path. Only works
-    inside the desktop app (pywebview); in a plain browser it returns
-    {"available": False} so the UI lets the user type the path instead."""
-    import native_dialog
-    initial = (body or {}).get("current") or "" if isinstance(body, dict) else ""
-    return native_dialog.pick_folder(initial)
-
-
 # ── restore from a posted payload (used by the old import path) ──────────────
 @router.post("/api/restore")
 def restore(body: dict = Body(...)):

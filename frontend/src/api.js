@@ -249,10 +249,21 @@ export async function detectUsbDrives() {
   return req("/api/backup/usb-drives");
 }
 
-// Open the OS "choose folder" dialog (desktop app only). Returns
-// { available, path? , cancelled? }. In a plain browser available is false.
+// Open the native OS "choose folder" dialog. In the desktop app this goes
+// through the pywebview js_api (window.pywebview.api.pick_backup_folder), which
+// is the only reliable way to drive a native dialog from the web UI. In a plain
+// browser window.pywebview is undefined, so we return { available:false } and
+// the caller falls back to letting the user type the path.
 export async function chooseFolder(current) {
-  return req("/api/backup/choose-folder", { method: "POST", body: JSON.stringify({ current: current || "" }) });
+  const api = (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
+  if (api && typeof api.pick_backup_folder === 'function') {
+    try {
+      return await api.pick_backup_folder(current || '');
+    } catch (e) {
+      return { available: false, error: String(e) };
+    }
+  }
+  return { available: false };
 }
 
 export async function testConnection(path) {
