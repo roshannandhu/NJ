@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3, Wallet } from 'lucide-react';
 import { createQuotation, createWarranty } from '../api';
 import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
 import NumberField from './NumberField';
@@ -32,6 +32,12 @@ export default function Checkout() {
     editingExisting && activeQuotation.includeInstallation != null
       ? activeQuotation.includeInstallation
       : (settings.installationEnabled ?? false));
+  // Advance received from the customer before/with the order — deducted from the
+  // grand total on the quotation as "Balance Due". Never enabled by default.
+  const [advanceEnabled, setAdvanceEnabled] = React.useState(() =>
+    editingExisting && (Number(activeQuotation.advanceReceived) || 0) > 0);
+  const [advanceValue, setAdvanceValue] = React.useState(() =>
+    editingExisting ? (Number(activeQuotation.advanceReceived) || 0) : 0);
 
   // Active bank accounts available for this quotation (CHANGE 5), ordered for display.
   const activeBanks = React.useMemo(
@@ -71,6 +77,10 @@ export default function Checkout() {
   const taxableAmount = subtotal - discountAmount;
   const taxAmount = Math.round(taxableAmount * taxRate) / 100;
   const grandTotal = taxableAmount + taxAmount;
+  // Advance is a payment AGAINST the total (applied after tax), clamped so the
+  // balance can never go negative.
+  const advanceReceived = advanceEnabled ? Math.min(Math.max(0, Number(advanceValue) || 0), grandTotal) : 0;
+  const balanceDue = Math.round((grandTotal - advanceReceived) * 100) / 100;
 
   // Calculate detected warranties based on items in the cart
   const detectedWarranties = React.useMemo(() => {
@@ -185,6 +195,13 @@ export default function Checkout() {
       discountValue,
       discountAmount,
       grandTotal,
+      // Advance payment against the total. Explicit fields overwrite ...base, so
+      // re-finalizing with the toggle off correctly resets a previous advance.
+      // advanceEnabled mirrors the checkout toggle so the quotation page's
+      // Advance pill starts in the same state.
+      advanceEnabled,
+      advanceReceived,
+      balanceDue,
       // Bank: honour a changed selection; otherwise keep the snapshotted bank
       // (audit-safe even if that bank was later removed from Settings).
       bank: selectedBank ? { ...selectedBank } : (!bankChanged ? (base.bank ?? null) : null),
@@ -1024,6 +1041,85 @@ export default function Checkout() {
               )}
             </div>
             )}
+
+            {/* Advance Received Toggle Row — amount already paid by the customer,
+                deducted from the grand total on the quotation as Balance Due. */}
+            <div>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 16px', borderRadius: advanceEnabled ? 'var(--radius) var(--radius) 0 0' : 'var(--radius)',
+                border: `1.5px solid ${advanceEnabled ? '#1d4ed8' : 'var(--line)'}`,
+                borderBottom: advanceEnabled ? '1px solid rgba(29,78,216,0.2)' : `1.5px solid ${advanceEnabled ? '#1d4ed8' : 'var(--line)'}`,
+                background: advanceEnabled ? 'rgba(29, 78, 216, 0.04)' : 'var(--bg)',
+                transition: 'all 0.2s', cursor: 'pointer'
+              }} onClick={() => setAdvanceEnabled(v => !v)}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Wallet size={14} color={advanceEnabled ? '#1d4ed8' : 'var(--ink-soft)'} /> Advance Received
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>
+                    {advanceEnabled
+                      ? (advanceReceived > 0
+                          ? `${settings.currencySymbol || '₹'}${advanceReceived.toLocaleString(undefined, { minimumFractionDigits: 2 })} paid → balance ${settings.currencySymbol || '₹'}${balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                          : 'Set amount below')
+                      : 'Off — click to enable'}
+                  </div>
+                </div>
+                <div style={{
+                  width: '44px', height: '24px', borderRadius: '12px',
+                  background: advanceEnabled ? '#1d4ed8' : 'var(--line)',
+                  position: 'relative', transition: 'background 0.2s', flexShrink: 0
+                }}>
+                  <div style={{
+                    position: 'absolute', top: '3px',
+                    left: advanceEnabled ? '23px' : '3px',
+                    width: '18px', height: '18px', borderRadius: '50%',
+                    background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                    transition: 'left 0.2s'
+                  }} />
+                </div>
+              </div>
+
+              {/* Advance Details (expanded) */}
+              {advanceEnabled && (
+                <div style={{
+                  padding: '14px 16px', border: '1.5px solid #1d4ed8', borderTop: 'none',
+                  borderRadius: '0 0 var(--radius) var(--radius)',
+                  background: 'rgba(29, 78, 216, 0.03)',
+                  display: 'flex', alignItems: 'center', gap: '10px'
+                }}>
+                  {/* Amount input */}
+                  <div style={{ flex: 1, position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', fontWeight: 700, color: '#1d4ed8' }}>
+                      {settings.currencySymbol || '₹'}
+                    </span>
+                    <NumberField
+                      min={0}
+                      step="any"
+                      allowFloat
+                      fallback={0}
+                      value={advanceValue}
+                      onCommit={n => setAdvanceValue(n)}
+                      placeholder="e.g. 20000"
+                      style={{
+                        width: '100%', padding: '9px 12px 9px 28px',
+                        border: '1.5px solid #1d4ed8', borderRadius: '6px',
+                        fontSize: '16px', fontWeight: 700, background: 'white',
+                        color: '#1e40af', outline: 'none', boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Computed balance */}
+                  <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '90px' }}>
+                    <div style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 600, textTransform: 'uppercase' }}>Balance</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#1e40af', fontFamily: 'var(--font-mono)' }}>
+                      {settings.currencySymbol || '₹'}{balanceDue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Actual subtotal + item-offer savings (only when product offers exist) */}
@@ -1068,18 +1164,42 @@ export default function Checkout() {
           <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '8px' }}>
             Total Amount Due
           </div>
-          <div style={{ 
-            fontFamily: 'var(--font-display)', 
-            fontSize: '44px', 
-            fontWeight: 600, 
-            marginBottom: '40px', 
-            letterSpacing: '-0.02em', 
-            lineHeight: 1, 
-            color: 'var(--accent-deep)' 
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '44px',
+            fontWeight: 600,
+            marginBottom: advanceReceived > 0 ? '12px' : '40px',
+            letterSpacing: '-0.02em',
+            lineHeight: 1,
+            color: 'var(--accent-deep)'
           }}>
             {settings.currencySymbol || '₹'}{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}
           </div>
-          
+
+          {/* Advance received → balance due (only when an advance is set) */}
+          {advanceReceived > 0 && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--line)', fontSize: '15px', color: '#1d4ed8', fontWeight: 600 }}>
+                <span>Advance Received</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>-{settings.currencySymbol || '₹'}{advanceReceived.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '8px' }}>
+                Balance Due
+              </div>
+              <div style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '44px',
+                fontWeight: 600,
+                marginBottom: '40px',
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                color: 'var(--accent-deep)'
+              }}>
+                {settings.currencySymbol || '₹'}{balanceDue.toLocaleString(undefined, {minimumFractionDigits: 2})}
+              </div>
+            </>
+          )}
+
           <button
             onClick={handleGenerateQuotation}
             disabled={isGenerating}

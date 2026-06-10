@@ -213,7 +213,7 @@ function CertificateDetails({ customer, certData: cd, template, fallbackDate }) 
 export default function WarrantyCertificate({
   template, openingText, brand, variant = 'customer',
   customer = {}, certData = {}, fallbackDate = '', invoiceFallback = '',
-  edit = null, domId = 'warrantyDoc',
+  edit = null, domId = 'warrantyDoc', watermarkEnabled = true,
 }) {
   const [editingTerms, setEditingTerms] = React.useState(false);
   const [fontTick, setFontTick] = React.useState(0);
@@ -335,7 +335,7 @@ export default function WarrantyCertificate({
     <div className="wc-doc" id={domId} style={{ '--wc-term-scale': fit.scale }}>
       <style dangerouslySetInnerHTML={{ __html: WC_CSS }} />
 
-      <BrandWatermark brand={brand} fallbackText="WARRANTY" />
+      {watermarkEnabled && <BrandWatermark brand={brand} fallbackText="WARRANTY" />}
 
       {/* ══ HEADER ══ */}
       <div className="wc-header">

@@ -1,12 +1,15 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, FileType2, Share2, ImagePlus, X } from 'lucide-react';
-import { downloadWarrantyDocx, mediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet } from 'lucide-react';
+import { mediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
 import BrandWatermark from './BrandWatermark';
 import { watermarkBrandForItems } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
+
+// Preset design colors offered on the quotation page (first is the original plum).
+const THEME_PRESETS = ['#8a1856', '#1e3a8a', '#14532d', '#c2410c', '#1f2937'];
 
 // ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
 function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
@@ -182,7 +185,8 @@ function QuotationDocumentInner() {
     loadQuotationForEdit,
     activeTab,
     setActiveTab,
-    showToast
+    showToast,
+    persistConfig
   } = useAppContext();
 
   const settings = data.settings || {};
@@ -190,6 +194,9 @@ function QuotationDocumentInner() {
   const [isDownloading, setIsDownloading] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [isSharing, setIsSharing] = React.useState(false);
+  // Native color-picker draft: held locally while dragging, committed on close
+  // so we don't fire a backend upsert per drag tick.
+  const [draftColor, setDraftColor] = React.useState(null);
 
   // ── In-place quotation editing (CHANGE 3) — warranty-style inline editing ──
   // The quotation document itself is directly editable: click any field to edit
@@ -214,7 +221,11 @@ function QuotationDocumentInner() {
     const taxRate = d.taxEnabled ? (Number(d.taxRate) || Number(settings.taxRate) || 0) : 0;
     const taxAmount = Math.round(taxableAmount * taxRate) / 100;
     const grandTotal = taxableAmount + taxAmount;
-    return { ...d, subtotal, actualSubtotal, productSavings, hasOffers, taxRate, taxAmount, discountAmount, grandTotal };
+    // Advance received is a payment against the total, applied AFTER tax. It is
+    // re-clamped on every edit so shrinking the order never leaves balanceDue < 0.
+    const advanceReceived = Math.min(Math.max(0, Number(d.advanceReceived) || 0), grandTotal);
+    const balanceDue = Math.round((grandTotal - advanceReceived) * 100) / 100;
+    return { ...d, subtotal, actualSubtotal, productSavings, hasOffers, taxRate, taxAmount, discountAmount, grandTotal, advanceReceived, balanceDue };
   };
 
   // Refresh a linked warranty's snapshot from the edited quotation, WITHOUT
@@ -266,6 +277,27 @@ function QuotationDocumentInner() {
   };
   // Apply a top-level patch to the current quotation, recompute, and persist.
   const commitDoc = (patch) => persistDoc(recomputeTotals({ ...generatedDoc, ...patch }));
+
+  // Persist a single warranty certificate (per-cert fields like watermarkEnabled)
+  // without touching the quotation. Mirrors WarrantyDocument's persistWarranty.
+  const persistCert = (updated) => {
+    setData(prev => ({
+      ...prev,
+      warranty_certificates: (prev.warranty_certificates || []).map(c =>
+        ((c.warrantyNo || c.id) === (updated.warrantyNo || updated.id)) ? updated : c),
+    }));
+    createWarranty(updated).catch(() => {}); // fire-and-forget; local copy already saved
+  };
+
+  // Set this quotation's theme color AND remember it as the default for new
+  // quotations. The settings write MUST use the functional setData form so it
+  // composes with the registry update commitDoc just queued (object form would
+  // clobber it with a stale snapshot).
+  const applyThemeColor = (c) => {
+    commitDoc({ themeColor: c });
+    setData(prev => ({ ...prev, settings: { ...prev.settings, quotationThemeColor: c } }));
+    persistConfig({ ...data, settings: { ...data.settings, quotationThemeColor: c } });
+  };
 
   // Field-level editing helpers
   const updateField     = (field, value) => commitDoc({ [field]: value });
@@ -867,7 +899,15 @@ function QuotationDocumentInner() {
   };
 
   const TB   = { border: '1.5px solid #1A1A1A' };
-  const PLUM = '#8a1856';
+  // Theme color: per-quotation pick → remembered default → original plum.
+  const PLUM = doc.themeColor || settings.quotationThemeColor || '#8a1856';
+  // Watermark visibility: per-document override → global Settings default → on.
+  // `??` (not `||`) so an explicit per-doc false beats a global true.
+  const wmEnabled = doc.watermarkEnabled ?? settings.watermarkEnabled ?? true;
+  const certWmEnabled = activeCert ? (activeCert.watermarkEnabled ?? settings.watermarkEnabled ?? true) : true;
+  // Advance Received row only shows when turned on. Default-on for quotations
+  // that already carry an advance (set at checkout or before this toggle existed).
+  const advanceOn = doc.advanceEnabled ?? ((doc.advanceReceived || 0) > 0);
   const curr = settings.currencySymbol || '₹';
 
   // ── Offer-price helpers (backward compatible) ────────────────────────────
@@ -1030,13 +1070,6 @@ function QuotationDocumentInner() {
           color: rgba(0,0,0,0.07); white-space: nowrap; letter-spacing: 0.1em;
           font-family: 'Times New Roman', serif;
         }
-        /* Brand-logo watermark: single, centred, faint, grayscale — never tiled. */
-        .wd-wm-logo {
-          max-width: 55%; max-height: 50%; width: auto; height: auto;
-          object-fit: contain; opacity: 0.10; filter: grayscale(100%);
-          display: block; margin: 0 auto;
-        }
-
         .warranty-doc .wd-logo {
           font-family: 'Playfair Display', Georgia, serif;
           font-size: 82pt;
@@ -1273,6 +1306,35 @@ function QuotationDocumentInner() {
             <div className="q-edit-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', padding: '10px 14px', background: 'rgba(138,24,86,0.05)', border: '1px solid rgba(138,24,86,0.18)', borderRadius: '8px', fontSize: '12px', color: '#8a1856', fontWeight: 600, width: '100%', maxWidth: '860px' }}>
               <Edit3 size={13} /> Click any text, price, quantity, or detail on the quotation below to edit it directly. Changes affect only this quotation.
             </div>
+
+            {/* ── Document options: watermark toggle + design color (screen-only;
+                   sits outside #quotationSheet so it never reaches the PDF) ── */}
+            <div className="actions-bar" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: '8px', width: '100%', maxWidth: '860px', flexWrap: 'wrap' }}>
+              <button onClick={() => commitDoc({ watermarkEnabled: !wmEnabled })} className="hover-lift"
+                title="Show or hide the faint brand-name watermark on this quotation (and its installation pages)"
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: wmEnabled ? 'var(--accent-soft)' : 'var(--surface)', color: wmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', border: `1px solid ${wmEnabled ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--radius-full)', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+                {wmEnabled ? <Eye size={15} /> : <EyeOff size={15} />} Watermark: {wmEnabled ? 'On' : 'Off'}
+              </button>
+              <button
+                onClick={() => advanceOn ? commitDoc({ advanceEnabled: false, advanceReceived: 0 }) : commitDoc({ advanceEnabled: true })}
+                className="hover-lift"
+                title="Show or hide the Advance Received / Balance Due rows on this quotation"
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: advanceOn ? 'rgba(29,78,216,0.08)' : 'var(--surface)', color: advanceOn ? '#1d4ed8' : 'var(--ink-soft)', border: `1px solid ${advanceOn ? '#1d4ed8' : 'var(--line)'}`, borderRadius: 'var(--radius-full)', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
+                <Wallet size={15} /> Advance: {advanceOn ? 'On' : 'Off'}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                <Palette size={15} style={{ color: 'var(--ink-soft)' }} />
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Design Color</span>
+                {THEME_PRESETS.map(c => (
+                  <button key={c} onClick={() => applyThemeColor(c)} title={c}
+                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c, border: 'none', padding: 0, cursor: 'pointer', boxShadow: PLUM.toLowerCase() === c ? `0 0 0 2px var(--surface), 0 0 0 4px ${c}` : 'inset 0 0 0 1px rgba(0,0,0,0.12)' }} />
+                ))}
+                <input type="color" value={draftColor ?? PLUM} title="Custom color"
+                  onChange={e => setDraftColor(e.target.value)}
+                  onBlur={() => { if (draftColor && draftColor.toLowerCase() !== PLUM.toLowerCase()) applyThemeColor(draftColor); setDraftColor(null); }}
+                  style={{ width: '30px', height: '26px', padding: 0, border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--surface)', cursor: 'pointer' }} />
+              </div>
+            </div>
             </>
           ) : (
             /* ── Actions Bar for Warranty Tab ── */
@@ -1312,20 +1374,21 @@ function QuotationDocumentInner() {
                 </>)}
               </div>
               {activeCert && (
-                <button onClick={() => downloadWarrantyDocx(activeCert.warrantyNo || activeCert.id, activeCert, `NJ_Warranty_${activeCert.warrantyNo || 'NJ-W-0001'}_${(activeCert.customer?.name || 'Customer').replace(/\s+/g,'_')}.docx`).catch(e => showToast && showToast('Word download failed: ' + e.message, 'error'))} className="hover-lift"
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#2d6a4f', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                  <FileType2 size={18} /> Download Word
-                </button>
-              )}
-              {activeCert && (
-                <button 
+                <button
                   onClick={() => {
                     setActiveWarranty(activeCert);
                     setCurrentView('warranty_document');
-                  }} 
+                  }}
                   className="hover-lift"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--ink)', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                   <Edit3 size={18} /> Edit Warranty
+                </button>
+              )}
+              {activeCert && (
+                <button onClick={() => persistCert({ ...activeCert, watermarkEnabled: !certWmEnabled })} className="hover-lift"
+                  title="Show or hide the faint brand-name watermark on this certificate"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 18px', background: certWmEnabled ? 'var(--accent-soft)' : 'var(--surface)', color: certWmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', border: `1px solid ${certWmEnabled ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
+                  {certWmEnabled ? <Eye size={18} /> : <EyeOff size={18} />} Watermark: {certWmEnabled ? 'On' : 'Off'}
                 </button>
               )}
               <button onClick={startNew} className="hover-lift"
@@ -1357,8 +1420,8 @@ function QuotationDocumentInner() {
                 border: '1px solid #E5E7EB', position: 'relative',
               }}>
 
-              {/* ── Brand watermark (faint, behind content; nothing if no brand) ── */}
-              <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />
+              {/* ── Brand watermark (faint, behind content; nothing if no brand or toggled off) ── */}
+              {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />}
 
               {/* ── HEADER BAND (FIXED size on every quotation — never scaled) ── */}
               <div className="q-header-band" style={{ flexShrink: 0 }}>
@@ -1767,6 +1830,36 @@ function QuotationDocumentInner() {
                     <span style={{ fontSize: QFIT(16), fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
+                  {/* Advance Received — only when turned on (Advance pill above).
+                      When on but still 0, the row is edit-only (visible on screen,
+                      excluded from PDF/print) so the amount can be typed inline; once
+                      > 0 it prints. Same edit-only gating as Delivery/Notes. */}
+                  {advanceOn && (
+                  <div
+                    className={(doc.advanceReceived || 0) > 0 ? undefined : 'q-edit-only'}
+                    {...((doc.advanceReceived || 0) > 0 ? {} : { 'data-html2canvas-ignore': 'true' })}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#f0fdf4', borderTop: '1px solid #dcfce7' }}>
+                    <span style={{ fontSize: D.tcFs, fontWeight: '600', color: '#16a34a' }}>Advance Received</span>
+                    <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>
+                      -{curr}<EditableCell
+                        value={doc.advanceReceived || 0}
+                        numeric
+                        onSave={v => updateField('advanceReceived', Math.max(0, v))}
+                        renderValue={() => (doc.advanceReceived || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        placeholder="0.00"
+                      />
+                    </span>
+                  </div>
+                  )}
+
+                  {/* Balance Due — the figure the customer still owes; only when on and an advance exists */}
+                  {advanceOn && (doc.advanceReceived || 0) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(12)} ${QFIT(14)}`, background: PLUM }}>
+                      <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>BALANCE DUE</span>
+                      <span style={{ fontSize: QFIT(16), fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{(doc.balanceDue ?? Math.max(0, doc.grandTotal - (doc.advanceReceived || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+
                 </div>
               </div>
 
@@ -1841,7 +1934,7 @@ function QuotationDocumentInner() {
                   <InstallPage
                     key={c.key || i}
                     c={c}
-                    brand={watermarkBrandForItems(doc.items, data)}
+                    brand={wmEnabled ? watermarkBrandForItems(doc.items, data) : null}
                     companyName={company.name || 'NJ India'}
                     docId={doc.id}
                     onSave={v => updateInstallOverride(c.key, v)}
@@ -1880,6 +1973,7 @@ function QuotationDocumentInner() {
               template={tmpl}
               openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
               brand={watermarkBrandForItems(activeCert?.items || doc.items, data)}
+              watermarkEnabled={certWmEnabled}
               variant="certificate"
               customer={activeCert.customer || {}}
               certData={cd}
