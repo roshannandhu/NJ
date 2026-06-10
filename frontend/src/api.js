@@ -249,6 +249,12 @@ export async function detectUsbDrives() {
   return req("/api/backup/usb-drives");
 }
 
+// Open the OS "choose folder" dialog (desktop app only). Returns
+// { available, path? , cancelled? }. In a plain browser available is false.
+export async function chooseFolder(current) {
+  return req("/api/backup/choose-folder", { method: "POST", body: JSON.stringify({ current: current || "" }) });
+}
+
 export async function testConnection(path) {
   return req("/api/backup/test-connection", { method: "POST", body: JSON.stringify({ path }) });
 }

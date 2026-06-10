@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, HardDrive, Cloud, Usb,
   Download, RefreshCw, ChevronDown, ChevronRight,
-  Database, Trash2, Search, Wifi, RotateCcw, Upload, Share2,
+  Database, Trash2, Search, Wifi, RotateCcw, Upload, Share2, FolderOpen,
 } from 'lucide-react';
 import { useAppContext } from '../AppContext';
 import {
@@ -10,7 +10,7 @@ import {
   runBackup, restoreFromFile, restoreFromPath,
   downloadBackup, downloadCatalogBackup, downloadHistoryBackup, fetchBackupBlob,
   getUploadsInfo, restoreCatalogFromFile,
-  detectUsbDrives, detectCloudPath, testConnection, listBackupFiles,
+  detectUsbDrives, detectCloudPath, testConnection, listBackupFiles, chooseFolder,
   cloudStatus, saveCloudConfig, cloudConnect, cloudDisconnect,
   clearQuotations, clearWarranties,
   recoveryBackups, recoveryScan, recoveryRecover, recoveryReportUrl,
@@ -77,6 +77,7 @@ export default function BackupSettings() {
   const [testRes, setTestRes] = useState({});
   const [testing, setTesting] = useState({});
   const [usbList, setUsbList] = useState(null);
+  const [picking, setPicking] = useState({});
 
   // Cloud OAuth accounts (gdrive/onedrive): live status, the client-id/secret
   // the user pastes in, per-provider busy flag, and whether to show setup help.
@@ -359,6 +360,34 @@ export default function BackupSettings() {
     } catch { showToast('USB detection failed', 'error'); }
   };
 
+  // Open the native OS folder picker for a Local Disk / USB destination and save
+  // the chosen path. In a plain browser (dev) the native dialog is unavailable,
+  // so fall back to letting the user type/paste the path.
+  const handleChooseFolder = async (name) => {
+    setPicking(p => ({ ...p, [name]: true }));
+    try {
+      const r = await chooseFolder(targets[name]?.path);
+      if (r.available && r.path) {
+        patchTargetAndSave(name, { path: r.path, enabled: true });
+        setTestRes(t => ({ ...t, [name]: null }));
+        showToast('Folder selected', 'success');
+      } else if (r.available && r.cancelled) {
+        /* user closed the dialog — do nothing */
+      } else {
+        // No native dialog (running in a browser) → manual entry fallback.
+        const typed = window.prompt(
+          'Enter the full backup folder path (e.g. ' + (name === 'local' ? 'C:\\Backups' : 'D:\\NJ Backups') + '):',
+          targets[name]?.path || ''
+        );
+        if (typed && typed.trim()) {
+          patchTargetAndSave(name, { path: typed.trim(), enabled: true });
+          setTestRes(t => ({ ...t, [name]: null }));
+        }
+      }
+    } catch { showToast('Could not open folder picker', 'error'); }
+    finally { setPicking(p => ({ ...p, [name]: false })); }
+  };
+
   // Locate the local Dropbox sync folder and fill in a NJ_Backups subfolder.
   const handleDetectDropbox = async () => {
     try {
@@ -580,7 +609,20 @@ export default function BackupSettings() {
                       {isExpanded && !isCloud && (
                         <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder={name === 'local' ? 'C:\\Backups' : 'D:\\NJ Backups'} style={{ ...inpStyle, flex: 1 }} />
+                            {name === 'dropbox' ? (
+                              <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="Dropbox folder" style={{ ...inpStyle, flex: 1 }} />
+                            ) : (
+                              // Local Disk / USB: pick the folder with the OS dialog instead of typing it.
+                              <div style={{ ...inpStyle, flex: 1, display: 'flex', alignItems: 'center', fontFamily: 'monospace', color: t.path ? 'var(--ink)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'default' }}
+                                title={t.path || ''}>
+                                {t.path || (name === 'local' ? 'No folder chosen' : 'No USB folder chosen')}
+                              </div>
+                            )}
+                            {name !== 'dropbox' && (
+                              <button style={btnStyle} disabled={picking[name]} onClick={() => handleChooseFolder(name)}>
+                                <FolderOpen size={14}/> {picking[name] ? 'Opening…' : 'Choose Folder'}
+                              </button>
+                            )}
                             {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
                             {name === 'dropbox' && <button style={btnStyle} disabled={busy} onClick={handleDetectDropbox}><Search size={14}/> Detect</button>}
                             <button style={{ ...btnStyle, width: 100 }} disabled={testing[name]} onClick={() => handleTest(name, t.path)}><Wifi size={14}/> Test</button>

@@ -145,6 +145,15 @@ if __name__ == "__main__":
 
         window = webview.create_window("NJ India Trading", URL, width=1280, height=820, min_size=(1024, 680))
 
+        # Let backend routes open a native folder picker (same process). Used by
+        # the Backup "Choose Folder" buttons for Local Disk / USB destinations.
+        try:
+            import native_dialog
+            native_dialog.set_window(window)
+            log("native_dialog window registered")
+        except Exception as _e:
+            log(f"native_dialog registration failed: {_e}")
+
         def force_window_icon():
             # Replace the default Python logo in the title bar / taskbar / alt-tab with
             # app.ico. Three bugs in the previous version are fixed here:
