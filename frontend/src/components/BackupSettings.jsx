@@ -10,7 +10,7 @@ import {
   runBackup, restoreFromFile, restoreFromPath,
   downloadBackup, downloadCatalogBackup, downloadHistoryBackup, fetchBackupBlob,
   getUploadsInfo, restoreCatalogFromFile,
-  detectUsbDrives, detectCloudPath, testConnection, listBackupFiles, chooseFolder,
+  detectUsbDrives, detectCloudPath, testConnection, listBackupFiles, listDirs, makeDir,
   cloudStatus, saveCloudConfig, cloudConnect, cloudDisconnect,
   clearQuotations, clearWarranties,
   recoveryBackups, recoveryScan, recoveryRecover, recoveryReportUrl,
@@ -77,7 +77,8 @@ export default function BackupSettings() {
   const [testRes, setTestRes] = useState({});
   const [testing, setTesting] = useState({});
   const [usbList, setUsbList] = useState(null);
-  const [picking, setPicking] = useState({});
+  // In-app folder browser: { name, current, parent, dirs, loading, error } | null
+  const [browse, setBrowse] = useState(null);
 
   // Cloud OAuth accounts (gdrive/onedrive): live status, the client-id/secret
   // the user pastes in, per-provider busy flag, and whether to show setup help.
@@ -360,32 +361,44 @@ export default function BackupSettings() {
     } catch { showToast('USB detection failed', 'error'); }
   };
 
-  // Open the native OS folder picker for a Local Disk / USB destination and save
-  // the chosen path. In a plain browser (dev) the native dialog is unavailable,
-  // so fall back to letting the user type/paste the path.
-  const handleChooseFolder = async (name) => {
-    setPicking(p => ({ ...p, [name]: true }));
+  // ── In-app folder browser ─────────────────────────────────────────────────
+  // Works in the desktop app AND a browser: the backend lists the real
+  // filesystem (it already has FS access for backups), the user clicks through
+  // drives → folders and picks one. Replaces the impossible native/typed picker.
+  const loadDirs = async (name, path) => {
+    setBrowse(b => ({ ...(b || { name }), name, loading: true, error: null }));
     try {
-      const r = await chooseFolder(targets[name]?.path);
-      if (r.available && r.path) {
-        patchTargetAndSave(name, { path: r.path, enabled: true });
-        setTestRes(t => ({ ...t, [name]: null }));
-        showToast('Folder selected', 'success');
-      } else if (r.available && r.cancelled) {
-        /* user closed the dialog — do nothing */
-      } else {
-        // No native dialog (running in a browser) → manual entry fallback.
-        const typed = window.prompt(
-          'Enter the full backup folder path (e.g. ' + (name === 'local' ? 'C:\\Backups' : 'D:\\NJ Backups') + '):',
-          targets[name]?.path || ''
-        );
-        if (typed && typed.trim()) {
-          patchTargetAndSave(name, { path: typed.trim(), enabled: true });
-          setTestRes(t => ({ ...t, [name]: null }));
-        }
-      }
-    } catch { showToast('Could not open folder picker', 'error'); }
-    finally { setPicking(p => ({ ...p, [name]: false })); }
+      const r = await listDirs(path || '');
+      setBrowse({ name, current: r.current || '', parent: r.parent ?? null,
+        dirs: r.dirs || [], loading: false, error: r.error || null });
+    } catch {
+      setBrowse(b => ({ ...(b || { name }), name, loading: false, error: 'Could not read folders' }));
+    }
+  };
+
+  // Open the browser at the destination's current folder if set, else at drives.
+  const openFolderBrowser = (name) => {
+    const start = targets[name]?.path || '';
+    loadDirs(name, start);
+  };
+
+  const handleNewFolder = async () => {
+    if (!browse || !browse.current) return;
+    const nm = window.prompt('New folder name:', 'NJ Backups');
+    if (!nm || !nm.trim()) return;
+    try {
+      const r = await makeDir(browse.current, nm.trim());
+      if (r.ok && r.path) { await loadDirs(browse.name, r.path); }
+      else showToast(r.error || 'Could not create folder', 'error');
+    } catch { showToast('Could not create folder', 'error'); }
+  };
+
+  const selectBrowsedFolder = () => {
+    if (!browse || !browse.current) return;
+    patchTargetAndSave(browse.name, { path: browse.current, enabled: true });
+    setTestRes(t => ({ ...t, [browse.name]: null }));
+    setBrowse(null);
+    showToast('Folder selected', 'success');
   };
 
   // Locate the local Dropbox sync folder and fill in a NJ_Backups subfolder.
@@ -619,8 +632,8 @@ export default function BackupSettings() {
                               </div>
                             )}
                             {name !== 'dropbox' && (
-                              <button style={btnStyle} disabled={picking[name]} onClick={() => handleChooseFolder(name)}>
-                                <FolderOpen size={14}/> {picking[name] ? 'Opening…' : 'Choose Folder'}
+                              <button style={btnStyle} onClick={() => openFolderBrowser(name)}>
+                                <FolderOpen size={14}/> Choose Folder
                               </button>
                             )}
                             {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
@@ -894,6 +907,73 @@ export default function BackupSettings() {
           </div>
         )}
       </div>
+
+      {/* ── In-app folder browser modal (Local Disk / USB "Choose Folder") ── */}
+      {browse && (
+        <div
+          onClick={() => setBrowse(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: 560, maxWidth: '92vw', maxHeight: '82vh', display: 'flex', flexDirection: 'column',
+              background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.25))', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FolderOpen size={16} color="var(--accent)" />
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                Select a folder for {DEST[browse.name]?.label || browse.name}
+              </div>
+            </div>
+
+            {/* Current path + Up */}
+            <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button style={{ ...btnStyle, padding: '4px 10px', fontSize: 12 }}
+                disabled={browse.parent === null || browse.loading}
+                onClick={() => loadDirs(browse.name, browse.parent || '')}>
+                <ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} /> Up
+              </button>
+              <div style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, color: 'var(--ink-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                title={browse.current || 'This PC'}>
+                {browse.current || 'This PC — choose a drive'}
+              </div>
+            </div>
+
+            {/* Folder list */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 160 }}>
+              {browse.loading && <div style={{ padding: 20, fontSize: 13, color: 'var(--ink-soft)' }}>Loading…</div>}
+              {!browse.loading && browse.error && (
+                <div style={{ padding: 20, fontSize: 13, color: '#EF4444' }}>{browse.error}</div>
+              )}
+              {!browse.loading && !browse.error && browse.dirs.length === 0 && (
+                <div style={{ padding: 20, fontSize: 13, color: 'var(--ink-soft)' }}>No sub-folders here. Use “Select this folder”, or create one.</div>
+              )}
+              {!browse.loading && browse.dirs.map(d => (
+                <div key={d.path} onClick={() => loadDirs(browse.name, d.path)}
+                  style={{ padding: '9px 18px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--line-soft, var(--line))' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  {browse.current === '' ? <HardDrive size={14} color="var(--ink-soft)" /> : <FolderOpen size={14} color="var(--ink-soft)" />}
+                  <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
+                  <ChevronRight size={14} color="var(--ink-soft)" />
+                </div>
+              ))}
+            </div>
+
+            {/* Footer actions */}
+            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button style={btnStyle} disabled={!browse.current || browse.loading} onClick={handleNewFolder}>
+                <Database size={14} /> New Folder
+              </button>
+              <div style={{ flex: 1 }} />
+              <button style={btnStyle} onClick={() => setBrowse(null)}>Cancel</button>
+              <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none', opacity: browse.current ? 1 : 0.5 }}
+                disabled={!browse.current || browse.loading} onClick={selectBrowsedFolder}>
+                Select this folder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

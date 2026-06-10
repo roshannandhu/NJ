@@ -249,21 +249,16 @@ export async function detectUsbDrives() {
   return req("/api/backup/usb-drives");
 }
 
-// Open the native OS "choose folder" dialog. In the desktop app this goes
-// through the pywebview js_api (window.pywebview.api.pick_backup_folder), which
-// is the only reliable way to drive a native dialog from the web UI. In a plain
-// browser window.pywebview is undefined, so we return { available:false } and
-// the caller falls back to letting the user type the path.
-export async function chooseFolder(current) {
-  const api = (typeof window !== 'undefined' && window.pywebview && window.pywebview.api) || null;
-  if (api && typeof api.pick_backup_folder === 'function') {
-    try {
-      return await api.pick_backup_folder(current || '');
-    } catch (e) {
-      return { available: false, error: String(e) };
-    }
-  }
-  return { available: false };
+// In-app folder browser: list drive roots (empty path) or the subfolders of a
+// path. The backend walks the real filesystem, so this works in both the desktop
+// app and a browser. Returns { current, parent, dirs:[{name,path}], error? }.
+export async function listDirs(path) {
+  return req(`/api/backup/list-dirs?path=${encodeURIComponent(path || "")}`);
+}
+
+// Create a new subfolder while browsing. Returns { ok, path? , error? }.
+export async function makeDir(parent, name) {
+  return req("/api/backup/make-dir", { method: "POST", body: JSON.stringify({ parent, name }) });
 }
 
 export async function testConnection(path) {

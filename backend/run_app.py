@@ -143,23 +143,7 @@ if __name__ == "__main__":
         except Exception as _e:
             log(f"AppUserModelID set failed: {_e}")
 
-        # Expose a tiny JS API so the WEB UI can open a NATIVE folder picker via
-        # window.pywebview.api.pick_backup_folder(). The dialog MUST be driven
-        # through js_api — calling create_file_dialog from the web-server request
-        # thread hangs — so the Backup "Choose Folder" buttons call this.
-        import native_dialog
-
-        class _NativeApi:
-            def pick_backup_folder(self, current=""):
-                return native_dialog.pick_folder(current or "")
-
-        window = webview.create_window("NJ India Trading", URL, width=1280, height=820,
-                                       min_size=(1024, 680), js_api=_NativeApi())
-        try:
-            native_dialog.set_window(window)
-            log("native_dialog window registered (js_api)")
-        except Exception as _e:
-            log(f"native_dialog registration failed: {_e}")
+        window = webview.create_window("NJ India Trading", URL, width=1280, height=820, min_size=(1024, 680))
 
         def force_window_icon():
             # Replace the default Python logo in the title bar / taskbar / alt-tab with

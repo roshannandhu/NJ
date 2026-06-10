@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -346,6 +347,60 @@ def usb_drives():
         return {"drives": drives}
     except Exception:
         return {"drives": []}
+
+
+# ── in-app folder browser (Local Disk / USB destinations) ────────────────────
+# The web UI can't open an OS folder dialog (browser sandbox) and pywebview's
+# native dialog can't be driven from a request thread, so the picker is built in
+# the app: these endpoints let the frontend walk the real filesystem (the backend
+# already has full FS access for writing backups) and pick a folder.
+@router.get("/api/backup/list-dirs")
+def list_dirs(path: str = ""):
+    """List drive roots (no path) or the immediate subfolders of `path`."""
+    path = (path or "").strip()
+    if not path:
+        drives = [f"{d}:\\" for d in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                  if os.path.exists(f"{d}:\\")]
+        return {"current": "", "parent": None,
+                "dirs": [{"name": d, "path": d} for d in drives]}
+
+    trimmed = path.rstrip("\\/")
+    parent = os.path.dirname(trimmed)
+    # At a drive root (e.g. "C:") dirname returns "C:" itself → send to drives list.
+    if not parent or parent == trimmed:
+        parent = ""
+    try:
+        entries = []
+        with os.scandir(path) as it:
+            for e in it:
+                try:
+                    if e.is_dir():
+                        entries.append({"name": e.name, "path": e.path})
+                except OSError:
+                    continue  # skip entries we can't stat
+        entries.sort(key=lambda x: x["name"].lower())
+        return {"current": path, "parent": parent, "dirs": entries}
+    except Exception as e:
+        return {"current": path, "parent": parent, "dirs": [],
+                "error": f"{type(e).__name__}: {e}"}
+
+
+@router.post("/api/backup/make-dir")
+def make_dir(body: dict = Body(...)):
+    """Create a new subfolder while browsing. body = { parent, name }."""
+    parent = (body or {}).get("parent") or ""
+    name = ((body or {}).get("name") or "").strip()
+    if not parent or not name:
+        return {"ok": False, "error": "parent and name are required"}
+    # Block path separators in the new name so it stays a single subfolder.
+    if any(c in name for c in '\\/:*?"<>|'):
+        return {"ok": False, "error": "invalid folder name"}
+    try:
+        new_path = os.path.join(parent, name)
+        os.makedirs(new_path, exist_ok=True)
+        return {"ok": True, "path": new_path}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 # ── restore from a posted payload (used by the old import path) ──────────────
