@@ -211,6 +211,8 @@ export default function WarrantyDocument() {
           certData={certData}
           fallbackDate={doc.date}
           invoiceFallback={doc.quotationId || parentQuote?.id || ''}
+          warrantyNo={doc.warrantyNo || doc.id}
+          orderNo={doc.quotationId || parentQuote?.id || ''}
           edit={edit}
         />
       </div>

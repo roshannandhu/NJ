@@ -160,17 +160,25 @@ function Seal({ template }) {
 }
 
 // ── Details block: customer variant (editable) ──────────────────────────────
-function CustomerDetails({ customer, certData, template, fallbackDate, invoiceFallback, edit }) {
+function CustomerDetails({ customer, certData, template, fallbackDate, invoiceFallback, edit, warrantyNo }) {
   const field = (lbl, val, save) => (
     <div className="wc-det-field">
       <span className="wc-det-lbl">{lbl}</span>
       <span className="wc-det-val">{edit ? <EditableCell value={val} onSave={save} /> : (val || '—')}</span>
     </div>
   );
+  // Static (read-only) field for an auto-generated identifier.
+  const staticField = (lbl, val) => (
+    <div className="wc-det-field">
+      <span className="wc-det-lbl">{lbl}</span>
+      <span className="wc-det-val">{val || '—'}</span>
+    </div>
+  );
   return (
     <div className="wc-details">
       <div className="wc-det-title">Customer Information</div>
       <div className="wc-det-grid">
+        {staticField('Certificate No', warrantyNo)}
         {field('Customer Name', customer.name, v => edit?.onUpdateCustomerField('name', v))}
         {field('Product', certData.productName, v => edit?.onUpdateCertField('productName', v))}
         {field('Date', certData.purchaseDate || fallbackDate, v => edit?.onUpdateCertField('purchaseDate', v))}
@@ -182,7 +190,7 @@ function CustomerDetails({ customer, certData, template, fallbackDate, invoiceFa
 }
 
 // ── Details block: certificate variant (static, template-conditional) ───────
-function CertificateDetails({ customer, certData: cd, template, fallbackDate }) {
+function CertificateDetails({ customer, certData: cd, template, fallbackDate, warrantyNo, orderNo }) {
   const isHeatout = template.id === 'heatout';
   const isStoneCoated = template.id === 'stone_coated';
   const isCeramic = template.id === 'ceramic';
@@ -196,6 +204,8 @@ function CertificateDetails({ customer, certData: cd, template, fallbackDate }) 
   return (
     <div className="wc-details">
       <div className="wc-det-title">Certificate Details</div>
+      {warrantyNo && row('Certificate No', warrantyNo, true)}
+      {orderNo && row('Order No', orderNo, true)}
       {row('Address', cd.siteAddress || [customer?.name, customer?.address].filter(Boolean).join(', '))}
       {row(isHeatout || isStoneCoated || isCeramic ? 'The name of the sold products (complete, including color)' : 'Product Name & Color',
         cd.productName || [cd.productName, (cd.productColor && cd.productColor !== 'N/A') ? cd.productColor : null].filter(Boolean).join(' — '))}
@@ -214,6 +224,7 @@ export default function WarrantyCertificate({
   template, openingText, brand, variant = 'customer',
   customer = {}, certData = {}, fallbackDate = '', invoiceFallback = '',
   edit = null, domId = 'warrantyDoc', watermarkEnabled = true,
+  warrantyNo = '', orderNo = '',
 }) {
   const [editingTerms, setEditingTerms] = React.useState(false);
   const [fontTick, setFontTick] = React.useState(0);
@@ -339,6 +350,13 @@ export default function WarrantyCertificate({
 
       {/* ══ HEADER ══ */}
       <div className="wc-header">
+        {/* Auto-generated identifiers, top-right above the header border. */}
+        {(warrantyNo || orderNo) && (
+          <div style={{ textAlign: 'right', fontSize: '8.5pt', lineHeight: 1.35, color: '#555', fontWeight: 700 }}>
+            {warrantyNo && <div>Certificate No: {warrantyNo}</div>}
+            {orderNo && <div>Order No: {orderNo}</div>}
+          </div>
+        )}
         {template.logo && template.logo.startsWith('data:image/') ? (
           <>
             <img src={template.logo} alt="Logo" style={{ height: 92, width: 'auto', maxWidth: 560, objectFit: 'contain', margin: '0 auto 3px', display: 'block' }} />
@@ -438,8 +456,8 @@ export default function WarrantyCertificate({
 
       {/* ══ DETAILS (variant-specific) ══ */}
       {variant === 'certificate'
-        ? <CertificateDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} />
-        : <CustomerDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} invoiceFallback={invoiceFallback} edit={edit} />}
+        ? <CertificateDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} warrantyNo={warrantyNo} orderNo={orderNo} />
+        : <CustomerDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} invoiceFallback={invoiceFallback} edit={edit} warrantyNo={warrantyNo} />}
 
       {/* ══ FOOTER — signature only (fixed) ══ */}
       <div className="wc-footer">

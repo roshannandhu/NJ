@@ -1487,6 +1487,8 @@ function QuotationDocumentInner() {
                 <div style={{ textAlign: 'right', fontSize: D.tcFs, fontWeight: '700' }}>
                   <div>Date: <EditableCell value={doc.date} onSave={v => updateField('date', v)} placeholder="date" /></div>
                   <div style={{ marginTop: '2px', color: '#555' }}>Manager: <EditableCell value={doc.managerName} onSave={v => updateField('managerName', v)} placeholder="manager" /></div>
+                  {/* Auto-generated order identifier (read-only) — identifies this quotation/customer. */}
+                  <div style={{ marginTop: '2px', color: '#555' }}>Quotation No: {doc.id}</div>
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: D.custMb }}>
@@ -1978,6 +1980,8 @@ function QuotationDocumentInner() {
               customer={activeCert.customer || {}}
               certData={cd}
               fallbackDate={activeCert.date}
+              warrantyNo={activeCert.warrantyNo || activeCert.id}
+              orderNo={activeCert.quotationId || doc.id || ''}
             />
             ); })()}
 
