@@ -15,12 +15,25 @@
 // Brands are ordered by how many line items carry them (most first), ties broken
 // by first appearance, so "A × B" lists the dominant brand first.
 
+// Tools & accessories are conceptually BRANDLESS, but legacy data stamps them
+// with a brand anyway (the default tools class carries brandId "nj", and items
+// added before the fix snapshotted a fallback brandId). So a tool is identified
+// by its CLASS TYPE, never by a missing brandId; the null-brandId check only
+// covers tool items whose class was since renamed or deleted.
+export function isToolItem(item, data) {
+  const cls = data?.classes?.find(c => c.name === item.className);
+  if (cls) return cls.type === 'tools';
+  return item.brandId === null;
+}
+
 // Ordered, de-duplicated brands present across a document's line items.
 // Each entry: { id, name, logo: '' }. `name` prefers the LIVE brand record,
 // falling back to the per-item snapshot only when the brand no longer exists.
+// Tool items never contribute a brand (see isToolItem).
 export function brandsForItems(items, data) {
   const counts = new Map();
   (items || []).forEach((it, idx) => {
+    if (isToolItem(it, data)) return;
     const cls = data?.classes?.find(c => c.name === it.className);
     const brandId = it.brandId || cls?.brandId;
     if (!brandId) return;
@@ -48,17 +61,55 @@ export function watermarkBrandForItems(items, data) {
   return name ? { name, logo: '' } : brands[0];
 }
 
-// The brand for a WARRANTY certificate's watermark. A certificate snapshots the
-// FULL quotation cart in `items`, but each certificate exists for ONE warranty
-// template — the one its product class links to via `class.warrantyId`. Resolve
-// the watermark from only the items covered by that template, so on a
-// multi-brand quotation every certificate shows ITS OWN parent brand (never the
-// combined "A × B" text). Falls back to all items when the template/classes
-// can't be resolved (deleted template, legacy data).
-export function watermarkBrandForWarranty(templateId, items, data) {
-  const coveredClasses = new Set(
-    (data?.classes || []).filter(c => c.warrantyId === templateId).map(c => c.name)
-  );
-  const covered = (items || []).filter(it => coveredClasses.has(it.className));
-  return watermarkBrandForItems(covered.length ? covered : items, data);
+// The PARENT BRAND that owns a quotation — the single source of truth for the
+// document's header/footer branding. A quotation is locked to one brand at the
+// cart level (addToCart rejects cross-brand items), so normally exactly one
+// brand resolves; legacy mixed-brand quotations resolve to the dominant brand
+// (same ordering brandsForItems uses for the watermark).
+// Returns the FULL LIVE brand record (so renames and profile edits update every
+// document), a { id, name } snapshot stub when the brand was deleted, or null
+// for tools-only / empty item lists.
+export function resolveQuotationBrand(items, data) {
+  const top = brandsForItems(items, data)[0];
+  if (!top) return null;
+  const live = (data?.brands || []).find(b => b.id === top.id);
+  return live || { id: top.id, name: top.name };
+}
+
+// Document-number prefixes for a brand. `brand.docPrefix` (Settings → Parent
+// Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…);
+// brands without one — and the no-brand case — fall back to the global
+// Settings prefixes (NJ-Q / NJ-W).
+export function docPrefixesForBrand(brand, settings) {
+  const p = (brand?.docPrefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return {
+    quotation: p ? `${p}-Q` : (settings?.quotationPrefix || 'NJ-Q'),
+    warranty:  p ? `${p}-W` : (settings?.warrantyPrefix || 'NJ-W'),
+  };
+}
+
+// The company profile a quotation should print for its parent brand.
+// Returns { name, address, phone, email, gst, website, logo, isGlobalFallback }.
+//   • no brand          → the global Settings → Company Profile (NJ). The only
+//                         path where the document may show NJ data by default.
+//   • the "nj" brand    → per-field fallback to the global profile (the NJ
+//                         brand IS the company, so empty fields inherit).
+//   • any other brand   → ONLY that brand's own fields — never NJ data.
+export function companyProfileForBrand(brand, data) {
+  const company = data?.company || {};
+  if (!brand) {
+    return {
+      name: company.name || '', address: company.address || '', phone: company.phone || '',
+      email: company.email || '', gst: company.gst || '', website: company.website || '',
+      logo: '', isGlobalFallback: true,
+    };
+  }
+  const fromCompany = brand.id === 'nj';
+  const pick = (field) => brand[field] || (fromCompany ? company[field] : '') || '';
+  return {
+    name: fromCompany ? (company.name || brand.name || '') : (brand.name || ''),
+    address: pick('address'), phone: pick('phone'), email: pick('email'),
+    gst: pick('gst'), website: pick('website'),
+    logo: brand.logo || '', isGlobalFallback: false,
+  };
 }

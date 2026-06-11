@@ -1,38 +1,64 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3 } from 'lucide-react';
 import { clearQuotations, clearWarranties, deleteQuotation, deleteWarranty } from '../api';
 
+// Rows rendered initially / added per "Show more" click. The list itself can
+// hold any number of records — only this many reach the DOM at once, so the
+// page stays fast even with 100k+ history entries.
+const PAGE_SIZE = 100;
+
 export default function History({ type }) {
   const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, setActiveTab, showToast } = useAppContext();
   const [search, setSearch] = useState('');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const isQuotation = type === 'quotations';
-  
+
   // Load live data from context registry. Hidden "warranty-only" quotations
   // (backing records for standalone warranties) never appear in Quotation History.
   // Dedupe by id/warrantyNo so the same record never shows twice (id uniquely
   // identifies a record, so two entries with the same id are the same one).
-  const _seen = new Set();
-  const rawList = (isQuotation
-    ? (data.quotations || []).filter(q => !q.warrantyOnly)
-    : (data.warranty_certificates || [])
-  ).filter(r => {
-    const k = isQuotation ? r.id : (r.warrantyNo || r.id);
-    if (_seen.has(k)) return false;
-    _seen.add(k);
-    return true;
-  });
+  const rawList = useMemo(() => {
+    const seen = new Set();
+    return (isQuotation
+      ? (data.quotations || []).filter(q => !q.warrantyOnly)
+      : (data.warranty_certificates || [])
+    ).filter(r => {
+      const k = isQuotation ? r.id : (r.warrantyNo || r.id);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [isQuotation, data.quotations, data.warranty_certificates]);
 
   // Filter based on search term (ID or Customer Name)
-  const filteredData = rawList.filter(row => {
+  const filteredData = useMemo(() => {
     const term = search.toLowerCase().trim();
-    if (!term) return true;
+    if (!term) return rawList;
+    return rawList.filter(row => {
+      const id = (isQuotation ? row.id : (row.warrantyNo || row.id || '')).toLowerCase();
+      const name = (row.customer?.name || row.name || '').toLowerCase();
+      return id.includes(term) || name.includes(term);
+    });
+  }, [rawList, search, isQuotation]);
 
-    const id = (isQuotation ? row.id : (row.warrantyNo || row.id || '')).toLowerCase();
-    const name = (row.customer?.name || row.name || '').toLowerCase();
-    return id.includes(term) || name.includes(term);
-  });
+  // Warranty certs grouped by parent quotation ONCE — the per-row lookup is then
+  // O(1) instead of scanning the whole certificate list for every rendered row.
+  const certsByQuotation = useMemo(() => {
+    if (!isQuotation) return new Map();
+    const m = new Map();
+    (data.warranty_certificates || []).forEach(w => {
+      if (!w.quotationId) return;
+      const arr = m.get(w.quotationId);
+      if (arr) arr.push(w); else m.set(w.quotationId, [w]);
+    });
+    return m;
+  }, [isQuotation, data.warranty_certificates]);
+
+  // Only a window of rows reaches the DOM; "Show more" extends it.
+  const visibleData = filteredData.slice(0, visibleCount);
+  const setSearchAndReset = (v) => { setSearch(v); setVisibleCount(PAGE_SIZE); };
 
   const handleView = (row) => {
     if (isQuotation) {
@@ -162,9 +188,9 @@ export default function History({ type }) {
         onBlur={(e) => e.currentTarget.style.borderColor = 'var(--line)'}
         >
           <Search size={18} color="var(--ink-soft)" style={{ marginRight: '12px', flexShrink: 0 }}/>
-          <input 
+          <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setSearchAndReset(e.target.value)}
             placeholder={isQuotation ? "Search by customer name or quote ID..." : "Search by customer name or certificate ID..."} 
             style={{ border: 'none', background: 'transparent', flex: 1, fontSize: '14px', color: 'var(--ink)', width: '100%' }} 
           />
@@ -220,14 +246,12 @@ export default function History({ type }) {
 
         {/* Table Body Row List */}
         <div>
-          {filteredData.map((row, i) => {
+          {visibleData.map((row, i) => {
             const rowId = isQuotation ? row.id : (row.warrantyNo || row.id);
             const customerName = row.customer?.name || row.name || 'Anonymous Customer';
             const dateVal = row.date;
             // Warranties linked to this quotation (for the status chip + open button).
-            const rowCerts = isQuotation
-              ? (data.warranty_certificates || []).filter(w => w.quotationId === row.id)
-              : [];
+            const rowCerts = isQuotation ? (certsByQuotation.get(row.id) || []) : [];
 
             return (
               <div 
@@ -338,6 +362,25 @@ export default function History({ type }) {
               </div>
             );
           })}
+
+          {/* Windowed rendering: load the next page of rows on demand. */}
+          {filteredData.length > visibleCount && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '18px 24px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--ink-soft)', fontWeight: 600 }}>
+                Showing {visibleCount.toLocaleString('en-IN')} of {filteredData.length.toLocaleString('en-IN')} records
+              </span>
+              <button
+                onClick={() => setVisibleCount(c => c + 2 * PAGE_SIZE)}
+                className="hover-lift"
+                style={{
+                  padding: '10px 22px', background: 'var(--surface)', border: '1.5px solid var(--line)',
+                  borderRadius: 'var(--radius-full)', fontWeight: 700, fontSize: '13px', color: 'var(--ink)', cursor: 'pointer',
+                }}
+              >
+                Show more
+              </button>
+            </div>
+          )}
 
           {/* Empty Registry State */}
           {filteredData.length === 0 && (

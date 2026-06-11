@@ -139,6 +139,13 @@
 .qd2-brand-chev { flex-shrink: 0; color: var(--ink-soft); transition: transform 0.3s cubic-bezier(0.4,0,0.2,1); }
 .qd2-brand-head.is-open .qd2-brand-chev { transform: rotate(90deg); }
 
+/* Locked brand — the cart already holds another brand's products. Stays
+   clickable (click explains why via toast) but reads as unavailable. */
+.qd2-brand-head.is-locked { opacity: 0.45; cursor: not-allowed; }
+.qd2-brand-head.is-locked:hover { background: var(--bg-warm); border-color: transparent; }
+.qd2-brand-lock { margin-left: auto; flex-shrink: 0; color: var(--ink-soft); }
+.qd2-brand-lock + .qd2-brand-count { margin-left: 6px; }
+
 /* Collapsible class list — animates height via CSS grid 0fr → 1fr. */
 .qd2-brand-classes {
   display: grid; grid-template-rows: 0fr; opacity: 0;

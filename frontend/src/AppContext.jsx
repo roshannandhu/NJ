@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { DEFAULT_DATA } from './data';
+import { isToolItem } from './brands';
 import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus } from './api';
 
 const AppContext = createContext();
@@ -43,8 +44,8 @@ export function AppProvider({ children }) {
   // Identity of the quotation currently being drafted/edited in this session.
   // While set, regenerating from Checkout REUSES this id (the backend upserts by
   // id, so it UPDATES the same history record instead of inserting a duplicate).
-  // Cleared only when the user explicitly starts a new quotation (see startNew
-  // in QuotationDocument / reset in WarrantyDocument).
+  // Set by loadQuotationForEdit; cleared when a finalize completes (the draft
+  // session ends with the generated document) and by startNew/reset.
   const [activeQuotationId, setActiveQuotationId] = useState(null);
 
   // What the Checkout's Finalize button should produce, chosen on the Quotation
@@ -173,11 +174,39 @@ export function AppProvider({ children }) {
     }
   };
 
+  // The parent brand of a cart item, for the one-brand-per-quotation rule.
+  // Tools are brandless (never lock or get locked); other items use their
+  // add-time brandId snapshot, falling back to a live class lookup for items
+  // added via paths that don't stamp one.
+  const cartItemBrandId = (item) => {
+    if (isToolItem(item, data)) return null;
+    return item.brandId ?? (data.classes || []).find(c => c.name === item.className)?.brandId ?? null;
+  };
+
   const addToCart = (item) => {
     // item needs: id, name, price, qty, unit, color, image
     // `actualPrice` is the immutable master/Settings price captured at add-time.
     // `price` stays the effective (chargeable) price; lowering it in Checkout
     // turns the difference into an "offer" without ever touching actualPrice.
+
+    // ── One parent brand per quotation ──
+    // A quotation's branding (header, footer, watermark) comes from its parent
+    // brand, so the cart never mixes brands. Checked against the SET of brands
+    // already present (not just the first) so legacy mixed-brand quotations
+    // loaded for editing stay editable — only NEW brands are rejected.
+    const incomingBrand = cartItemBrandId(item);
+    if (incomingBrand) {
+      const existingBrands = new Set(cart.map(cartItemBrandId).filter(Boolean));
+      if (existingBrands.size > 0 && !existingBrands.has(incomingBrand)) {
+        const lockedId = existingBrands.values().next().value;
+        const lockedName = (data.brands || []).find(b => b.id === lockedId)?.name
+          || cart.find(ci => cartItemBrandId(ci) === lockedId)?.brandName
+          || 'another brand';
+        showToast(`This quotation already has ${lockedName} products — clear the cart to switch brands`, 'error');
+        return false;
+      }
+    }
+
     let updatedExisting = false;
     setCart(prev => {
       const existing = prev.find(cartItem => cartItem.id === item.id);
@@ -191,6 +220,7 @@ export function AppProvider({ children }) {
       );
     });
     showToast(updatedExisting ? `Updated ${item.name} quantity` : `Added ${item.name} to Cart`);
+    return true;
   };
 
   const updateCartQty = (cartId, newQty) => {

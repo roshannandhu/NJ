@@ -143,7 +143,11 @@ if __name__ == "__main__":
         except Exception as _e:
             log(f"AppUserModelID set failed: {_e}")
 
-        window = webview.create_window("NJ India Trading", URL, width=1280, height=820, min_size=(1024, 680))
+        # text_select=True: pywebview's default (False) injects user-select:none
+        # into the page, which breaks selecting/copying text and clipboard
+        # paste into fields like Quotation Settings -> Terms & Conditions.
+        window = webview.create_window("NJ India Trading", URL, width=1280, height=820, min_size=(1024, 680),
+                                       text_select=True)
 
         def force_window_icon():
             # Replace the default Python logo in the title bar / taskbar / alt-tab with

@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Image as ImageIcon,
   Layers,
+  Lock,
   Minus,
   Package,
   Plus,
@@ -14,6 +15,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { mediaUrl } from '../api';
+import { isToolItem } from '../brands';
 import { useAppContext } from '../AppContext';
 import LiveQuotation from './LiveQuotation';
 import NumberField from './NumberField';
@@ -31,7 +33,7 @@ const matchesSearch = (item, cls, search) => {
 };
 
 export default function QuotationDesk() {
-  const { data, addToCart, customer, setCustomer } = useAppContext();
+  const { data, cart, addToCart, customer, setCustomer, showToast } = useAppContext();
   const cur = data?.settings?.currencySymbol || '₹';
 
   const [catalogView, setCatalogView] = React.useState('products');
@@ -76,8 +78,36 @@ export default function QuotationDesk() {
     return groups;
   }, [brands, railClasses, toolsActive, toolClasses]);
 
+  // ── One parent brand per quotation ──
+  // The brands already in the cart (tools never count). While non-empty, every
+  // OTHER brand in the rail is locked: its accordion won't open and its products
+  // can't be added (addToCart also enforces this — the UI just makes it visible).
+  // A Set (not a single id) keeps legacy mixed-brand quotations editable.
+  const lockedByBrandIds = React.useMemo(() => {
+    const ids = new Set();
+    (cart || []).forEach(it => {
+      if (isToolItem(it, data)) return;
+      const id = it.brandId ?? (data.classes || []).find(c => c.name === it.className)?.brandId;
+      if (id) ids.add(id);
+    });
+    return ids;
+  }, [cart, data]);
+  // The orphan group's classes resolve to the fallback brand at add-time, so it
+  // locks exactly when that brand does.
+  const isBrandLocked = (brand) =>
+    lockedByBrandIds.size > 0 && !lockedByBrandIds.has(brand?.id || fallbackBrandId);
+  const lockedToName = React.useMemo(() => {
+    const firstId = lockedByBrandIds.values().next().value;
+    return (data.brands || []).find(b => b.id === firstId)?.name
+      || (cart || []).find(it => it.brandName)?.brandName || 'another brand';
+  }, [lockedByBrandIds, data.brands, cart]);
+  const showLockToast = () =>
+    showToast(`This quotation already has ${lockedToName} products — clear the cart to switch brands`, 'error');
+
   // Clear (never auto-pick) a stale selection so the rail opens fully collapsed:
   // first load shows only brands, and switching tabs never forces a class open.
+  // An open brand that becomes locked (e.g. a quotation was loaded for editing)
+  // collapses the same way.
   React.useEffect(() => {
     if (activeClassId && !railClasses.some(c => c.id === activeClassId)) {
       setActiveClassId(null);
@@ -85,7 +115,14 @@ export default function QuotationDesk() {
     if (openBrandId && !brandGroups.some(g => (g.brand?.id || 'orphan') === openBrandId)) {
       setOpenBrandId(null);
     }
-  }, [railClasses, activeClassId, brandGroups, openBrandId]);
+    if (!toolsActive && openBrandId) {
+      const openGroup = brandGroups.find(g => (g.brand?.id || 'orphan') === openBrandId);
+      if (openGroup && isBrandLocked(openGroup.brand)) {
+        setOpenBrandId(null);
+        setActiveClassId(null);
+      }
+    }
+  }, [railClasses, activeClassId, brandGroups, openBrandId, toolsActive, lockedByBrandIds]);
 
   // Brand accordion (single-open). Opening a brand reveals its classes and
   // auto-selects the first so the centre fills immediately; clicking the open
@@ -122,9 +159,11 @@ export default function QuotationDesk() {
     const qty = getSelectedQty(item);
     const price = getItemPrice(item);
     const isTool = cls?.type === 'tools' || item.classId === 'cls_tools';
-    const brandId = brandOf(cls);
+    // Tools are BRANDLESS — never stamp them with the fallback brand, or they
+    // would lock the cart to it and skew the document's brand resolution.
+    const brandId = isTool ? null : brandOf(cls);
     const brand = (data.brands || []).find(b => b.id === brandId);
-    addToCart({
+    const ok = addToCart({
       id: `${item.id}-${color}`,
       name: item.name,
       className: cls?.name || (isTool ? 'Tools & Accessories' : 'Products'),
@@ -134,6 +173,7 @@ export default function QuotationDesk() {
       // variety image (used by tools, which have no colours).
       price, qty, unit: item.unit, color, image: getSelectedColorInfo(item)?.image || item.image,
     });
+    if (!ok) return; // cross-brand add rejected — no "Added" flash
     setSelection(item.id, { qty: 1 });
     setAddedItems(prev => ({ ...prev, [item.id]: true }));
     setTimeout(() => setAddedItems(prev => ({ ...prev, [item.id]: false })), 1400);
@@ -143,10 +183,15 @@ export default function QuotationDesk() {
   const activeBrand = activeClass ? brands.find(b => b.id === brandOf(activeClass)) : null;
 
   // Center content: search results across the tab, else the active class's varieties.
+  // While the cart locks the quotation to a brand, Products-tab search only
+  // surfaces that brand's classes (Tools are brandless — never filtered).
   const searchResults = React.useMemo(() => {
     if (!normalizedSearch) return null;
-    return railClasses.flatMap(cls => getClassVarieties(cls.id));
-  }, [normalizedSearch, railClasses]);
+    const searchable = (!toolsActive && lockedByBrandIds.size > 0)
+      ? railClasses.filter(cls => lockedByBrandIds.has(brandOf(cls)))
+      : railClasses;
+    return searchable.flatMap(cls => getClassVarieties(cls.id));
+  }, [normalizedSearch, railClasses, toolsActive, lockedByBrandIds]);
   const gridItems = normalizedSearch ? searchResults : (activeClass ? getClassVarieties(activeClass.id) : []);
 
   // ── Variety card ─────────────────────────────────────────────────────────
@@ -278,20 +323,26 @@ export default function QuotationDesk() {
               const brandKey = brand?.id || 'orphan';
               // Tools tab: flat, brandless list — no brand header, always expanded.
               const flat = toolsActive;
+              const locked = !flat && isBrandLocked(brand);
               const isOpen = flat ? true : openBrandId === brandKey;
               return (
               <div className="qd2-brand-group" key={brandKey}>
                 {!flat && (
                 <button
                   type="button"
-                  className={`qd2-brand-head${isOpen ? ' is-open' : ''}`}
-                  onClick={() => toggleBrand(brand, items)}
+                  className={`qd2-brand-head${isOpen ? ' is-open' : ''}${locked ? ' is-locked' : ''}`}
+                  // A locked brand stays clickable so the user learns WHY it's
+                  // unavailable, but it never opens.
+                  onClick={() => (locked ? showLockToast() : toggleBrand(brand, items))}
                   aria-expanded={isOpen}
+                  aria-disabled={locked}
+                  title={locked ? `Quotation locked to ${lockedToName} — clear the cart to switch brands` : undefined}
                 >
                   {brand?.logo
                     ? <img src={mediaUrl(brand.logo)} alt="" />
                     : <span className="qd2-brand-mark">{(brand?.name || 'O').charAt(0).toUpperCase()}</span>}
                   <span className="qd2-brand-name">{brand?.name || 'Other'}</span>
+                  {locked && <Lock size={13} className="qd2-brand-lock" />}
                   <span className="qd2-brand-count">{items.length}</span>
                   <ChevronRight size={16} className="qd2-brand-chev" />
                 </button>

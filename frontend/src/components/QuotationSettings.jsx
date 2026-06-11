@@ -5,6 +5,7 @@ import {
   CheckCircle, Tag, Layers,
   ToggleLeft, ToggleRight, Save, Image as ImageIcon, X, Trash2, Star
 } from 'lucide-react';
+import NumberField from './NumberField';
 
 // ─── Default per-class Terms from the original NJ PDFs ───────────────────────
 const DEFAULT_CLASS_TERMS = {
@@ -298,7 +299,6 @@ export default function QuotationSettings() {
     validityDays:      initSettings.validityDays      ?? 20,
     currencySymbol:    initSettings.currencySymbol    ?? '₹',
     bankDetails:       initSettings.bankDetails       ?? '',
-    footerNote:        initSettings.footerNote        ?? 'Generated via NJ Quotation System',
     showProductImage:  initSettings.showProductImage  ?? true,
     showClassSpecBox:  initSettings.showClassSpecBox  ?? true,
     watermarkEnabled:  initSettings.watermarkEnabled  ?? true,
@@ -415,10 +415,12 @@ export default function QuotationSettings() {
             {settings.taxEnabled && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
                 <Field label="Default Tax Rate (%)">
-                  <input
-                    type="number" min="0" max="100" step="0.5"
+                  {/* NumberField normalises on blur/Enter (never per keystroke),
+                      so the value can be cleared and retyped freely. */}
+                  <NumberField
+                    min={0} max={100} step={0.5} allowFloat
                     value={settings.taxRate}
-                    onChange={e => setSettings(s => ({ ...s, taxRate: parseFloat(e.target.value) || 0 }))}
+                    onCommit={v => setSettings(s => ({ ...s, taxRate: v }))}
                     style={inputStyle}
                   />
                 </Field>
@@ -467,12 +469,13 @@ export default function QuotationSettings() {
                   label={settings.discountType === 'percent' ? 'Default Discount Rate (%)' : `Default Discount Amount (${settings.currencySymbol || '₹'})`}
                   hint="Pre-fills the discount field on checkout. Cashier can change it per order."
                 >
-                  <input
-                    type="number" min="0"
+                  <NumberField
+                    min={0}
                     max={settings.discountType === 'percent' ? 100 : undefined}
                     step={settings.discountType === 'percent' ? 0.5 : 1}
+                    allowFloat
                     value={settings.discountRate}
-                    onChange={e => setSettings(s => ({ ...s, discountRate: parseFloat(e.target.value) || 0 }))}
+                    onCommit={v => setSettings(s => ({ ...s, discountRate: v }))}
                     style={inputStyle}
                   />
                 </Field>
@@ -497,10 +500,10 @@ export default function QuotationSettings() {
           </Field>
 
           <Field label="Quotation Validity (Days)" hint="Shown at the bottom of every printed document">
-            <input
-              type="number" min="1"
+            <NumberField
+              min={1} fallback={30}
               value={settings.validityDays}
-              onChange={e => setSettings(s => ({ ...s, validityDays: parseInt(e.target.value) || 30 }))}
+              onCommit={v => setSettings(s => ({ ...s, validityDays: v }))}
               style={inputStyle}
             />
           </Field>
@@ -594,19 +597,8 @@ export default function QuotationSettings() {
             checked={settings.watermarkEnabled}
             onChange={v => setSettings(s => ({ ...s, watermarkEnabled: v }))}
             label="Brand Watermark on Documents"
-            desc="Faint parent-brand name behind quotations and warranty certificates. This is the default for all documents; each quotation or warranty can override it on its own page."
+            desc="Faint parent-brand name behind quotations. This is the default for all quotations; each one can override it on its own page."
           />
-        </div>
-
-        <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <Field label="Document Footer Note" hint="Appears at bottom-right of every printed document">
-            <input
-              value={settings.footerNote}
-              onChange={e => setSettings(s => ({ ...s, footerNote: e.target.value }))}
-              style={inputStyle}
-              placeholder="e.g. Generated via NJ Quotation System"
-            />
-          </Field>
         </div>
       </Section>
 

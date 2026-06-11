@@ -6,7 +6,7 @@ import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, share
 import { buildWarrantyCertsForQuotation } from '../warranty';
 import { paginateQuotation } from '../quotationPagination';
 import BrandWatermark from './BrandWatermark';
-import { watermarkBrandForItems, watermarkBrandForWarranty } from '../brands';
+import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // Preset design colors offered on the quotation page (first is the original plum).
@@ -107,7 +107,16 @@ function QuotationDocumentInner() {
   } = useAppContext();
 
   const settings = data.settings || {};
-  const company  = data.company  || {};
+  // The quotation's PARENT BRAND drives all document branding (header, footer,
+  // logo). Resolved LIVE from the line items (renaming a brand or editing its
+  // profile updates every document); the brandId stored at checkout is only a
+  // safety net for quotations whose items can no longer resolve a brand.
+  const docBrand = resolveQuotationBrand(generatedDoc?.items, data)
+    || (generatedDoc?.brandId ? (data.brands || []).find(b => b.id === generatedDoc.brandId) : null)
+    || null;
+  // Per-brand company profile; only the no-brand/NJ paths may show NJ data.
+  const profile = companyProfileForBrand(docBrand, data);
+  const njBranded = profile.isGlobalFallback || docBrand?.id === 'nj';
   const [isDownloading, setIsDownloading] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [isSharing, setIsSharing] = React.useState(false);
@@ -790,7 +799,6 @@ function QuotationDocumentInner() {
   // Watermark visibility: per-document override → global Settings default → on.
   // `??` (not `||`) so an explicit per-doc false beats a global true.
   const wmEnabled = doc.watermarkEnabled ?? settings.watermarkEnabled ?? true;
-  const certWmEnabled = activeCert ? (activeCert.watermarkEnabled ?? settings.watermarkEnabled ?? true) : true;
   // Advance Received row only shows when turned on. Default-on for quotations
   // that already carry an advance (set at checkout or before this toggle existed).
   const advanceOn = doc.advanceEnabled ?? ((doc.advanceReceived || 0) > 0);
@@ -1289,13 +1297,6 @@ function QuotationDocumentInner() {
                   <Edit3 size={18} /> Edit Warranty
                 </button>
               )}
-              {activeCert && (
-                <button onClick={() => persistCert({ ...activeCert, watermarkEnabled: !certWmEnabled })} className="hover-lift"
-                  title="Show or hide the faint brand-name watermark on this certificate"
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 18px', background: certWmEnabled ? 'var(--accent-soft)' : 'var(--surface)', color: certWmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', border: `1px solid ${certWmEnabled ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                  {certWmEnabled ? <Eye size={18} /> : <EyeOff size={18} />} Watermark: {certWmEnabled ? 'On' : 'Off'}
-                </button>
-              )}
               <button onClick={startNew} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <RotateCcw size={18} /> New Order
@@ -1316,6 +1317,19 @@ function QuotationDocumentInner() {
               const showSpec = settings.showClassSpecBox !== false && tileClasses.length > 0;
 
               // ── Fixed header band — repeated on every page ──
+              // All branding comes from the quotation's PARENT BRAND `profile`
+              // (see companyProfileForBrand). The hardcoded NJ strings survive
+              // only on the no-brand/global-fallback path; a non-NJ brand shows
+              // ONLY its own filled-in fields. Contact lines render
+              // conditionally — the paginator measures the band live, so a
+              // shorter/taller header is handled automatically.
+              const brandLogoSrc = docBrand?.logo ? mediaUrl(docBrand.logo)
+                : (njBranded && settings.quotationLogo) ? settings.quotationLogo : '';
+              const headerContact = [
+                profile.phone && `Ph: ${profile.phone}`,
+                profile.email,
+                profile.website,
+              ].filter(Boolean);
               const headerBand = () => (
               <div className="q-header-band" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: HDR.divMb }}>
@@ -1323,15 +1337,16 @@ function QuotationDocumentInner() {
                   width: HDR.h, height: HDR.h, border: '1px solid #E5E7EB', borderRadius: '14px',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                   background: '#FFFFFF', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', flexShrink: 0,
-                  overflow: 'hidden', padding: settings.quotationLogo ? '8px' : 0, boxSizing: 'border-box',
+                  overflow: 'hidden', padding: brandLogoSrc ? '8px' : 0, boxSizing: 'border-box',
                 }}>
-                  {settings.quotationLogo ? (
+                  {brandLogoSrc ? (
                     <img
-                      src={settings.quotationLogo}
-                      alt="Quotation logo"
+                      src={brandLogoSrc}
+                      alt="Brand logo"
+                      crossOrigin="anonymous"
                       style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                     />
-                  ) : (
+                  ) : njBranded ? (
                     <>
                       <div style={{
                         fontSize: HDR.font, fontWeight: '900', lineHeight: '1',
@@ -1342,17 +1357,33 @@ function QuotationDocumentInner() {
                         NJINDIA.IN
                       </div>
                     </>
+                  ) : (
+                    // Non-NJ brand with no logo: its own initial, never the NJ mark.
+                    <div style={{
+                      fontSize: HDR.font, fontWeight: '900', lineHeight: '1',
+                      background: `linear-gradient(135deg, ${PLUM} 0%, #3a506b 100%)`,
+                      WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                    }}>{(docBrand?.name || '?').charAt(0).toUpperCase()}</div>
                   )}
                 </div>
 
                 <div style={{ textAlign: 'right' }}>
                   <h1 style={{ fontSize: HDR.h1, fontWeight: '900', margin: '0 0 4px 0', letterSpacing: '-0.01em', color: '#1A1A1A', textTransform: 'uppercase' }}>
-                    {company.name || 'NJ India Trading Pvt. Ltd.'}
+                    {profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')}
                   </h1>
                   <div style={{ fontSize: HDR.info, lineHeight: HDR.lh, color: '#555' }}>
-                    {(company.address || 'KNH Building, Neelithod Bridge, Parakkal\nRamanattukara PO, Kozhikode — 673633')
-                      .split('\n').map((l, i) => <span key={i}>{l}<br /></span>)}
-                    Ph: {company.phone || '+91 73566 08633'} &nbsp;|&nbsp; {company.website || 'www.njindia.in'}
+                    {(profile.address || (profile.isGlobalFallback ? 'KNH Building, Neelithod Bridge, Parakkal\nRamanattukara PO, Kozhikode — 673633' : ''))
+                      .split('\n').filter(Boolean).map((l, i) => <span key={i}>{l}<br /></span>)}
+                    {(headerContact.length > 0 || profile.isGlobalFallback) && (
+                      <span>
+                        {headerContact.length > 0
+                          ? headerContact.map((part, i) => (
+                              <span key={i}>{i > 0 && <> &nbsp;|&nbsp; </>}{part}</span>
+                            ))
+                          : <>Ph: +91 73566 08633 &nbsp;|&nbsp; www.njindia.in</>}
+                      </span>
+                    )}
+                    {profile.gst && <><br />GSTIN: {profile.gst}</>}
                   </div>
                 </div>
               </div>
@@ -1847,7 +1878,6 @@ function QuotationDocumentInner() {
                 fontSize: D.subFont, color: '#777', display: 'flex', justifyContent: 'space-between', fontWeight: 500,
               }}>
                 <div>Valid for <EditableCell value={doc.validityDays ?? settings.validityDays ?? 30} numeric onSave={v => updateField('validityDays', v)} style={{ width: '40px', textAlign: 'center' }} /> days from date of issue.</div>
-                <div>{settings.footerNote || 'NJ Quotation System'}</div>
               </div>
               </div>
               );
@@ -1915,7 +1945,7 @@ function QuotationDocumentInner() {
 
                 {/* ── PAGE FOOTER (every page) ── */}
                 <div className="q-page-footer" style={{ flexShrink: 0, borderTop: '1px solid #E5E7EB', paddingTop: '6px', fontSize: '10px', fontWeight: 600, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{company.name || 'NJ India Trading Pvt. Ltd.'} — Quotation {doc.id}</span>
+                  <span>{profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')} — Quotation {doc.id}</span>
                   <span>Page {pi + 1} of {pageList.length}</span>
                 </div>
               </div>
@@ -1954,8 +1984,6 @@ function QuotationDocumentInner() {
             <WarrantyCertificate
               template={tmpl}
               openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-              brand={watermarkBrandForWarranty(tmpl.id, activeCert?.items || doc.items, data)}
-              watermarkEnabled={certWmEnabled}
               variant="certificate"
               customer={activeCert.customer || {}}
               certData={cd}

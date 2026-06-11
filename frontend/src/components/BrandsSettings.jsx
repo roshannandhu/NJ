@@ -20,7 +20,11 @@ export default function BrandsSettings() {
 
   const addBrand = () => setBrands(prev => [
     ...prev,
-    { id: genId(), name: '', logo: '', description: '', order: prev.length, active: true },
+    {
+      id: genId(), name: '', logo: '', description: '', order: prev.length, active: true,
+      // Per-brand company profile — printed on this brand's quotations.
+      address: '', phone: '', email: '', gst: '', website: '', docPrefix: '',
+    },
   ]);
 
   const move = (id, dir) => setBrands(prev => {
@@ -154,6 +158,47 @@ export default function BrandsSettings() {
                     <span style={labelStyle}>Description</span>
                     <textarea value={brand.description || ''} onChange={e => update(brand.id, 'description', e.target.value)} style={{ ...inputStyle, minHeight: '56px', resize: 'vertical' }} placeholder="Short description of this brand" />
                   </div>
+                  {/* Per-brand company profile — the quotation header/footer print
+                      THIS data when the quotation belongs to this brand. */}
+                  <div style={{ borderTop: '1px solid var(--line)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div>
+                      <span style={labelStyle}>Company Profile</span>
+                      <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>
+                        Shown in the header of this brand's quotations.
+                        {brand.id === 'nj' && ' Empty fields fall back to the original NJ company details.'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={labelStyle}>Address</span>
+                      <textarea value={brand.address || ''} onChange={e => update(brand.id, 'address', e.target.value)} style={{ ...inputStyle, minHeight: '56px', resize: 'vertical' }} placeholder={'Street, building\nCity — PIN, State'} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={labelStyle}>Phone</span>
+                        <input value={brand.phone || ''} onChange={e => update(brand.id, 'phone', e.target.value)} style={inputStyle} placeholder="+91 …" />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={labelStyle}>Email</span>
+                        <input value={brand.email || ''} onChange={e => update(brand.id, 'email', e.target.value)} style={inputStyle} placeholder="sales@brand.com" />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={labelStyle}>GST Number</span>
+                        <input value={brand.gst || ''} onChange={e => update(brand.id, 'gst', e.target.value)} style={inputStyle} placeholder="GSTIN" />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={labelStyle}>Website</span>
+                        <input value={brand.website || ''} onChange={e => update(brand.id, 'website', e.target.value)} style={inputStyle} placeholder="www.brand.com" />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={labelStyle}>Document Prefix</span>
+                        <input value={brand.docPrefix || ''} onChange={e => update(brand.id, 'docPrefix', e.target.value.toUpperCase())} style={inputStyle} placeholder="e.g. HL → HL-Q-… / HL-W-…" maxLength={6} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>
+                      Document Prefix brands this brand's quotation &amp; warranty numbers (e.g. HL-Q-482913). Leave blank to use the global NJ-Q / NJ-W prefixes from Quotation Settings.
+                    </div>
+                  </div>
+
                   <div onClick={() => update(brand.id, 'active', !brand.active)} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     {brand.active ? <ToggleRight size={26} color="var(--accent)" strokeWidth={2} /> : <ToggleLeft size={26} color="var(--ink-soft)" strokeWidth={2} />}
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}>{brand.active ? 'Active' : 'Inactive'}</span>

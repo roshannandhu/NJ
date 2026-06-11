@@ -1,9 +1,8 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2 } from 'lucide-react';
 import { createWarranty } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
-import { watermarkBrandForWarranty } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -60,9 +59,6 @@ export default function WarrantyDocument() {
   const certData = doc.certData || {};
   const parentQuote = data.quotations?.find(q => q.id === doc.quotationId) || null;
   const isStandalone = !parentQuote || parentQuote.warrantyOnly;
-  const items = doc.items || [];
-  // Watermark: per-certificate override → global Settings default → on.
-  const wmEnabled = doc.watermarkEnabled ?? (data.settings || {}).watermarkEnabled ?? true;
 
   // ── Persist every edit immediately (local + backend) ────────────────────────
   const certKey = (w) => w.id || w.warrantyNo;
@@ -184,11 +180,6 @@ export default function WarrantyDocument() {
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
               <Share2 size={15}/> Share
             </button>
-            <button onClick={() => persistWarranty({ ...doc, watermarkEnabled: !wmEnabled })} className="hover-lift"
-              title="Show or hide the faint brand-name watermark on this certificate"
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background: wmEnabled ? 'var(--accent-soft)' : 'var(--surface)', color: wmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', border:`1px solid ${wmEnabled ? 'var(--accent)' : 'var(--line)'}`, borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-              {wmEnabled ? <Eye size={15}/> : <EyeOff size={15}/>} Watermark: {wmEnabled ? 'On' : 'Off'}
-            </button>
             <button onClick={startNew} className="hover-lift"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
               <RotateCcw size={15}/> New Order
@@ -204,8 +195,6 @@ export default function WarrantyDocument() {
         <WarrantyCertificate
           template={template}
           openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-          brand={watermarkBrandForWarranty(template?.id, items, data)}
-          watermarkEnabled={wmEnabled}
           variant="customer"
           customer={customer}
           certData={certData}

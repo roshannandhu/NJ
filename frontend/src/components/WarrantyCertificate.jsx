@@ -1,5 +1,4 @@
 import React from 'react';
-import BrandWatermark from './BrandWatermark';
 import { Edit3, Check } from 'lucide-react';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -221,9 +220,9 @@ function CertificateDetails({ customer, certData: cd, template, fallbackDate, wa
 
 // ════════════════════════════════════════════════════════════════════════════
 export default function WarrantyCertificate({
-  template, openingText, brand, variant = 'customer',
+  template, openingText, variant = 'customer',
   customer = {}, certData = {}, fallbackDate = '', invoiceFallback = '',
-  edit = null, domId = 'warrantyDoc', watermarkEnabled = true,
+  edit = null, domId = 'warrantyDoc',
   warrantyNo = '', orderNo = '',
 }) {
   const [editingTerms, setEditingTerms] = React.useState(false);
@@ -345,8 +344,6 @@ export default function WarrantyCertificate({
   return (
     <div className="wc-doc" id={domId} style={{ '--wc-term-scale': fit.scale }}>
       <style dangerouslySetInnerHTML={{ __html: WC_CSS }} />
-
-      {watermarkEnabled && <BrandWatermark brand={brand} fallbackText="WARRANTY" />}
 
       {/* ══ HEADER ══ */}
       <div className="wc-header">
@@ -496,13 +493,6 @@ const WC_CSS = `
     pointer-events: none; z-index: 1;
   }
   .wc-doc .wc-header { position: relative; text-align: center; padding-bottom: 10px; border-bottom: 1px solid #e2e2e2; flex-shrink: 0; }
-  /* BrandWatermark emits .wd-wm / .wd-wm-logo — style them here so the faint
-     watermark stays centred (the old .warranty-doc .wd-wm rule no longer matches
-     this .wc-doc root). */
-  .wc-doc .wd-wm { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-30deg);
-    font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none; color: rgba(0,0,0,0.07);
-    white-space: nowrap; letter-spacing: 0.1em; font-family: 'Times New Roman', serif; z-index: 0; }
-  .wc-doc .wd-wm-logo { max-width: 55%; max-height: 50%; object-fit: contain; opacity: 0.10; filter: grayscale(100%); display: block; margin: 0 auto; }
 
   .wc-logo { font-family: 'Playfair Display', Georgia, serif; font-size: 60pt; font-weight: 900; letter-spacing: 0.04em; color: #111; margin: 0; line-height: 1.02; }
   .wc-logo-sub { font-size: 9pt; letter-spacing: 0.28em; text-transform: uppercase; color: #444; font-weight: 700; margin: 2px 0 0; font-family: 'Times New Roman', Times, Georgia, serif; }

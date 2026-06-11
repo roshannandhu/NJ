@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3, Wallet } from 'lucide-react';
 import { createQuotation, createWarranty } from '../api';
+import { resolveQuotationBrand, docPrefixesForBrand } from '../brands';
 import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
 import NumberField from './NumberField';
 
@@ -145,15 +146,20 @@ export default function Checkout() {
 
     // Reuse the current draft's id if we're still editing the same session, so
     // the backend (which upserts by id) UPDATES the existing quotation instead
-    // of inserting a duplicate. A brand-new id is only minted for a fresh draft
-    // (activeQuotationId is null until the first generate; cleared by "New").
+    // of inserting a duplicate. activeQuotationId is set by loadQuotationForEdit
+    // (History / "Edit in Checkout") and cleared when a finalize completes, so a
+    // fresh desk cart always mints a new id instead of overwriting the last one.
     //
     // A standalone warranty-only finalize is backed by its OWN hidden quotation,
     // so it must NEVER reuse — and overwrite — the active quotation draft: doing
     // so would clobber a real quotation (marking it warrantyOnly and zeroing its
     // total). So warranty-only always mints a fresh id; only quote/both reuse it.
     const reuseId = intent !== 'warranty' ? activeQuotationId : null;
-    const qNo = reuseId || `${settings.quotationPrefix || 'NJ-Q'}-${Date.now().toString().slice(-6)}`;
+    // The quotation's parent brand: brands its number (HL-Q-… via docPrefix)
+    // and is stored on the snapshot. Rendering still resolves the brand LIVE
+    // from the items, so renames/profile edits update existing quotations.
+    const qBrand = resolveQuotationBrand(cart, data);
+    const qNo = reuseId || `${docPrefixesForBrand(qBrand, settings).quotation}-${Date.now().toString().slice(-6)}`;
     const isRegenerate = !!reuseId;
     setActiveQuotationId(qNo);
 
@@ -176,6 +182,8 @@ export default function Checkout() {
       items: [...cart],
       customer: { ...customer },
       managerName: managerName.trim(), // the manager this quotation is made under
+      brandId: qBrand?.id || null,
+      brandName: qBrand?.name || '',
 
       subtotal,
       actualSubtotal,
@@ -244,8 +252,17 @@ export default function Checkout() {
 
     setGenerateIntent?.('quote'); // reset so later edits default to a plain quote
 
+    // The draft session ends with the generated document: empty the working
+    // cart (so the Quotation Desk starts fresh — no stale products from the
+    // last order) and drop the draft id (so the NEXT desk cart mints a new
+    // quotation instead of overwriting this one). Editing this quotation later
+    // goes through loadQuotationForEdit, which rebuilds cart + id from the
+    // saved record.
+    setCart([]);
+    setCustomer({ name: '', phone: '', email: '', address: '' });
+    setActiveQuotationId(null);
+
     if (intent === 'warranty') {
-      setActiveQuotationId(null); // standalone warranty, not a quotation draft
       setActiveWarranty(certs[0]);
       setCurrentView('warranty_document');
       showToast(certs.length > 1 ? `${certs.length} warranties created` : 'Warranty created', "success");

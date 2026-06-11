@@ -5,6 +5,7 @@ import {
   Plus, Image as ImageIcon, Trash2, Package, Palette, FileText, CheckCircle2, Loader,
   Award, Wrench, X, ChevronLeft, ChevronRight, Copy, GripVertical, Pencil,
 } from 'lucide-react';
+import NumberField from './NumberField';
 import './ProductsCatalog.css';
 
 const newId = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -232,8 +233,11 @@ export default function ProductsClassesSettings() {
                             </optgroup>
                           )}
                         </select></div>
+                      {/* NumberField keeps a local string while focused, so the value
+                          can be cleared/retyped freely; it normalises to a number
+                          (empty -> 0) only on blur/Enter — never per keystroke. */}
                       <div className="set-field"><span className="set-label">Base Price (₹)</span>
-                        <input className="set-input" type="number" value={editVar.basePrice} onChange={e => updateVariety(editVar.id, { basePrice: parseFloat(e.target.value) || 0 })} /></div>
+                        <NumberField className="set-input" allowFloat value={editVar.basePrice} onCommit={v => updateVariety(editVar.id, { basePrice: v })} /></div>
                       <div className="set-field"><span className="set-label">Unit</span>
                         <input className="set-input" list="pc-units" value={editVar.unit} onChange={e => updateVariety(editVar.id, { unit: e.target.value })} />
                         <datalist id="pc-units"><option value="sqft" /><option value="ft" /><option value="piece" /><option value="nos" /><option value="box" /></datalist></div>
@@ -276,7 +280,8 @@ export default function ProductsClassesSettings() {
                                     <input className="set-input" value={t.hex || '#000000'} onChange={e => updateType(editVar.id, editTypeIdx, { hex: e.target.value })} />
                                   </div></div>
                                 <div className="set-field"><span className="set-label">Price Offset (₹)</span>
-                                  <input className="set-input" type="number" value={t.offset ?? 0} onChange={e => updateType(editVar.id, editTypeIdx, { offset: parseFloat(e.target.value) || 0 })} /></div>
+                                  {/* min={null}: offsets may be negative (a colour can be cheaper). */}
+                                  <NumberField className="set-input" allowFloat min={null} fallback={0} value={t.offset ?? 0} onCommit={v => updateType(editVar.id, editTypeIdx, { offset: v })} /></div>
                                 <div className="set-field span2"><span className="set-label">Swatch Image (optional)</span>
                                   <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                                     <label className="set-img" style={{ width: 84, height: 84, background: t.image ? imagePreview(t.image) : (t.hex || 'var(--bg-warm)') }}>

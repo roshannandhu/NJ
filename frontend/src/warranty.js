@@ -11,6 +11,8 @@
 // upserts by id, never duplicating, and callers filter out ids that already
 // exist so a user's edits to an existing certificate are never overwritten).
 
+import { resolveQuotationBrand, companyProfileForBrand, docPrefixesForBrand } from './brands';
+
 // Resolve the unique warranty templates linked to the product classes on a
 // quotation. Tool/accessory classes have no warrantyId, so they're naturally
 // excluded. Each entry carries `forClass` so the certificate knows its product.
@@ -50,7 +52,12 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
   if (templates.length === 0) return [];
 
   const qSuffix = String(quotation.id || '').replace(/^.*?-/, '');
-  const wPrefix = settings.warrantyPrefix || 'NJ-W';
+  // Warranty numbers carry the parent brand's prefix (HL-W-… via docPrefix),
+  // matching the quotation's numbering; the seller printed on the certificate
+  // is the brand's company profile (global profile for NJ/no-brand).
+  const qBrand = resolveQuotationBrand(quotation.items, data);
+  const profile = companyProfileForBrand(qBrand, data);
+  const wPrefix = docPrefixesForBrand(qBrand, settings).warranty;
   const certIdFor = (tmpl) =>
     `${wPrefix}-${qSuffix}-${String(tmpl.id).replace(/[^a-zA-Z0-9]+/g, '').slice(0, 12)}`;
 
@@ -70,7 +77,7 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
       warrantyNo: wNo,
       template: tmpl,
       certData: {
-        sellerName: data.company?.name || 'NOUFAL & JABBAR INTERNATIONAL LLP',
+        sellerName: profile.name || data.company?.name || 'NOUFAL & JABBAR INTERNATIONAL LLP',
         batchNo: selectedItem?.batchNo || '',
         purchaseDate: today,
         siteAddress: (quotation.customer || {}).address || '',
