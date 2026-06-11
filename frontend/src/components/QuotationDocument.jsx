@@ -235,7 +235,9 @@ function QuotationDocumentInner() {
   // Per-quotation product image for a class (overrides the catalogue), keyed like
   // classDescriptions. Stored on the doc so it only affects THIS quotation.
   const updateClassImage = (key, url) => commitDoc({ classImages: { ...(generatedDoc.classImages || {}), [key]: url } });
-  const updateTerms     = (text) => commitDoc({ terms: text.split('\n') });
+  // termsCustomized: hand-edited terms stick to THIS quotation; without the
+  // flag, re-finalizing from Checkout refreshes terms from Settings.
+  const updateTerms     = (text) => commitDoc({ terms: text.split('\n'), termsCustomized: true });
   const updateBankField = (field, value) => commitDoc({ bank: { ...(generatedDoc.bank || {}), [field]: value } });
   // Set a line's unit price. With no active offers, keep price == actualPrice so the
   // single "Actual Price" column drives the total; otherwise edit each independently.

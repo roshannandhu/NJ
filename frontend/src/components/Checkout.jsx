@@ -173,8 +173,11 @@ export default function Checkout() {
     const selectedBank = activeBanks.find(b => b.id === selectedBankId) || null;
     const bankChanged = (selectedBankId || '') !== (base.bankId || '');
     // Copy the latest common Terms & Conditions onto the quotation; editable per-quotation later.
-    const commonTerms = (settings.commonTerms || '')
-      .split('\n').map(t => t.trim()).filter(Boolean);
+    // Legacy configs may hold commonTerms as an ARRAY (the old reset/seed path) —
+    // normalise before splitting or finalize throws and nothing is generated.
+    const commonTermsText = Array.isArray(settings.commonTerms)
+      ? settings.commonTerms.join('\n') : (settings.commonTerms || '');
+    const commonTerms = commonTermsText.split('\n').map(t => t.trim()).filter(Boolean);
 
     const snapshot = {
       ...base,
@@ -209,7 +212,11 @@ export default function Checkout() {
       bank: selectedBank ? { ...selectedBank } : (!bankChanged ? (base.bank ?? null) : null),
       bankId: selectedBankId || '',
       // Editable, per-quotation fields: preserve on update, seed fresh on create.
-      terms: isRegenerate ? (base.terms ?? commonTerms) : commonTerms,
+      // Terms FOLLOW the latest Settings text on every finalize unless this
+      // quotation's terms were hand-edited on its document (termsCustomized) —
+      // otherwise editing Settings → Common T&C never reached updated quotations.
+      terms: isRegenerate && base.termsCustomized ? (base.terms ?? commonTerms) : commonTerms,
+      termsCustomized: isRegenerate ? !!base.termsCustomized : false,
       classDescriptions: isRegenerate ? (base.classDescriptions ?? {}) : {},
       notes: isRegenerate ? (base.notes ?? '') : '',
       delivery: isRegenerate ? (base.delivery ?? '') : '',

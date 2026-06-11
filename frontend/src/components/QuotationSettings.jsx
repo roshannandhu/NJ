@@ -305,7 +305,10 @@ export default function QuotationSettings() {
     quotationLogo:     initSettings.quotationLogo     ?? '',
     // Single common Terms & Conditions applied to every NEW quotation. Seeded from any
     // existing default-class terms (or the PDF default) so it is never empty on first load.
-    commonTerms:       initSettings.commonTerms       ?? initSettings.classTerms?.default ?? DEFAULT_CLASS_TERMS.default,
+    // Always a NEWLINE STRING — the seeds are arrays, and an array saved here breaks
+    // the textarea (comma-joined) and crashes Checkout's split('\n') on finalize.
+    commonTerms: (v => Array.isArray(v) ? v.join('\n') : (v ?? ''))(
+      initSettings.commonTerms ?? initSettings.classTerms?.default ?? DEFAULT_CLASS_TERMS.default),
   });
 
   // Multiple bank accounts (CHANGE 4). Each: { id, bankName, accountName, accountNumber,
@@ -632,7 +635,7 @@ export default function QuotationSettings() {
             />
             <div style={{ textAlign: 'right' }}>
               <button
-                onClick={() => setSettings(s => ({ ...s, commonTerms: DEFAULT_CLASS_TERMS.default }))}
+                onClick={() => setSettings(s => ({ ...s, commonTerms: DEFAULT_CLASS_TERMS.default.join('\n') }))}
                 style={{
                   background: 'none', border: 'none', color: 'var(--accent)', fontSize: '11px',
                   fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: '2px 4px',
