@@ -350,9 +350,10 @@ export default function WarrantyCertificate({
 
       {/* ══ HEADER ══ */}
       <div className="wc-header">
-        {/* Auto-generated identifiers, top-right above the header border. */}
+        {/* Auto-generated identifiers — absolutely positioned at the header's
+            top-right, beside the logo, so they NEVER add vertical space. */}
         {(warrantyNo || orderNo) && (
-          <div style={{ textAlign: 'right', fontSize: '8.5pt', lineHeight: 1.35, color: '#555', fontWeight: 700 }}>
+          <div style={{ position: 'absolute', top: 0, right: 0, textAlign: 'right', fontSize: '8.5pt', lineHeight: 1.35, color: '#555', fontWeight: 700 }}>
             {warrantyNo && <div>Certificate No: {warrantyNo}</div>}
             {orderNo && <div>Order No: {orderNo}</div>}
           </div>
@@ -494,7 +495,7 @@ const WC_CSS = `
     border: 1.5px solid #8b1a1a; border-radius: 3px;
     pointer-events: none; z-index: 1;
   }
-  .wc-doc .wc-header { text-align: center; padding-bottom: 10px; border-bottom: 1px solid #e2e2e2; flex-shrink: 0; }
+  .wc-doc .wc-header { position: relative; text-align: center; padding-bottom: 10px; border-bottom: 1px solid #e2e2e2; flex-shrink: 0; }
   /* BrandWatermark emits .wd-wm / .wd-wm-logo — style them here so the faint
      watermark stays centred (the old .warranty-doc .wd-wm rule no longer matches
      this .wc-doc root). */

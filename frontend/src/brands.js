@@ -47,3 +47,18 @@ export function watermarkBrandForItems(items, data) {
   const name = brands.map(b => b.name).filter(Boolean).join(' × ');
   return name ? { name, logo: '' } : brands[0];
 }
+
+// The brand for a WARRANTY certificate's watermark. A certificate snapshots the
+// FULL quotation cart in `items`, but each certificate exists for ONE warranty
+// template — the one its product class links to via `class.warrantyId`. Resolve
+// the watermark from only the items covered by that template, so on a
+// multi-brand quotation every certificate shows ITS OWN parent brand (never the
+// combined "A × B" text). Falls back to all items when the template/classes
+// can't be resolved (deleted template, legacy data).
+export function watermarkBrandForWarranty(templateId, items, data) {
+  const coveredClasses = new Set(
+    (data?.classes || []).filter(c => c.warrantyId === templateId).map(c => c.name)
+  );
+  const covered = (items || []).filter(it => coveredClasses.has(it.className));
+  return watermarkBrandForItems(covered.length ? covered : items, data);
+}

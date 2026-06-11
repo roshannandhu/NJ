@@ -3,7 +3,7 @@ import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, Eye, EyeOff } from 'lucide-react';
 import { createWarranty } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
-import { watermarkBrandForItems } from '../brands';
+import { watermarkBrandForWarranty } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -204,7 +204,7 @@ export default function WarrantyDocument() {
         <WarrantyCertificate
           template={template}
           openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-          brand={watermarkBrandForItems(items, data)}
+          brand={watermarkBrandForWarranty(template?.id, items, data)}
           watermarkEnabled={wmEnabled}
           variant="customer"
           customer={customer}

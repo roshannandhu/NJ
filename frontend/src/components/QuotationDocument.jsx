@@ -4,8 +4,9 @@ import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, I
 import { mediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
+import { paginateQuotation } from '../quotationPagination';
 import BrandWatermark from './BrandWatermark';
-import { watermarkBrandForItems } from '../brands';
+import { watermarkBrandForItems, watermarkBrandForWarranty } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // Preset design colors offered on the quotation page (first is the original plum).
@@ -47,17 +48,19 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   );
 }
 
-// ── Single-page "fit engine" for the quotation sheet ─────────────────────────
-// The sheet is a fixed A4 page (794×1123px, overflow:hidden). The header band
-// (logo + company details) is a FIXED size on every quotation. Everything below
-// — the whole body, INCLUDING terms & conditions — is scaled by one continuous
-// CSS variable `--q-fit`, applied to every font/padding/margin/image size via
-// calc(). A measure-and-converge layout effect grows short content to fill the
-// page and shrinks long content so it never spills to page 2. Because the scale
-// is font/length based (not a CSS transform, which the PDF engine neutralises),
-// the exported PDF matches the screen exactly. Mirrors WarrantyCertificate's
-// --wc-term-scale engine, but simpler: the fixed header means the available
-// height is constant, so `ideal = qFit × avail / natural` is a near-direct solve.
+// ── Fixed-size, multi-page quotation layout ──────────────────────────────────
+// Every quotation element renders at a FIXED size — fonts, row heights, spacing
+// and logos never scale. When the content outgrows one A4 page (794×1123px) it
+// flows onto additional pages with clean breaks (no row or section is ever
+// cut): a layout effect measures each content block at its fixed size and a
+// pure paginator (quotationPagination.js) assigns the FLOWING blocks (spec
+// table, item rows, totals) to pages. Every page repeats the same fixed chrome
+// — header band, customer block, Terms & Conditions, validity row and a slim
+// "Page X of Y" footer — and because that chrome renders from the one shared
+// document state, an edit made on ANY page reflects on every page.
+//
+// QFIT survives from the old single-page fit engine: with `--q-fit` never set,
+// every QFIT(n) resolves to plain `n`px (the var's default is 1).
 const QFIT = (n) => `calc(${n}px * var(--q-fit, 1))`;
 // Fixed header band sizes (never scale) — the loosest legacy tier's values.
 const HDR = { h: '90px', font: '42px', h1: '22px', info: '11px', lh: 1.65, divMb: '12px' };
@@ -82,94 +85,8 @@ const QD = {
   termsMb: QFIT(5),
   custMb:  QFIT(20),
 };
-// Fit-engine tunables. Q_MAX caps how large a sparse quote grows (so a 1-item
-// quote fills the page without looking comical); Q_MIN is the densest a long
-// quote shrinks to before the clip guard accepts it. Damped to absorb the small
-// non-linearities from image boxes and text re-wrapping at the column edges.
-const Q_MIN = 0.42, Q_MAX = 1.6, Q_DAMP = 0.6, Q_ITER_MAX = 18, A4 = 1123;
-
-// One installation-guide page: its own fixed A4 (overflow:hidden, so content and
-// the brand watermark are clipped to the page — same as the quotation sheet and
-// warranty certificate). The header band (label + class name) and footer are a
-// FIXED size; the guidance body is scaled by a per-page --q-fit so short guidance
-// grows to fill the page and long guidance shrinks to one page. Each page owns its
-// own fit loop (one per in-cart class), mirroring the quotation engine above.
-function InstallPage({ c, brand, companyName, docId, onSave }) {
-  const pageRef = React.useRef(null);
-  const bodyRef = React.useRef(null);
-  const [iFit, setIFit] = React.useState(1);
-  const [tick, setTick] = React.useState(0);
-  const stRef = React.useRef({ iter: 0, frozen: false });
-
-  // Reset to 1 for a different class; re-arm (keep scale) when its text/fonts change.
-  React.useLayoutEffect(() => { stRef.current = { iter: 0, frozen: false }; setIFit(1); }, [c.key]);
-  React.useLayoutEffect(() => { stRef.current = { iter: 0, frozen: false }; }, [c.text, tick]);
-
-  React.useLayoutEffect(() => {
-    const st = stRef.current;
-    if (st.frozen) return;
-    const page = pageRef.current, body = bodyRef.current;
-    if (!page || !body) return;
-    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
-    const headEl = page.querySelector('.nj-install-head');
-    const footEl = page.querySelector('.nj-install-foot');
-    const headH = headEl ? headEl.offsetHeight : 0;
-    const footH = footEl ? footEl.offsetHeight : 0;
-    const cs = getComputedStyle(page);
-    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const avail = A4 - padV - headH - footH - 2;   // CONSTANT — header/footer fixed
-    const natural = body.scrollHeight;
-    if (natural < 1 || avail < 40) return;
-    st.iter += 1;
-    const ideal = iFit * (avail / natural);
-    if (natural > avail) {
-      if (iFit <= Q_MIN + 0.0005) { st.frozen = true; return; }
-      setIFit(+Math.max(Q_MIN, ideal).toFixed(3));
-      return;
-    }
-    const next = +Math.min(Q_MAX, Math.max(Q_MIN, iFit + (ideal - iFit) * Q_DAMP)).toFixed(3);
-    if (st.iter >= Q_ITER_MAX || Math.abs(next - iFit) < 0.004) { st.frozen = true; return; }
-    setIFit(next);
-  }, [iFit, c.text, tick]);
-
-  React.useEffect(() => {
-    let alive = true;
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (alive) setTick(t => t + 1); });
-    return () => { alive = false; };
-  }, []);
-
-  return (
-    <div ref={pageRef} className="nj-install-page" style={{
-      width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
-      background: '#FFFFFF', color: '#1A1A1A', padding: '64px',
-      fontFamily: '"Inter", system-ui, sans-serif', position: 'relative',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.07)', border: '1px solid #E5E7EB',
-    }}>
-      <BrandWatermark brand={brand} fallbackText="" />
-      <div className="nj-install-head" style={{ flexShrink: 0, borderBottom: '2px solid #1A1A1A', paddingBottom: '14px', marginBottom: '24px' }}>
-        <div style={{ fontSize: '12px', letterSpacing: '0.18em', textTransform: 'uppercase', color: '#c2410c', fontWeight: 700 }}>Installation Guide</div>
-        <div style={{ fontSize: '26px', fontWeight: 800, marginTop: '4px' }}>{c.name}</div>
-      </div>
-      <div ref={bodyRef} style={{ flexShrink: 0, fontSize: QFIT(14.5), lineHeight: 1.75, color: '#27272a', '--q-fit': iFit }}>
-        <EditableCell
-          value={c.text}
-          onSave={onSave}
-          multiline
-          placeholder="click to add installation guidance"
-          renderValue={(val) => <div style={{ whiteSpace: 'pre-wrap' }}>{val}</div>}
-          style={{ display: 'block', width: '100%' }}
-        />
-      </div>
-      {/* Spacer pins the footer to the bottom; shrinks to ~0 as the body fills. */}
-      <div style={{ flex: '1 1 auto' }} />
-      <div className="nj-install-foot" style={{ flexShrink: 0, marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #E5E7EB', fontSize: '11px', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
-        <span>{companyName}</span>
-        <span>Quotation {docId}</span>
-      </div>
-    </div>
-  );
-}
+// A4 page height in px at 96dpi (794×1123 = 210×297mm).
+const A4 = 1123;
 
 function QuotationDocumentInner() {
   const {
@@ -306,8 +223,6 @@ function QuotationDocumentInner() {
   const removeItemRow   = (cartId) => commitDoc({ items: generatedDoc.items.filter(it => it.cartId !== cartId) });
   const addItemRow      = () => commitDoc({ items: [...generatedDoc.items, { cartId: 'custom_' + Date.now(), id: 'custom', name: 'Custom Service / Item', className: 'Custom', price: 0, actualPrice: 0, qty: 1, unit: 'nos', color: '' }] });
   const updateClassDesc = (key, value) => commitDoc({ classDescriptions: { ...(generatedDoc.classDescriptions || {}), [key]: value } });
-  // Per-quotation installation-guidance override (edited inline on the 2nd+ page).
-  const updateInstallOverride = (key, value) => commitDoc({ installOverrides: { ...(generatedDoc.installOverrides || {}), [key]: value } });
   // Per-quotation product image for a class (overrides the catalogue), keyed like
   // classDescriptions. Stored on the doc so it only affects THIS quotation.
   const updateClassImage = (key, url) => commitDoc({ classImages: { ...(generatedDoc.classImages || {}), [key]: url } });
@@ -345,10 +260,11 @@ function QuotationDocumentInner() {
     showToast("Generating PDF...", "info");
 
     try {
-      // One engine: full-size, multi-page A4 (never shrunk). Identical to Share.
-      // With installation guidance on, append one clean page per class.
+      // One engine: full-size A4, one capture per quotation page (never shrunk).
+      // Identical to Share. With installation guidance on, append one clean page
+      // per class.
       const els = collectQuotationPdfEls();
-      const pdf = els.length > 1 ? await elementsToPdf(els) : await elementToPdf(element);
+      const pdf = await elementsToPdf(els);
       const r = await finishPdfSave(pdf, qName, dest);
       showToast(r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded!", "success");
     } catch (error) {
@@ -393,123 +309,149 @@ function QuotationDocumentInner() {
   });
 
 
-  const quotationSheetRef = React.useRef(null);
-  const qBodyRef = React.useRef(null);
-  // Continuous body scale (the value of the `--q-fit` CSS variable on `.q-body`).
-  const [qFit, setQFit] = React.useState(1);
-  // Last-resort content reduction: when a quote is so dense it can't fit even at
-  // the minimum scale, the SUPPLEMENTARY "Product details with image" table is
-  // dropped so the ESSENTIAL items + total + terms are always visible (they must
-  // never be clipped). Mirrors the old densest tier, which also dropped it.
-  const [dropSpec, setDropSpec] = React.useState(false);
-  // Bumped once fonts / images finish loading, to re-fit against final heights.
-  const [qFontTick, setQFontTick] = React.useState(0);
-  // Per-content convergence budget. `frozen` stops re-entry once we've settled or
-  // hit the floor, so the loop can never cascade renders.
-  const qFitStRef = React.useRef({ iter: 0, frozen: false });
+  // ── Pagination state ──
+  // `pages` = array of pages, each an ordered list of typed segments (see
+  // quotationPagination.js). `null` means "measuring pass": render EVERYTHING on
+  // one (overflowing, clipped) page so the layout effect below can measure each
+  // block at its fixed size before the first paint shows a settled layout.
+  const qPagesWrapRef = React.useRef(null);
+  const [qPages, setQPages] = React.useState(null);
+  // Bumped once fonts / images finish loading, to re-measure final heights.
+  const [layoutTick, setLayoutTick] = React.useState(0);
+  // Re-render budget per content state — stops any measure/assign oscillation
+  // (sub-pixel wrap jitter) from cascading renders.
+  const qPagIterRef = React.useRef(0);
 
-  // Reset the scale to 1 for a genuinely different document (new/imported/loaded
-  // quotation), keyed on id so an inline edit re-fits from the CURRENT scale
-  // instead of snapping back to 1 (no flicker).
+  // A genuinely different document (new/imported/loaded): restart from the
+  // measuring pass.
   React.useLayoutEffect(() => {
-    qFitStRef.current = { iter: 0, frozen: false };
-    setQFit(1);
-    setDropSpec(false);
+    qPagIterRef.current = 0;
+    setQPages(null);
   }, [generatedDoc?.id]);
 
-  // Re-arm the convergence budget whenever the document content (any edit), the
-  // font/image tick, or the dropped-spec state changes — WITHOUT resetting the
-  // scale — so edits and the content-reduction step re-fit smoothly.
+  // Re-arm the budget on any content edit or font/image tick — WITHOUT dropping
+  // back to the single measuring page (no flicker; blocks are re-measured in
+  // place across the already-rendered pages).
   React.useLayoutEffect(() => {
-    qFitStRef.current = { iter: 0, frozen: false };
-  }, [generatedDoc, qFontTick, dropSpec]);
+    qPagIterRef.current = 0;
+  }, [generatedDoc, layoutTick]);
 
-  // The fit loop: measure the body's natural height against the constant space
-  // below the fixed header, then grow (to fill) or shrink (to never overflow).
+  // Measure-and-assign: read every block's fixed-size height (offsetHeight is
+  // transform-immune, so the on-screen preview scale can't pollute it), then ask
+  // the pure paginator for the page assignment. Heights are position-independent
+  // (constant content width on every page; items table is table-layout:fixed),
+  // so the second pass measures identical values and converges.
+  //
+  // Fixed per-page chrome (header band, customer block, Terms & Conditions,
+  // validity row, page footer) repeats on EVERY page — its height is subtracted
+  // from the budget; only spec/item rows + totals flow between pages.
   React.useLayoutEffect(() => {
-    const st = qFitStRef.current;
-    if (st.frozen) return;
-    const body = qBodyRef.current, sheet = quotationSheetRef.current;
-    if (!body || !sheet) return;
-    // Never re-fit mid-edit (would reflow under the caret).
     if (document.body.getAttribute('data-quotation-editing') === 'true') return;
+    const root = qPagesWrapRef.current;
+    if (!root) return;
+    if (qPagIterRef.current >= 8) return;
 
-    const headerEl = sheet.querySelector('.q-header-band');
-    const headerH = headerEl ? headerEl.offsetHeight : 0;
-    const cs = getComputedStyle(sheet);
-    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-    const avail = A4 - headerH - padV - 2;        // CONSTANT — header is fixed
-    const natural = body.scrollHeight;             // moves with --q-fit
-    if (natural < 1 || avail < 40) return;
+    const block = {};
+    root.querySelectorAll('[data-q-block]').forEach(el => { block[el.dataset.qBlock] = el.offsetHeight; });
+    const collectRows = (attr) => {
+      const out = [];
+      root.querySelectorAll(`[${attr}]`).forEach(el => {
+        const i = parseInt(el.getAttribute(attr), 10);
+        if (!Number.isNaN(i)) out[i] = el.offsetHeight;
+      });
+      return out;
+    };
+    const itemRows = collectRows('data-q-item-row');
+    const specRows = collectRows('data-q-spec-row');
+    const theadEl = (k) => root.querySelector(`[data-q-thead="${k}"]`);
+    const headBandEl = root.querySelector('.q-header-band');
+    const pageFootEl = root.querySelector('.q-page-footer');
+    if (!headBandEl || itemRows.length !== doc.items.length) return; // mid-update DOM; next render re-runs
 
-    st.iter += 1;
-    const ideal = qFit * (avail / natural);
+    // Flowing-content budget: A4 minus the page padding (PAGE_PAD: 40px top +
+    // bottom) and ALL the per-page chrome, plus a small safety margin for table
+    // borders / sub-pixel rounding.
+    const chromeH = headBandEl.offsetHeight
+      + (block.cust || 0)
+      + (block.termsBlock || 0)
+      + (block.validity || 0)
+      + (pageFootEl ? pageFootEl.offsetHeight : 0);
+    const availH = A4 - 80 - chromeH - 6;
+    if (availH < 100) return; // chrome alone fills the page — keep last assignment
 
-    // Clip guard: while the body overflows the page, always shrink (never accept
-    // an overflowing scale until we're already at the floor).
-    if (natural > avail) {
-      if (qFit <= Q_MIN + 0.0005) {
-        // Can't shrink further. As a last resort, drop the supplementary product-
-        // detail image table so the items + total + terms are never clipped, then
-        // let the loop re-fit (and grow) the lighter body.
-        const canDropSpec = settings.showClassSpecBox !== false && tileClasses.length > 0 && !dropSpec;
-        if (canDropSpec) { setDropSpec(true); return; }
-        st.frozen = true; return;
-      }
-      setQFit(+Math.max(Q_MIN, ideal).toFixed(3));
-      return;
+    const next = paginateQuotation({
+      availH,
+      heights: {
+        specHead: theadEl('spec') ? theadEl('spec').offsetHeight : 0,
+        specRows,
+        specMb: 24,           // the spec table's fixed bottom margin (QD.tblMb)
+        itemsHead: theadEl('items') ? theadEl('items').offsetHeight : 0,
+        itemRows,
+        itemsMb: 24,          // the items table's fixed bottom margin (QD.tblMb)
+        addRow: block.addRow || 0,
+        payTotals: block.payTotals || 0,
+        // When Delivery/Notes are both empty the rows are screen-only edit
+        // affordances (excluded from the PDF) — cost 0 so they can never force
+        // an extra page that would export nearly empty.
+        deliveryNotes: (doc.delivery || doc.notes) ? (block.deliveryNotes || 0) : 0,
+      },
+    });
+
+    if (JSON.stringify(next) !== JSON.stringify(qPages)) {
+      qPagIterRef.current += 1;
+      setQPages(next);
     }
-    // Fits — damped step toward filling the page.
-    const next = +Math.min(Q_MAX, Math.max(Q_MIN, qFit + (ideal - qFit) * Q_DAMP)).toFixed(3);
-    if (st.iter >= Q_ITER_MAX || Math.abs(next - qFit) < 0.004) { st.frozen = true; return; }
-    setQFit(next);
-  }, [qFit, generatedDoc, qFontTick, dropSpec]);
+  }, [qPages, generatedDoc, layoutTick]);
 
-  // Re-fit once web fonts are ready (font metrics change line wrapping/heights).
+  // Re-measure once web fonts are ready (font metrics change line wrapping).
   React.useEffect(() => {
     let alive = true;
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (alive) setQFontTick(t => t + 1); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (alive) setLayoutTick(t => t + 1); });
     return () => { alive = false; };
   }, []);
 
-  // Re-fit once the body's images (thumbnails, brand logo, bank QR) finish loading
-  // — the first measure often runs before they have size, under-filling the page.
+  // Re-measure once the pages' images (thumbnails, brand logo, bank QR) finish
+  // loading — the first measure often runs before they have size.
   React.useEffect(() => {
-    const body = qBodyRef.current;
-    if (!body) return;
-    const imgs = Array.from(body.querySelectorAll('img'));
+    const root = qPagesWrapRef.current;
+    if (!root) return;
+    const imgs = Array.from(root.querySelectorAll('img'));
     if (imgs.every(im => im.complete)) return;
     let done = false;
     const onDone = () => {
       if (done) return;
-      if (imgs.every(im => im.complete)) { done = true; setQFontTick(t => t + 1); }
+      if (imgs.every(im => im.complete)) { done = true; setLayoutTick(t => t + 1); }
     };
     imgs.forEach(im => { im.addEventListener('load', onDone); im.addEventListener('error', onDone); });
     return () => imgs.forEach(im => { im.removeEventListener('load', onDone); im.removeEventListener('error', onDone); });
   }, [generatedDoc]);
 
-  // Preview-fit (screen only): scale the settled 794px sheet down to its on-screen
-  // pane. This is a CSS transform, which the PDF engine neutralises per capture,
-  // so the export stays full-size. Kept separate from the fit loop, which measures
-  // untransformed layout heights and is unaffected by this.
+  // Preview-fit (screen only): scale every 794px page down to the on-screen pane.
+  // The transform is applied PER PAGE (not on the wrapper) so the PDF engine's
+  // per-element neutralisation works unchanged, and measured offsetHeights are
+  // unaffected (transforms don't change layout space).
   React.useLayoutEffect(() => {
-    const el = quotationSheetRef.current;
-    if (!el) return;
-    el.style.transform = 'none';
-    el.style.transformOrigin = 'top center';
-    el.style.marginBottom = '0';
-    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
-    const parent = el.parentElement;
-    const availW = parent ? parent.clientWidth : el.offsetWidth;
-    const naturalW = el.offsetWidth;
-    const s = Math.min(1, availW / naturalW);
-    if (s < 1) {
-      const naturalH = el.scrollHeight;
-      el.style.transform = `scale(${s})`;
+    const root = qPagesWrapRef.current;
+    if (!root) return;
+    const els = Array.from(root.querySelectorAll('.q-sheet-page'));
+    els.forEach(el => {
+      el.style.transform = 'none';
       el.style.transformOrigin = 'top center';
-      el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
+      el.style.marginBottom = '0';
+    });
+    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
+    const parent = root.parentElement;
+    const availW = parent ? parent.clientWidth : root.offsetWidth;
+    const s = Math.min(1, availW / 794);
+    if (s < 1) {
+      els.forEach(el => {
+        const naturalH = el.scrollHeight;
+        el.style.transform = `scale(${s})`;
+        el.style.transformOrigin = 'top center';
+        el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
+      });
     }
-  }, [generatedDoc, qFit]);
+  }, [generatedDoc, qPages]);
 
   // ── Per-class product image: click-to-upload + Ctrl+V paste ────────────────
   // `imgTargetKey` is the class image box the user last clicked; Ctrl+V drops a
@@ -598,10 +540,7 @@ function QuotationDocumentInner() {
     try {
       let file;
       if (activeTabId === 'quotation') {
-        const els = collectQuotationPdfEls();
-        file = els.length > 1
-          ? await elementsToPdfFile(els, quotationFileName(generatedDoc, custName))
-          : await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName));
+        file = await elementsToPdfFile(collectQuotationPdfEls(), quotationFileName(generatedDoc, custName));
       } else {
         file = await elementToPdfFile(document.getElementById('warrantyDoc'), warrantyFileName(activeCert || { id: activeTabId }, custName));
       }
@@ -617,12 +556,7 @@ function QuotationDocumentInner() {
     try {
       const files = [];
       setActiveTab('quotation'); await _wait(450);
-      {
-        const els = collectQuotationPdfEls();
-        files.push(els.length > 1
-          ? await elementsToPdfFile(els, quotationFileName(generatedDoc, custName))
-          : await elementToPdfFile(document.getElementById('quotationSheet'), quotationFileName(generatedDoc, custName)));
-      }
+      files.push(await elementsToPdfFile(collectQuotationPdfEls(), quotationFileName(generatedDoc, custName)));
       for (const w of bundledWarranties) {
         try {
           setActiveTab(w.warrantyNo || w.id); await _wait(450);
@@ -691,58 +625,10 @@ function QuotationDocumentInner() {
     return itemClass?.id || resolveClassKey(className);
   };
 
-  // Installation guidance for a class (settings.classInstall, keyed like classSpecs).
-  const getInstallText = (className) => {
-    const kwKey = resolveClassKey(className);
-    const idKey = data.classes?.find(c => c.name === className)?.id;
-    const t = settings.classInstall?.[idKey] ?? settings.classInstall?.[kwKey];
-    return (typeof t === 'string' ? t : '').trim();
-  };
-  // Classes in THIS quotation that have non-empty guidance (one PDF page each),
-  // only when the per-quotation toggle is on. Empty-guidance classes are skipped.
-  // Per-quotation override (edited inline on the installation page) wins over the
-  // catalogue text. Keyed like classDescriptions (classDescKey → class.id).
-  const installTextFor = (className) => {
-    const key = classDescKey(className);
-    const ov = doc.installOverrides?.[key];
-    return (ov != null && ov !== '') ? ov : getInstallText(className);
-  };
-  // One visible + printed A4 page per in-cart class that has guidance (toggle on).
-  const installClasses = doc.includeInstallation
-    ? tileClasses.map(name => ({ name, key: classDescKey(name), text: installTextFor(name) })).filter(c => c.text)
-    : [];
-
-  // Build the ordered element list for the PDF: page 1 (sheet) + one page per
-  // install class. Used by download + share so both produce the same document.
-  const collectQuotationPdfEls = () => {
-    const sheet = document.getElementById('quotationSheet');
-    const pages = installClasses.length
-      ? Array.from(document.querySelectorAll('.nj-install-page'))
-      : [];
-    return [sheet, ...pages].filter(Boolean);
-  };
-
-  // Preview-fit the visible installation pages to the pane width, mirroring the
-  // quotation sheet's scaling. The PDF engine neutralises this transform per
-  // captured page, so export stays full-size. Skipped while a field is being
-  // edited so editing never reflows.
-  const installPagesRef = React.useRef(null);
-  React.useLayoutEffect(() => {
-    const el = installPagesRef.current;
-    if (!el) return;
-    el.style.transform = 'none';
-    el.style.transformOrigin = 'top center';
-    el.style.marginBottom = '0';
-    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
-    const parent = el.parentElement;
-    const availW = parent ? parent.clientWidth : el.offsetWidth;
-    const s = Math.min(1, availW / 794);
-    if (s < 1) {
-      const naturalH = el.scrollHeight;
-      el.style.transform = `scale(${s})`;
-      el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
-    }
-  });
+  // Build the ordered element list for the PDF: every quotation page, in order.
+  // Used by download + share so both produce the same document.
+  const collectQuotationPdfEls = () =>
+    Array.from(document.querySelectorAll('.q-sheet-page'));
 
   // Resolve the Parent Brand for a class on the quotation. Prefers the per-item
   // brand snapshot (historical accuracy: rename-proof), then the live class→brand
@@ -1061,9 +947,12 @@ function QuotationDocumentInner() {
            never appears in the exported PDF / print). */
         .q-editable { border-radius: 2px; transition: background 0.15s, outline 0.15s; }
         .q-editable:hover { background: rgba(138,24,86,0.06); outline: 1px dashed rgba(138,24,86,0.4); }
-        body[data-quotation-editing="true"] #quotationSheet { transform: none !important; margin-bottom: 0 !important; }
+        body[data-quotation-editing="true"] .q-sheet-page { transform: none !important; margin-bottom: 0 !important; }
+        /* While typing, let a growing textarea near a page bottom stay visible
+           (pagination recomputes on blur and re-clips). */
+        body[data-quotation-editing="true"] .q-sheet-page { overflow: visible !important; }
 
-        .warranty-doc .wd-wm, #quotationSheet .wd-wm, .nj-install-page .wd-wm {
+        .warranty-doc .wd-wm, .q-sheet-page .wd-wm {
           position: absolute; top: 50%; left: 50%;
           transform: translate(-50%,-50%) rotate(-30deg);
           font-size: 72pt; font-weight: 900; pointer-events: none; user-select: none;
@@ -1170,7 +1059,7 @@ function QuotationDocumentInner() {
             margin: 0 !important;
             overflow: visible !important;
           }
-          .printable-sheet, .warranty-doc {
+          .warranty-doc {
             box-shadow: none !important;
             margin: 0 !important;
             padding: 10px 0px !important;
@@ -1181,9 +1070,25 @@ function QuotationDocumentInner() {
             border: none !important;
             background: #ffffff !important;
           }
-          /* Reset the on-screen single-page fit-scale so the quotation prints at
-             full size and flows across multiple pages (matching Download/Share). */
-          #quotationSheet { transform: none !important; margin-bottom: 0 !important; }
+          /* Quotation pages are FIXED A4 sheets: print one per page, breaking
+             cleanly between pages — matching Download/Share exactly. The zoom
+             fits the 794px sheet into the printable width inside the @page
+             margins (Chromium honours zoom in print; this app runs in WebView2). */
+          .q-pages { gap: 0 !important; margin: 0 !important; }
+          .q-sheet-page {
+            width: 794px !important;
+            max-width: 794px !important;
+            height: 1123px !important;
+            margin: 0 auto !important;
+            overflow: hidden !important;
+            box-shadow: none !important;
+            border: none !important;
+            transform: none !important;
+            zoom: 0.8;
+            page-break-after: always;
+            break-after: page;
+          }
+          .q-sheet-page:last-child { page-break-after: auto; break-after: auto; }
           .printable-sheet tr, .printable-sheet thead { page-break-inside: avoid; }
           @page {
             size: A4;
@@ -1311,7 +1216,7 @@ function QuotationDocumentInner() {
                    sits outside #quotationSheet so it never reaches the PDF) ── */}
             <div className="actions-bar" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: '8px', width: '100%', maxWidth: '860px', flexWrap: 'wrap' }}>
               <button onClick={() => commitDoc({ watermarkEnabled: !wmEnabled })} className="hover-lift"
-                title="Show or hide the faint brand-name watermark on this quotation (and its installation pages)"
+                title="Show or hide the faint brand-name watermark on this quotation"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: wmEnabled ? 'var(--accent-soft)' : 'var(--surface)', color: wmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', border: `1px solid ${wmEnabled ? 'var(--accent)' : 'var(--line)'}`, borderRadius: 'var(--radius-full)', fontWeight: 600, fontSize: '13px', cursor: 'pointer' }}>
                 {wmEnabled ? <Eye size={15} /> : <EyeOff size={15} />} Watermark: {wmEnabled ? 'On' : 'Off'}
               </button>
@@ -1403,27 +1308,15 @@ function QuotationDocumentInner() {
             <>
             {/* ── VIEW A: PRINTABLE QUOTATION SHEET (inline editable) ── */}
             {(() => {
-              // Body sizes are scaled by the `--q-fit` variable on `.q-body`; the
-              // header band uses fixed `HDR` constants. See the fit engine above.
+              // All sizes are FIXED — QFIT resolves to plain px because `--q-fit`
+              // is never set on the quotation. The body is split into typed
+              // segments; the paginator assigns them to as many A4 pages as
+              // needed (see the measure-and-assign effect + quotationPagination).
               const D = QD;
-              return (
-            <div
-              className="printable-sheet"
-              id="quotationSheet"
-              ref={quotationSheetRef}
-              style={{
-                width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
-                display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                background: '#FFFFFF',
-                padding: PAGE_PAD, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
-                color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
-                border: '1px solid #E5E7EB', position: 'relative',
-              }}>
+              const showSpec = settings.showClassSpecBox !== false && tileClasses.length > 0;
 
-              {/* ── Brand watermark (faint, behind content; nothing if no brand or toggled off) ── */}
-              {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />}
-
-              {/* ── HEADER BAND (FIXED size on every quotation — never scaled) ── */}
+              // ── Fixed header band — repeated on every page ──
+              const headerBand = () => (
               <div className="q-header-band" style={{ flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: HDR.divMb }}>
                 <div style={{
@@ -1467,10 +1360,11 @@ function QuotationDocumentInner() {
               {/* Thick divider */}
               <div style={{ borderBottom: '2.5px solid #1A1A1A', marginBottom: HDR.divMb }} />
               </div>
-              {/* ── SCALABLE BODY (everything below the header fits to one page) ── */}
-              <div className="q-body" ref={qBodyRef} style={{ '--q-fit': qFit, flexShrink: 0 }}>
+              );
 
-              {/* Customer + Date */}
+              // ── Customer + Date (atomic block) ──
+              const renderCust = () => (
+              <div data-q-block="cust" style={{ display: 'flow-root', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px', fontSize: D.tcFs }}>
                 <div>
                   <span style={{ color: '#555', fontWeight: '600' }}>Quotation To : </span>
@@ -1494,11 +1388,14 @@ function QuotationDocumentInner() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: D.custMb }}>
                 <div style={{ width: '100px', borderBottom: '3px solid #1A1A1A' }} />
               </div>
+              </div>
+              );
 
-              {/* TABLE 1 — PRODUCT DETAILS WITH IMAGE */}
-              {settings.showClassSpecBox !== false && tileClasses.length > 0 && !dropSpec && (
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb, pageBreakInside: 'avoid' }}>
-                  <thead>
+              // ── TABLE 1 — PRODUCT DETAILS WITH IMAGE (class rows [from, to);
+              //    the header repeats on every page a chunk lands on) ──
+              const renderSpec = (from, to) => (
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb }}>
+                  <thead data-q-thead="spec">
                     <tr>
                       <th colSpan="2" style={{
                         ...TB, background: PLUM, color: '#FFFFFF',
@@ -1510,7 +1407,8 @@ function QuotationDocumentInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tileClasses.map((className, idx) => {
+                    {tileClasses.slice(from, to).map((className, k) => {
+                      const idx = from + k;
                       const itemClass = data.classes?.find(c => c.name === className);
                       const brandColor = itemClass ? itemClass.color : PLUM;
                       const imgKey = classDescKey(className);
@@ -1528,7 +1426,7 @@ function QuotationDocumentInner() {
                         </svg>
                       );
                       return (
-                        <tr key={idx}>
+                        <tr key={idx} data-q-spec-row={idx}>
                           <td style={{ ...TB, padding: D.specPad, width: '65%', verticalAlign: 'top' }}>
                             {(() => {
                               const brand = getBrandForClass(className);
@@ -1612,12 +1510,12 @@ function QuotationDocumentInner() {
                     })}
                   </tbody>
                 </table>
-              )}
+              );
 
-              {/* TABLE 2 — ITEMISED ESTIMATE (image + actual/offer pricing) */}
-              {(() => {
-                // Base thumbnail size; rendered scaled by --q-fit (QFIT). All column
-                // widths scale by the same factor so the table stays aligned.
+              // ── TABLE 2 — ITEMISED ESTIMATE (item rows [from, to); the header
+              //    repeats on every page a chunk lands on) ──
+              const renderItems = (from, to) => {
+                // Fixed thumbnail size (QFIT resolves to plain px now).
                 const thumb = 46;
                 // Build columns dynamically; the OFFER PRICE column only appears
                 // when at least one line carries an offer (keeps it uncluttered).
@@ -1631,8 +1529,14 @@ function QuotationDocumentInner() {
                   { key: 'total',  label: 'TOTAL',        align: 'right',  w: QFIT(106) },
                 ];
                 return (
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb }}>
-                <thead>
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb, tableLayout: 'fixed' }}>
+                {/* Explicit column widths + table-layout:fixed keep every row's
+                    height identical no matter which page's table instance hosts
+                    it — required for stable pagination measurements. */}
+                <colgroup>
+                  {cols.map(col => <col key={col.key} style={col.w === 'auto' ? undefined : { width: col.w }} />)}
+                </colgroup>
+                <thead data-q-thead="items">
                   <tr>
                     {cols.map(col => (
                       <th key={col.key} style={{
@@ -1647,14 +1551,15 @@ function QuotationDocumentInner() {
                   </tr>
                 </thead>
                 <tbody>
-                  {doc.items.map((item, i) => {
+                  {doc.items.slice(from, to).map((item, k) => {
+                    const i = from + k;
                     const offer = hasOffer(item);
                     const actualUnit = rowActualUnit(item);
                     const itemClass = data.classes?.find(c => c.name === item.className);
                     const brandColor = itemClass ? itemClass.color : PLUM;
                     const imgSrc = item.image ? mediaUrl(item.image) : '';
                     return (
-                    <tr key={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
+                    <tr key={item.cartId ?? i} data-q-item-row={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
                         {i + 1}
                       </td>
@@ -1708,17 +1613,23 @@ function QuotationDocumentInner() {
                 </tbody>
               </table>
                 );
-              })()}
+              };
 
-              {/* Add line item (edit affordance, hidden in print/PDF) */}
-              <div className="q-edit-only" data-html2canvas-ignore="true" style={{ marginTop: `calc(-1 * ${D.tblMb})`, marginBottom: D.tblMb }}>
-                <button onClick={addItemRow}
-                  style={{ padding: '6px 12px', border: '1.5px dashed #c9b3c0', borderRadius: '6px', background: 'transparent', color: PLUM, fontWeight: 700, fontSize: D.subFont, cursor: 'pointer' }}>
-                  + Add line item
-                </button>
+              // ── Add line item (edit affordance, hidden in print/PDF) ──
+              const renderAddRow = () => (
+              <div className="q-edit-only" data-q-block="addRow" data-html2canvas-ignore="true" style={{ display: 'flow-root' }}>
+                <div style={{ marginTop: `calc(-1 * ${D.tblMb})`, marginBottom: D.tblMb }}>
+                  <button onClick={addItemRow}
+                    style={{ padding: '6px 12px', border: '1.5px dashed #c9b3c0', borderRadius: '6px', background: 'transparent', color: PLUM, fontWeight: 700, fontSize: D.subFont, cursor: 'pointer' }}>
+                    + Add line item
+                  </button>
+                </div>
               </div>
+              );
 
-              {/* ── PAYMENT (left, plain text) + TOTALS (right) ── */}
+              // ── PAYMENT (left, plain text) + TOTALS (right) — atomic, never split ──
+              const renderPayTotals = () => (
+              <div data-q-block="payTotals" style={{ display: 'flow-root' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: QFIT(28), marginBottom: D.tblMb }}>
 
                 {/* Payment block (left) — plain text, no box. Structured bank → legacy → picker. */}
@@ -1864,9 +1775,13 @@ function QuotationDocumentInner() {
 
                 </div>
               </div>
+              </div>
+              );
 
-              {/* Delivery / Notes (optional, per-quotation) */}
-              {/* Delivery & Notes — filled rows print; empty rows are edit-only (excluded from PDF) */}
+              // ── Delivery / Notes (optional, per-quotation) — atomic ──
+              // Filled rows print; empty rows are edit-only (excluded from PDF).
+              const renderDeliveryNotes = () => (
+              <div data-q-block="deliveryNotes" style={{ display: 'flow-root' }}>
               <div style={{ marginTop: D.tcMt, fontSize: D.tcFs, color: '#444', lineHeight: D.tcLineH }}>
                 <div className={doc.delivery ? undefined : 'q-edit-only'} {...(doc.delivery ? {} : { 'data-html2canvas-ignore': 'true' })}>
                   <strong style={{ color: '#1A1A1A' }}>Delivery: </strong>
@@ -1877,44 +1792,56 @@ function QuotationDocumentInner() {
                   <EditableCell value={doc.notes} onSave={v => updateField('notes', v)} multiline placeholder="add notes" />
                 </div>
               </div>
-
-              {/* Terms and Conditions — always 2-column, scaled with the body (D.*) */}
-              <div style={{ marginTop: D.tcMt }}>
-                <h4 style={{
-                  color: '#E53E3E', fontSize: D.subFont, fontWeight: '900',
-                  letterSpacing: '0.08em', textTransform: 'uppercase',
-                  marginBottom: QFIT(10), borderBottom: '2px solid #1A1A1A', paddingBottom: '4px',
-                }}>
-                  Terms and Conditions :
-                </h4>
-                <EditableCell
-                  value={quotationTerms.join('\n')}
-                  onSave={v => updateTerms(v)}
-                  multiline
-                  placeholder="click to add terms (one per line)"
-                  style={{ display: 'block', width: '100%' }}
-                  renderValue={() => {
-                    const terms = quotationTerms;
-                    const mid = Math.ceil(terms.length / 2);
-                    return (
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `0 ${QFIT(20)}` }}>
-                        <ol style={{ margin: 0, paddingLeft: QFIT(14), fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                          {terms.slice(0, mid).map((term, i) => (
-                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                          ))}
-                        </ol>
-                        <ol start={mid + 1} style={{ margin: 0, paddingLeft: QFIT(14), fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' }}>
-                          {terms.slice(mid).map((term, i) => (
-                            <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    );
-                  }}
-                />
               </div>
+              );
 
-              {/* Footer */}
+              // ── Terms and Conditions — FIXED on every page (2-column, full
+              //    list). Every page renders the SAME shared terms via the same
+              //    EditableCell, so editing the terms on any page updates all
+              //    pages at once. ──
+              const renderTerms = () => {
+                const terms = quotationTerms;
+                const mid = Math.ceil(terms.length / 2);
+                const olStyle = { margin: 0, paddingLeft: QFIT(14), fontSize: D.termsFs, lineHeight: D.termsLH, color: '#1A1A1A' };
+                return (
+                  <div data-q-block="termsBlock" style={{ display: 'flow-root', flexShrink: 0 }}>
+                    <div style={{ marginTop: D.tcMt }}>
+                      <h4 style={{
+                        color: '#E53E3E', fontSize: D.subFont, fontWeight: '900',
+                        letterSpacing: '0.08em', textTransform: 'uppercase',
+                        marginBottom: QFIT(10), borderBottom: '2px solid #1A1A1A', paddingBottom: '4px',
+                      }}>
+                        Terms and Conditions :
+                      </h4>
+                      <EditableCell
+                        value={quotationTerms.join('\n')}
+                        onSave={v => updateTerms(v)}
+                        multiline
+                        placeholder="click to add terms (one per line)"
+                        style={{ display: 'block', width: '100%' }}
+                        renderValue={() => (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: `0 ${QFIT(20)}` }}>
+                            <ol style={olStyle}>
+                              {terms.slice(0, mid).map((term, i) => (
+                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                              ))}
+                            </ol>
+                            <ol start={mid + 1} style={olStyle}>
+                              {terms.slice(mid).map((term, i) => (
+                                <li key={i} style={{ marginBottom: D.termsMb }}>{term}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      />
+                    </div>
+                  </div>
+                );
+              };
+
+              // ── Validity / footer note row (atomic; last content block) ──
+              const renderValidity = () => (
+              <div data-q-block="validity" style={{ display: 'flow-root', flexShrink: 0 }}>
               <div style={{
                 borderTop: '2px solid #1A1A1A', marginTop: D.footMt, paddingTop: QFIT(14),
                 fontSize: D.subFont, color: '#777', display: 'flex', justifyContent: 'space-between', fontWeight: 500,
@@ -1922,28 +1849,81 @@ function QuotationDocumentInner() {
                 <div>Valid for <EditableCell value={doc.validityDays ?? settings.validityDays ?? 30} numeric onSave={v => updateField('validityDays', v)} style={{ width: '40px', textAlign: 'center' }} /> days from date of issue.</div>
                 <div>{settings.footerNote || 'NJ Quotation System'}</div>
               </div>
+              </div>
+              );
 
-              </div>{/* ── /SCALABLE BODY ── */}
+              // ── Segment dispatcher + page assembly. Only these segments FLOW
+              //    between pages — header band, customer block, terms, validity
+              //    and page footer are fixed chrome rendered on every page. ──
+              const renderSegment = (seg, idx) => {
+                switch (seg.type) {
+                  case 'spec':          return showSpec ? <React.Fragment key={idx}>{renderSpec(seg.from, seg.to)}</React.Fragment> : null;
+                  case 'items':         return <React.Fragment key={idx}>{renderItems(seg.from, seg.to)}</React.Fragment>;
+                  case 'addRow':        return <React.Fragment key={idx}>{renderAddRow()}</React.Fragment>;
+                  case 'payTotals':     return <React.Fragment key={idx}>{renderPayTotals()}</React.Fragment>;
+                  case 'deliveryNotes': return <React.Fragment key={idx}>{renderDeliveryNotes()}</React.Fragment>;
+                  default:              return null;
+                }
+              };
+
+              // Measuring pass (qPages === null): everything on one page so each
+              // block can be measured; the page clips (overflow:hidden) and the
+              // layout effect re-renders the settled assignment before paint.
+              const allSegments = [
+                ...(showSpec ? [{ type: 'spec', from: 0, to: tileClasses.length, withHead: true }] : []),
+                { type: 'items', from: 0, to: doc.items.length, withHead: true },
+                { type: 'addRow' },
+                { type: 'payTotals' },
+                { type: 'deliveryNotes' },
+              ];
+              const pageList = (qPages && qPages.length) ? qPages : [allSegments];
+
+              return (
+            <div className="q-pages" ref={qPagesWrapRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: '100%' }}>
+              {pageList.map((segs, pi) => (
+              <div
+                key={pi}
+                className="printable-sheet q-sheet-page"
+                id={pi === 0 ? 'quotationSheet' : undefined}
+                style={{
+                  width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                  background: '#FFFFFF',
+                  padding: PAGE_PAD, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
+                  color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
+                  border: '1px solid #E5E7EB', position: 'relative', flexShrink: 0,
+                }}>
+
+                {/* ── Brand watermark (faint, behind content; on every page) ── */}
+                {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />}
+
+                {/* ── HEADER BAND (fixed, every page) ── */}
+                {headerBand()}
+
+                {/* ── CUSTOMER + DATE (fixed, every page — shared state, so an
+                       edit on any page reflects on all pages) ── */}
+                {renderCust()}
+
+                {/* ── BODY — this page's flowing segments, at fixed sizes ── */}
+                <div className="q-body" style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+                  {segs.map(renderSegment)}
+                </div>
+
+                {/* ── TERMS & CONDITIONS + VALIDITY (fixed, every page) ── */}
+                {renderTerms()}
+                {renderValidity()}
+
+                {/* ── PAGE FOOTER (every page) ── */}
+                <div className="q-page-footer" style={{ flexShrink: 0, borderTop: '1px solid #E5E7EB', paddingTop: '6px', fontSize: '10px', fontWeight: 600, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{company.name || 'NJ India Trading Pvt. Ltd.'} — Quotation {doc.id}</span>
+                  <span>Page {pi + 1} of {pageList.length}</span>
+                </div>
+              </div>
+              ))}
             </div>
             );
             })()}
 
-            {/* ── Installation guidance pages — visible 2nd+ pages, inline-editable,
-                   captured into the PDF. One page per in-cart class with guidance. ── */}
-            {installClasses.length > 0 && (
-              <div ref={installPagesRef} className="nj-install-pages" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', marginTop: '24px', transformOrigin: 'top center' }}>
-                {installClasses.map((c, i) => (
-                  <InstallPage
-                    key={c.key || i}
-                    c={c}
-                    brand={wmEnabled ? watermarkBrandForItems(doc.items, data) : null}
-                    companyName={company.name || 'NJ India'}
-                    docId={doc.id}
-                    onSave={v => updateInstallOverride(c.key, v)}
-                  />
-                ))}
-              </div>
-            )}
             </>
           ) : (() => {
             /* ── VIEW B: WARRANTY CERTIFICATE (numbered sections matching physical PDF) ── */
@@ -1974,7 +1954,7 @@ function QuotationDocumentInner() {
             <WarrantyCertificate
               template={tmpl}
               openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-              brand={watermarkBrandForItems(activeCert?.items || doc.items, data)}
+              brand={watermarkBrandForWarranty(tmpl.id, activeCert?.items || doc.items, data)}
               watermarkEnabled={certWmEnabled}
               variant="certificate"
               customer={activeCert.customer || {}}

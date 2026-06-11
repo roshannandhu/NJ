@@ -301,7 +301,6 @@ export default function QuotationSettings() {
     footerNote:        initSettings.footerNote        ?? 'Generated via NJ Quotation System',
     showProductImage:  initSettings.showProductImage  ?? true,
     showClassSpecBox:  initSettings.showClassSpecBox  ?? true,
-    installationEnabled: initSettings.installationEnabled ?? false,
     watermarkEnabled:  initSettings.watermarkEnabled  ?? true,
     quotationLogo:     initSettings.quotationLogo     ?? '',
     // Single common Terms & Conditions applied to every NEW quotation. Seeded from any
@@ -590,12 +589,6 @@ export default function QuotationSettings() {
             onChange={v => setSettings(s => ({ ...s, showProductImage: v }))}
             label="Show Product Image in Table 1"
             desc="Include product thumbnail in the right column of the product details table"
-          />
-          <Toggle
-            checked={settings.installationEnabled}
-            onChange={v => setSettings(s => ({ ...s, installationEnabled: v }))}
-            label="Installation Guidance Page"
-            desc="Append a separate PDF page per class showing its installation guidance. Default for new quotations; can be toggled per quotation at checkout. Set each class's text in Products & Catalog → class → Edit."
           />
           <Toggle
             checked={settings.watermarkEnabled}

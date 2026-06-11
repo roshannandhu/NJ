@@ -43,9 +43,8 @@ export default function ProductsClassesSettings() {
   // ── Edit helpers ──────────────────────────────────────────────────────────
   const updateClass = (id, patch) => commit({ ...data, classes: data.classes.map(c => c.id === id ? { ...c, ...patch } : c) });
   // Per-class quotation text lives in settings maps keyed by class id — the same
-  // data the quotation reads (classSpecs = the product-details description,
-  // classInstall = the installation-guidance page). Edited here so the catalogue
-  // class is the single place to manage them.
+  // data the quotation reads (classSpecs = the product-details description).
+  // Edited here so the catalogue class is the single place to manage it.
   const updateClassSetting = (mapName, id, val) =>
     commit({ ...data, settings: { ...data.settings, [mapName]: { ...(data.settings?.[mapName] || {}), [id]: val } } });
   const updateVariety = (id, patch) => commit({ ...data, varieties: data.varieties.map(v => v.id === id ? { ...v, ...patch } : v) });
@@ -427,12 +426,6 @@ export default function ProductsClassesSettings() {
                     value={data.settings?.classSpecs?.[modalClass.id] ?? ''}
                     onChange={e => updateClassSetting('classSpecs', modalClass.id, e.target.value)}
                     placeholder="Product title on the first line, then spec lines — shown in the quotation's Product Details table." />
-                </div>
-                <div className="set-field span2"><span className="set-label">Installation Guidance</span>
-                  <textarea className="set-textarea" rows={6}
-                    value={data.settings?.classInstall?.[modalClass.id] ?? ''}
-                    onChange={e => updateClassSetting('classInstall', modalClass.id, e.target.value)}
-                    placeholder="How to install this class. Prints as its own page in the quotation when the Installation Guidance Page toggle is on. Leave blank to skip." />
                 </div>
               </div>
             </div>

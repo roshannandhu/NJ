@@ -27,11 +27,6 @@ export default function Checkout() {
     editingExisting && activeQuotation.discountType ? activeQuotation.discountType : (settings.discountType || 'percent'));
   const [discountValue, setDiscountValue] = React.useState(() =>
     editingExisting && activeQuotation.discountValue != null ? activeQuotation.discountValue : (settings.discountRate || 0));
-  // Append a per-class installation-guidance page to the PDF (default from settings).
-  const [includeInstallation, setIncludeInstallation] = React.useState(() =>
-    editingExisting && activeQuotation.includeInstallation != null
-      ? activeQuotation.includeInstallation
-      : (settings.installationEnabled ?? false));
   // Advance received from the customer before/with the order — deducted from the
   // grand total on the quotation as "Balance Due". Never enabled by default.
   const [advanceEnabled, setAdvanceEnabled] = React.useState(() =>
@@ -187,7 +182,6 @@ export default function Checkout() {
       productSavings,
       hasOffers,
       taxEnabled,
-      includeInstallation,
       taxRate,
       taxAmount,
       discountEnabled,
@@ -897,35 +891,6 @@ export default function Checkout() {
                 <div style={{
                   position: 'absolute', top: '3px',
                   left: taxEnabled ? '23px' : '3px',
-                  width: '18px', height: '18px', borderRadius: '50%',
-                  background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
-                  transition: 'left 0.2s'
-                }} />
-              </div>
-            </div>
-
-            {/* Installation Guidance Toggle Row */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 16px', borderRadius: 'var(--radius)',
-              border: `1.5px solid ${includeInstallation ? 'var(--accent)' : 'var(--line)'}`,
-              background: includeInstallation ? 'rgba(194, 65, 12, 0.04)' : 'var(--bg)',
-              transition: 'all 0.2s', cursor: 'pointer'
-            }} onClick={() => setIncludeInstallation(v => !v)}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>Installation Guidance Page</div>
-                <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>
-                  {includeInstallation ? 'Adds a page per class (with guidance) to the PDF' : 'No installation page in the PDF'}
-                </div>
-              </div>
-              <div style={{
-                width: '44px', height: '24px', borderRadius: '12px',
-                background: includeInstallation ? 'var(--accent)' : 'var(--line)',
-                position: 'relative', transition: 'background 0.2s', flexShrink: 0
-              }}>
-                <div style={{
-                  position: 'absolute', top: '3px',
-                  left: includeInstallation ? '23px' : '3px',
                   width: '18px', height: '18px', borderRadius: '50%',
                   background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
                   transition: 'left 0.2s'
