@@ -9,6 +9,7 @@
 // A Page is an ordered list of typed segments:
 //   { type: 'spec',  from, to, withHead }   — spec-table class rows [from, to)
 //   { type: 'items', from, to, withHead }   — item rows [from, to)
+//   { type: 'addonItems', from, to, withHead } — add-on order rows [from, to)
 //   { type: 'addRow' }                       — edit-only "Add line item" button
 //   { type: 'payTotals' }                    — payment + totals (atomic, never split)
 //   { type: 'deliveryNotes' }                — atomic
@@ -23,6 +24,8 @@
 //   payTotals, deliveryNotes, addRow                     — atomic block heights (0/null = absent)
 //   specHead, specRows: number[], specMb                 — spec table (rows may be empty)
 //   itemsHead, itemRows: number[], itemsMb               — items table
+//   addonsHead, addonRows: number[], addonsMb            — add-on items table (absent on
+//                                                          quotations without add-ons)
 // }
 // availH: flowing-content height budget per page (page height − padding −
 //         header band − customer block − terms block − validity − page footer).
@@ -79,6 +82,7 @@ export function paginateQuotation({ heights, availH }) {
 
   placeTable('spec', h.specHead || 0, h.specRows, h.specMb);
   placeTable('items', h.itemsHead || 0, h.itemRows, h.itemsMb);
+  placeTable('addonItems', h.addonsHead || 0, h.addonRows, h.addonsMb);
   placeAtomic('addRow', h.addRow);
   placeAtomic('payTotals', h.payTotals);
   placeAtomic('deliveryNotes', h.deliveryNotes);

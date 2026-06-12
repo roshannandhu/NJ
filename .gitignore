@@ -57,3 +57,5 @@ scratch_docx*
 
 # Local assistant/tool state
 .claude/
+
+.verify-tmp/

@@ -77,11 +77,17 @@ export function resolveQuotationBrand(items, data) {
 }
 
 // Document-number prefixes for a brand. `brand.docPrefix` (Settings → Parent
-// Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…);
-// brands without one — and the no-brand case — fall back to the global
-// Settings prefixes (NJ-Q / NJ-W).
+// Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…).
+// A non-NJ brand WITHOUT a configured prefix derives one from its name (word
+// initials, or the first two letters of a single-word name) so its documents
+// are never numbered as NJ by accident; the Settings field stays the override.
+// The NJ brand and the no-brand case use the global Settings prefixes.
 export function docPrefixesForBrand(brand, settings) {
-  const p = (brand?.docPrefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  let p = (brand?.docPrefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!p && brand && brand.id !== 'nj') {
+    const words = String(brand.name || '').trim().toUpperCase().replace(/[^A-Z0-9 ]/g, '').split(/\s+/).filter(Boolean);
+    p = words.length >= 2 ? words.map(w => w[0]).join('').slice(0, 4) : (words[0] || '').slice(0, 2);
+  }
   return {
     quotation: p ? `${p}-Q` : (settings?.quotationPrefix || 'NJ-Q'),
     warranty:  p ? `${p}-W` : (settings?.warrantyPrefix || 'NJ-W'),

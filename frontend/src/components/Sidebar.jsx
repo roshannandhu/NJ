@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Settings, FileText, ShieldCheck, PlusCircle, LayoutDashboard, ShieldAlert } from 'lucide-react';
+import { useAppContext } from '../AppContext';
 
 export default function Sidebar({ currentView, setCurrentView }) {
   const [expanded, setExpanded] = useState(false);
+  const { startFreshDesk } = useAppContext();
 
   const navItems = [
     { id: 'dashboard',      label: 'Dashboard',          icon: LayoutDashboard },
@@ -136,7 +138,9 @@ export default function Sidebar({ currentView, setCurrentView }) {
             return (
               <button
                 key={item.id}
-                onClick={() => { setCurrentView(item.id); setExpanded(false); }}
+                // Quotation Desk always opens a FRESH desk (clears leftover
+                // cart / edit / add-on sessions, with a confirm guard).
+                onClick={() => { item.id === 'quotation_desk' ? startFreshDesk() : setCurrentView(item.id); setExpanded(false); }}
                 title={!expanded ? item.label : undefined}
                 style={{
                   width: '100%',

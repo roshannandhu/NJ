@@ -1,10 +1,11 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus } from 'lucide-react';
 import { mediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
 import { paginateQuotation } from '../quotationPagination';
+import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
 import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand } from '../brands';
 import WarrantyCertificate from './WarrantyCertificate';
@@ -100,6 +101,8 @@ function QuotationDocumentInner() {
     setActiveWarranty,
     setActiveQuotationId,
     loadQuotationForEdit,
+    startAddonOrder,
+    cancelAddonOrder,
     activeTab,
     setActiveTab,
     showToast,
@@ -111,7 +114,7 @@ function QuotationDocumentInner() {
   // logo). Resolved LIVE from the line items (renaming a brand or editing its
   // profile updates every document); the brandId stored at checkout is only a
   // safety net for quotations whose items can no longer resolve a brand.
-  const docBrand = resolveQuotationBrand(generatedDoc?.items, data)
+  const docBrand = resolveQuotationBrand(allItemsOf(generatedDoc), data)
     || (generatedDoc?.brandId ? (data.brands || []).find(b => b.id === generatedDoc.brandId) : null)
     || null;
   // Per-brand company profile; only the no-brand/NJ paths may show NJ data.
@@ -131,6 +134,14 @@ function QuotationDocumentInner() {
   // ONLY this quotation — master products/settings are never touched.
   const doc = generatedDoc;
 
+  // ── Add-on Order derived values ──
+  // Add-on batches live in doc.addons (see ../addons.js); the original `items`
+  // array is never touched by the add-on flow. docAllItems is the whole order
+  // for consumers that must see every product (brand, spec table, warranties).
+  const docAddonItems = addonItemsOf(doc);
+  const docHasAddons = docAddonItems.length > 0;
+  const docAllItems = docHasAddons ? allItemsOf(doc) : (doc.items || []);
+
   // Recompute all totals from line items + tax/discount, mirroring Checkout math.
   const recomputeTotals = (d) => {
     const items = d.items || [];
@@ -147,6 +158,29 @@ function QuotationDocumentInner() {
     const taxRate = d.taxEnabled ? (Number(d.taxRate) || Number(settings.taxRate) || 0) : 0;
     const taxAmount = Math.round(taxableAmount * taxRate) / 100;
     const grandTotal = taxableAmount + taxAmount;
+
+    // ── Add-on Order totals ──
+    // The original section's math above never changes (it reads only the
+    // untouched original inputs, so its result is frozen in effect). Add-ons
+    // carry NO tax and NO discount: addonTotal is a plain sum, and the stored
+    // grandTotal becomes original + add-on so History/backup keep working.
+    if (Array.isArray(d.addons) && d.addons.length) {
+      const addons = d.addons.filter(b => (b.items || []).length > 0); // drop emptied batches
+      if (addons.length) {
+        const addonTotal = addonTotalOf({ addons });
+        const originalGrandTotal = Math.round(grandTotal * 100) / 100;
+        const updatedGrand = Math.round((originalGrandTotal + addonTotal) * 100) / 100;
+        const adv = Math.min(Math.max(0, Number(d.advanceReceived) || 0), updatedGrand);
+        return {
+          ...d, addons, subtotal, actualSubtotal, productSavings, hasOffers, taxRate, taxAmount, discountAmount,
+          originalGrandTotal, addonTotal, grandTotal: updatedGrand,
+          advanceReceived: adv, balanceDue: Math.round((updatedGrand - adv) * 100) / 100,
+        };
+      }
+      // every add-on item removed → revert to the plain (legacy) shape
+      d = { ...d, addons: [] };
+    }
+
     // Advance received is a payment against the total, applied AFTER tax. It is
     // re-clamped on every edit so shrinking the order never leaves balanceDue < 0.
     const advanceReceived = Math.min(Math.max(0, Number(d.advanceReceived) || 0), grandTotal);
@@ -161,7 +195,7 @@ function QuotationDocumentInner() {
   // field the user can't reach from the quotation (sellerName, batchNo, …) is
   // left untouched.
   const syncCertToQuotation = (cert, updatedDoc) => {
-    const items = updatedDoc.items || [];
+    const items = allItemsOf(updatedDoc); // originals + add-on items
     let sel = items.find(it => it.cartId === cert.certData?.selectedCartId);
     if (!sel) sel = items.find(it => it.className === cert.template?.forClass) || items[0] || null;
     return {
@@ -243,7 +277,24 @@ function QuotationDocumentInner() {
   // single "Actual Price" column drives the total; otherwise edit each independently.
   const setItemUnitPrice = (cartId, v) => commitDoc({ items: generatedDoc.items.map(it => it.cartId === cartId ? { ...it, price: v, actualPrice: v } : it) });
 
+  // ── Add-on row editing (requirement: add-ons stay editable/removable) ──
+  // Rows are addressed by (batchId, cartId) so edits land in the right batch;
+  // recomputeTotals drops batches whose last item was removed.
+  const updateAddonItemField = (batchId, cartId, field, value) => commitDoc({
+    addons: (generatedDoc.addons || []).map(b => b.id !== batchId ? b
+      : { ...b, items: (b.items || []).map(it => it.cartId === cartId ? { ...it, [field]: value } : it) }),
+  });
+  const removeAddonItemRow = (batchId, cartId) => commitDoc({
+    addons: (generatedDoc.addons || []).map(b => b.id !== batchId ? b
+      : { ...b, items: (b.items || []).filter(it => it.cartId !== cartId) }),
+  });
+  const setAddonItemUnitPrice = (batchId, cartId, v) => commitDoc({
+    addons: (generatedDoc.addons || []).map(b => b.id !== batchId ? b
+      : { ...b, items: (b.items || []).map(it => it.cartId === cartId ? { ...it, price: v, actualPrice: v } : it) }),
+  });
+
   const startNew = () => {
+    cancelAddonOrder?.(); // a pending add-on session must not leak into the new draft
     setCart([]);
     setCustomer({ name: '', phone: '', email: '', address: '' });
     setActiveQuotation(null);
@@ -374,10 +425,12 @@ function QuotationDocumentInner() {
     };
     const itemRows = collectRows('data-q-item-row');
     const specRows = collectRows('data-q-spec-row');
+    const addonRows = collectRows('data-q-addon-row');
     const theadEl = (k) => root.querySelector(`[data-q-thead="${k}"]`);
     const headBandEl = root.querySelector('.q-header-band');
     const pageFootEl = root.querySelector('.q-page-footer');
-    if (!headBandEl || itemRows.length !== doc.items.length) return; // mid-update DOM; next render re-runs
+    if (!headBandEl || itemRows.length !== doc.items.length
+      || addonRows.length !== docAddonItems.length) return; // mid-update DOM; next render re-runs
 
     // Flowing-content budget: A4 minus the page padding (PAGE_PAD: 40px top +
     // bottom) and ALL the per-page chrome, plus a small safety margin for table
@@ -399,6 +452,9 @@ function QuotationDocumentInner() {
         itemsHead: theadEl('items') ? theadEl('items').offsetHeight : 0,
         itemRows,
         itemsMb: 24,          // the items table's fixed bottom margin (QD.tblMb)
+        addonsHead: theadEl('addons') ? theadEl('addons').offsetHeight : 0,
+        addonRows,
+        addonsMb: 24,         // the add-on table's fixed bottom margin (QD.tblMb)
         addRow: block.addRow || 0,
         payTotals: block.payTotals || 0,
         // When Delivery/Notes are both empty the rows are screen-only edit
@@ -505,7 +561,10 @@ function QuotationDocumentInner() {
   // exist (deterministic ids) so a user's edits to an existing cert are never
   // overwritten. The quotation is already persisted, so each cert is linked.
   const [isCreatingWarranty, setIsCreatingWarranty] = React.useState(false);
-  const applicableCerts = buildWarrantyCertsForQuotation(generatedDoc, data, settings);
+  // Warranty templates consider the WHOLE order — add-on items can introduce
+  // new warranty-linked classes (deterministic ids keep existing certs safe).
+  const applicableCerts = buildWarrantyCertsForQuotation(
+    docHasAddons ? { ...generatedDoc, items: docAllItems } : generatedDoc, data, settings);
   const missingCerts = applicableCerts.filter(
     c => !bundledWarranties.some(w => (w.id || w.warrantyNo) === c.id)
   );
@@ -615,7 +674,7 @@ function QuotationDocumentInner() {
   // Find all unique warranties matching tile items in this quotation (for checking template presence)
   // Tile classes only (exclude tools/accessories)
   const tileClasses = Array.from(
-    new Set(doc.items.map(i => i.className))
+    new Set(docAllItems.map(i => i.className))
   ).filter(name => name !== 'Custom' && !name.toLowerCase().includes('tool'));
 
   // Class-key resolver (maps class name → settings key)
@@ -645,7 +704,7 @@ function QuotationDocumentInner() {
   // brand snapshot (historical accuracy: rename-proof), then the live class→brand
   // link. Logo comes from the current brand record. Null when no brand info.
   const getBrandForClass = (className) => {
-    const item = doc.items.find(i => i.className === className && (i.brandId || i.brandName));
+    const item = docAllItems.find(i => i.className === className && (i.brandId || i.brandName));
     const itemClass = data.classes?.find(c => c.name === className);
     const brandId = item?.brandId || itemClass?.brandId;
     const brand = (data.brands || []).find(b => b.id === brandId);
@@ -811,7 +870,7 @@ function QuotationDocumentInner() {
   // so the document renders exactly as it always did.
   const hasOffer = (item) => item.actualPrice != null && item.actualPrice > 0 && item.price < item.actualPrice;
   const rowActualUnit = (item) => (hasOffer(item) ? item.actualPrice : item.price);
-  const docAnyOffer = doc.hasOffers ?? doc.items.some(hasOffer);
+  const docAnyOffer = (doc.hasOffers ?? doc.items.some(hasOffer)) || docAddonItems.some(hasOffer);
   const docActualSubtotal = doc.actualSubtotal
     ?? doc.items.reduce((s, it) => s + (rowActualUnit(it) * it.qty), 0);
   const docSavings = doc.productSavings
@@ -1155,6 +1214,13 @@ function QuotationDocumentInner() {
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <ArrowLeft size={18} /> Edit in Checkout
               </button>
+              {!generatedDoc.warrantyOnly && (
+                <button onClick={() => startAddonOrder?.(generatedDoc)} className="hover-lift"
+                  title="Add-on Order: the customer bought more later? Add the new products to this same quotation — the original items and amounts stay unchanged."
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#FDF6EC', color: '#b45309', border: '1px solid #b45309', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
+                  <PackagePlus size={18} /> Add More Products
+                </button>
+              )}
               <button onClick={downloadQuotationPDF} disabled={isDownloading} className="hover-lift"
                 style={{
                   display: 'flex',
@@ -1648,6 +1714,113 @@ function QuotationDocumentInner() {
                 );
               };
 
+              // ── TABLE 3 — ADD-ON PRODUCTS (rows [from, to); same fixed-layout
+              //    discipline as the items table so pagination measurements stay
+              //    stable). Rendered only when add-on batches exist; rows carry an
+              //    "Added Later · date" badge and SI NO continues from the
+              //    original table. Edits address (batchId, cartId). ──
+              const renderAddonItems = (from, to) => {
+                const thumb = 46;
+                const AMBER = '#b45309';
+                const cols = [
+                  { key: 'si',     label: 'SI NO',        align: 'center', w: QFIT(44) },
+                  { key: 'img',    label: 'IMAGE',        align: 'center', w: QFIT(thumb + 16) },
+                  { key: 'prod',   label: 'PRODUCT',      align: 'left',   w: 'auto' },
+                  { key: 'qty',    label: 'QTY',          align: 'center', w: QFIT(84) },
+                  { key: 'actual', label: 'ACTUAL PRICE', align: 'right',  w: QFIT(98) },
+                  ...(docAnyOffer ? [{ key: 'offer', label: 'OFFER PRICE', align: 'right', w: QFIT(98) }] : []),
+                  { key: 'total',  label: 'TOTAL',        align: 'right',  w: QFIT(106) },
+                ];
+                return (
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb, tableLayout: 'fixed' }}>
+                <colgroup>
+                  {cols.map(col => <col key={col.key} style={col.w === 'auto' ? undefined : { width: col.w }} />)}
+                </colgroup>
+                {/* Single banner row only — the column grid matches the items
+                    table directly above, so repeating its column labels would
+                    just eat page height. */}
+                <thead data-q-thead="addons">
+                  <tr>
+                    <th colSpan={cols.length} style={{
+                      ...TB, background: PLUM, color: '#FFFFFF',
+                      padding: `${QFIT(11)} ${QFIT(10)}`, textAlign: 'left', fontWeight: '800',
+                      fontSize: D.subFont, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    }}>
+                      Add-on Products — Added Later
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docAddonItems.slice(from, to).map((item, k) => {
+                    const i = from + k;
+                    const si = (doc.items?.length || 0) + i + 1; // numbering continues from the original table
+                    const offer = hasOffer(item);
+                    const actualUnit = rowActualUnit(item);
+                    const itemClass = data.classes?.find(c => c.name === item.className);
+                    const brandColor = itemClass ? itemClass.color : PLUM;
+                    const imgSrc = item.image ? mediaUrl(item.image) : '';
+                    return (
+                    <tr key={`${item._batchId}-${item.cartId ?? i}`} data-q-addon-row={i} style={{ background: i % 2 === 0 ? '#FFFDF8' : '#FBF5EA' }}>
+                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
+                        {si}
+                      </td>
+                      <td style={{ ...TB, padding: QFIT(4), textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ width: QFIT(thumb), height: QFIT(thumb), margin: '0 auto', borderRadius: '5px', overflow: 'hidden', border: '1px solid #E5E7EB', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {imgSrc ? (
+                            <img src={imgSrc} alt={item.name} crossOrigin="anonymous"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: brandColor, opacity: 0.85, color: '#FFFFFF', fontWeight: '800', fontSize: QFIT(Math.round(thumb / 2.6)) }}>
+                              {(item.name || '?').trim().charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ ...TB, padding: D.rowPad }}>
+                        <div style={{ fontSize: D.rowFont, fontWeight: '700', color: '#1A1A1A' }}>
+                          <EditableCell value={item.name} onSave={v => updateAddonItemField(item._batchId, item.cartId, 'name', v)} placeholder="item name" style={{ display: 'block', width: '100%' }} />
+                        </div>
+                        {/* One compact sub-line (matches the items table's row
+                            height): class · color, then the Added-Later date in
+                            amber. Full date+time stays in the tooltip + data. */}
+                        <div style={{ fontSize: D.subFont, color: '#777', fontWeight: '500', marginTop: '1px' }}>
+                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` · ${item.color}` : ''}</span>
+                          <span title={item._addedAt ? `Added Later · ${formatAddedAt(item._addedAt)}` : 'Added Later'}
+                            style={{ color: AMBER, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            {' '}· Added {item._addedAt ? new Date(item._addedAt).toLocaleDateString('en-GB') : 'Later'}
+                          </span>
+                          <button className="q-edit-only" data-html2canvas-ignore="true" onClick={() => removeAddonItemRow(item._batchId, item.cartId)} title="Remove this add-on line"
+                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0, marginLeft: '6px' }}>✕ remove</button>
+                        </div>
+                      </td>
+                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '700', fontSize: D.rowFont, color: '#1A1A1A' }}>
+                        <EditableCell value={item.qty} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'qty', Math.max(0, v))} style={{ width: '48px', textAlign: 'center' }} />
+                        &nbsp;<span style={{ fontSize: D.subFont, fontWeight: '500', color: '#666' }}>{item.unit}</span>
+                      </td>
+                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: offer ? '500' : '600', fontSize: D.rowFont, color: offer ? '#999' : '#333', fontFamily: 'var(--font-mono)', textDecoration: offer ? 'line-through' : 'none' }}>
+                        {curr}<EditableCell value={actualUnit} numeric
+                          onSave={v => (docAnyOffer ? updateAddonItemField(item._batchId, item.cartId, 'actualPrice', v) : setAddonItemUnitPrice(item._batchId, item.cartId, v))}
+                          renderValue={() => actualUnit.toLocaleString('en-IN')}
+                          style={{ width: '70px', textAlign: 'right', textDecoration: 'inherit' }} />
+                      </td>
+                      {docAnyOffer && (
+                        <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
+                          {offer
+                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN')} style={{ width: '70px', textAlign: 'right' }} /></>
+                            : <EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
+                        </td>
+                      )}
+                      <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: '#1A1A1A', fontFamily: 'var(--font-mono)' }}>
+                        {curr}{(item.price * item.qty).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+                );
+              };
+
               // ── Add line item (edit affordance, hidden in print/PDF) ──
               const renderAddRow = () => (
               <div className="q-edit-only" data-q-block="addRow" data-html2canvas-ignore="true" style={{ display: 'flow-root' }}>
@@ -1770,9 +1943,30 @@ function QuotationDocumentInner() {
                     </div>
                   )}
 
-                  {/* Grand Total */}
+                  {/* Add-on breakdown — Original vs Add-on, only when add-ons exist */}
+                  {docHasAddons && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#555' }}>Original Total</span>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#1A1A1A', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{(doc.originalGrandTotal ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      {/* Offer savings inside add-on lines (same actual/offer rule as table 2) */}
+                      {addonSavingsOf(doc) > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#f0fdf4', borderBottom: '1px solid #dcfce7' }}>
+                          <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#16a34a' }}>Add-on You Save</span>
+                          <span style={{ fontSize: D.tcFs, fontWeight: '800', color: '#16a34a', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>-{curr}{addonSavingsOf(doc).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#FDF6EC', borderBottom: '1px solid #f3e3c8' }}>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#b45309' }}>Add-on Total <span style={{ fontWeight: 500 }}>(no tax / discount)</span></span>
+                        <span style={{ fontSize: D.tcFs, fontWeight: '700', color: '#b45309', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>+{curr}{(doc.addonTotal ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Grand Total (labelled "Updated Total" once add-ons exist) */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(12)} ${QFIT(14)}`, background: PLUM }}>
-                    <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>TOTAL</span>
+                    <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{docHasAddons ? 'UPDATED TOTAL' : 'TOTAL'}</span>
                     <span style={{ fontSize: QFIT(16), fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
@@ -1891,6 +2085,7 @@ function QuotationDocumentInner() {
                 switch (seg.type) {
                   case 'spec':          return showSpec ? <React.Fragment key={idx}>{renderSpec(seg.from, seg.to)}</React.Fragment> : null;
                   case 'items':         return <React.Fragment key={idx}>{renderItems(seg.from, seg.to)}</React.Fragment>;
+                  case 'addonItems':    return <React.Fragment key={idx}>{renderAddonItems(seg.from, seg.to)}</React.Fragment>;
                   case 'addRow':        return <React.Fragment key={idx}>{renderAddRow()}</React.Fragment>;
                   case 'payTotals':     return <React.Fragment key={idx}>{renderPayTotals()}</React.Fragment>;
                   case 'deliveryNotes': return <React.Fragment key={idx}>{renderDeliveryNotes()}</React.Fragment>;
@@ -1904,6 +2099,7 @@ function QuotationDocumentInner() {
               const allSegments = [
                 ...(showSpec ? [{ type: 'spec', from: 0, to: tileClasses.length, withHead: true }] : []),
                 { type: 'items', from: 0, to: doc.items.length, withHead: true },
+                ...(docHasAddons ? [{ type: 'addonItems', from: 0, to: docAddonItems.length, withHead: true }] : []),
                 { type: 'addRow' },
                 { type: 'payTotals' },
                 { type: 'deliveryNotes' },
@@ -1927,7 +2123,7 @@ function QuotationDocumentInner() {
                 }}>
 
                 {/* ── Brand watermark (faint, behind content; on every page) ── */}
-                {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(doc.items, data)} fallbackText="" />}
+                {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(docAllItems, data)} fallbackText="" />}
 
                 {/* ── HEADER BAND (fixed, every page) ── */}
                 {headerBand()}

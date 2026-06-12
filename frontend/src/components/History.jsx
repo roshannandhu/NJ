@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
-import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3 } from 'lucide-react';
+import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3, PackagePlus } from 'lucide-react';
 import { clearQuotations, clearWarranties, deleteQuotation, deleteWarranty } from '../api';
+import { addonItemsOf } from '../addons';
 
 // Rows rendered initially / added per "Show more" click. The list itself can
 // hold any number of records — only this many reach the DOM at once, so the
@@ -9,9 +10,13 @@ import { clearQuotations, clearWarranties, deleteQuotation, deleteWarranty } fro
 const PAGE_SIZE = 100;
 
 export default function History({ type }) {
-  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, setActiveTab, showToast } = useAppContext();
+  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, startAddonOrder, setActiveTab, showToast } = useAppContext();
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Add-on selection mode: armed by the "Add-on Order" button above the list;
+  // while on, clicking a quotation row starts an add-on for THAT quotation
+  // instead of opening it.
+  const [addonSelectMode, setAddonSelectMode] = useState(false);
 
   const isQuotation = type === 'quotations';
 
@@ -59,6 +64,17 @@ export default function History({ type }) {
   // Only a window of rows reaches the DOM; "Show more" extends it.
   const visibleData = filteredData.slice(0, visibleCount);
   const setSearchAndReset = (v) => { setSearch(v); setVisibleCount(PAGE_SIZE); };
+
+  // Row click: in add-on selection mode a quotation row IS the selection;
+  // otherwise open the document as before.
+  const handleRowClick = (row) => {
+    if (addonSelectMode && isQuotation) {
+      setAddonSelectMode(false);
+      startAddonOrder(row);
+      return;
+    }
+    handleView(row);
+  };
 
   const handleView = (row) => {
     if (isQuotation) {
@@ -196,9 +212,34 @@ export default function History({ type }) {
           />
         </div>
 
+        {/* Add-on Order (text button): arms selection mode — the next quotation
+            clicked becomes the target for adding more products. */}
+        {isQuotation && rawList.length > 0 && (
+          <button
+            onClick={() => setAddonSelectMode(m => !m)}
+            className="hover-lift"
+            title="Add more products to an existing quotation — click this, then click the quotation"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '12px 20px',
+              background: addonSelectMode ? '#b45309' : '#FDF6EC',
+              border: '1.5px solid #b45309',
+              color: addonSelectMode ? '#fff' : '#b45309',
+              borderRadius: 'var(--radius)',
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontSize: '13px',
+            }}
+          >
+            <PackagePlus size={16} /> {addonSelectMode ? 'Cancel — choosing quotation…' : 'Add-on Order'}
+          </button>
+        )}
+
         {/* Clear History Registry Button */}
         {rawList.length > 0 && (
-          <button 
+          <button
             onClick={handleClearHistory}
             className="hover-lift"
             style={{ 
@@ -220,14 +261,29 @@ export default function History({ type }) {
         )}
       </div>
 
+      {/* Add-on selection instruction banner */}
+      {addonSelectMode && isQuotation && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px',
+          padding: '12px 16px', borderRadius: 'var(--radius)',
+          background: '#FDF6EC', border: '1.5px dashed #b45309',
+          color: '#b45309', fontSize: '13px', fontWeight: 600,
+        }}>
+          <PackagePlus size={16} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Click the quotation you want to add products to.</strong> The original items and amounts will stay unchanged — new products are added as "Added Later".
+          </span>
+        </div>
+      )}
+
       {/* Database Results Container */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
+      <div style={{ background: 'var(--surface)', border: addonSelectMode && isQuotation ? '1.5px solid #b45309' : '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
         
         {/* Table Header Row */}
         <div style={{ 
           display: 'grid', 
-          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px', 
-          background: 'var(--bg-warm)', 
+          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px',
+          background: 'var(--bg-warm)',
           padding: '16px 24px', 
           fontSize: '11px', 
           textTransform: 'uppercase', 
@@ -254,19 +310,20 @@ export default function History({ type }) {
             const rowCerts = isQuotation ? (certsByQuotation.get(row.id) || []) : [];
 
             return (
-              <div 
-                key={i} 
-                onClick={() => handleView(row)}
+              <div
+                key={i}
+                onClick={() => handleRowClick(row)}
+                title={addonSelectMode && isQuotation ? `Add more products to ${rowId}` : undefined}
                 style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px', 
-                  padding: '18px 24px', 
+                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px',
+                  padding: '18px 24px',
                   borderBottom: '1px solid var(--line-soft)', 
                   alignItems: 'center', 
                   transition: 'background-color 0.2s',
                   cursor: 'pointer'
                 }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-warm)'}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = (addonSelectMode && isQuotation) ? '#FDF6EC' : 'var(--bg-warm)'}
                 onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
               >
                 {/* ID block with custom monospace */}
@@ -293,6 +350,12 @@ export default function History({ type }) {
                         {row.items?.length || 0} items
                       </span>
                     </div>
+                    {addonItemsOf(row).length > 0 && (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 700, color: '#b45309' }}
+                        title="This quotation has add-on products added after it was generated">
+                        <PackagePlus size={12} /> +{addonItemsOf(row).length} added later
+                      </div>
+                    )}
                     {rowCerts.length > 0 && (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 700, color: '#15803d' }}
                         title={rowCerts.map(c => c.warrantyNo || c.id).join(', ')}>

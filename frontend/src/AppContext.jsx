@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { DEFAULT_DATA } from './data';
 import { isToolItem } from './brands';
+import { allItemsOf } from './addons';
 import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus } from './api';
 
 const AppContext = createContext();
@@ -53,6 +54,13 @@ export function AppProvider({ children }) {
   // 'warranty' (standalone warranty only). Every Desk action routes THROUGH
   // Checkout; this carries the chosen intent there.
   const [generateIntent, setGenerateIntent] = useState('quote');
+
+  // Add-on Order mode: while set, the Desk/Checkout session APPENDS the cart
+  // to this existing quotation as a new add-on batch (original items and
+  // amounts stay untouched) instead of minting/updating a normal quotation.
+  // Kept SEPARATE from activeQuotationId so the regular edit path (which
+  // replaces items wholesale) can never fire during an add-on session.
+  const [addonQuotationId, setAddonQuotationId] = useState(null);
 
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
@@ -196,13 +204,20 @@ export function AppProvider({ children }) {
     // loaded for editing stay editable — only NEW brands are rejected.
     const incomingBrand = cartItemBrandId(item);
     if (incomingBrand) {
-      const existingBrands = new Set(cart.map(cartItemBrandId).filter(Boolean));
+      // In Add-on Order mode the cart starts empty, but the lock must still
+      // hold the target quotation's brand — seed the set from its items too.
+      const addonTarget = addonQuotationId
+        ? (data.quotations || []).find(q => q.id === addonQuotationId) : null;
+      const lockSource = addonTarget ? [...cart, ...allItemsOf(addonTarget)] : cart;
+      const existingBrands = new Set(lockSource.map(cartItemBrandId).filter(Boolean));
       if (existingBrands.size > 0 && !existingBrands.has(incomingBrand)) {
         const lockedId = existingBrands.values().next().value;
         const lockedName = (data.brands || []).find(b => b.id === lockedId)?.name
-          || cart.find(ci => cartItemBrandId(ci) === lockedId)?.brandName
+          || lockSource.find(ci => cartItemBrandId(ci) === lockedId)?.brandName
           || 'another brand';
-        showToast(`This quotation already has ${lockedName} products — clear the cart to switch brands`, 'error');
+        showToast(addonQuotationId
+          ? `Add-on items must match the quotation's brand (${lockedName})`
+          : `This quotation already has ${lockedName} products — clear the cart to switch brands`, 'error');
         return false;
       }
     }
@@ -244,10 +259,58 @@ export function AppProvider({ children }) {
     setCustomer({ name: '', phone: '', email: '', address: '', ...(q.customer || {}) });
     setActiveQuotation(q);
     setActiveQuotationId(q.id || null);
+    setAddonQuotationId(null); // a full edit session replaces any add-on session
     setActiveTab('quotation');
     // Editing an existing quotation is always a plain quotation finalize.
     setGenerateIntent('quote');
     setCurrentView('checkout');
+  };
+
+  // Start an Add-on Order for an existing quotation: a fresh EMPTY cart locked
+  // to the quotation's brand; finalizing from Checkout APPENDS the cart as a
+  // new add-on batch (Checkout.finalizeAddon) — originals stay untouched.
+  const startAddonOrder = (q) => {
+    if (!q || q.warrantyOnly) return;
+    if (cart.length > 0) {
+      const ok = window.confirm(`Your current cart will be cleared to start an Add-on Order for ${q.id}. Continue?`);
+      if (!ok) return;
+    }
+    setCart([]);
+    setCustomer({ name: '', phone: '', email: '', address: '', ...(q.customer || {}) });
+    setActiveQuotation(q);
+    setAddonQuotationId(q.id);
+    // Keep the normal edit path dormant: editingExisting in Checkout must stay
+    // false, or finalizeGeneration would REPLACE the quotation's items.
+    setActiveQuotationId(null);
+    setGenerateIntent('quote');
+    setActiveTab('quotation');
+    setCurrentView('quotation_desk');
+    showToast(`Pick the extra products for ${q.id}, then press "Add to Quotation" in Checkout`, 'info');
+  };
+
+  const cancelAddonOrder = () => {
+    setAddonQuotationId(null);
+    setCart([]);
+    setCustomer({ name: '', phone: '', email: '', address: '' });
+  };
+
+  // Sidebar "Quotation Desk" = start a NEW quotation: clear any leftover cart,
+  // customer, edit session or add-on session so the desk always opens fresh.
+  // A non-empty cart asks first so an in-progress draft is never lost silently;
+  // declining keeps the cart and just navigates (the old behaviour).
+  const startFreshDesk = () => {
+    const dirty = cart.length > 0 || addonQuotationId;
+    if (dirty && !window.confirm('Start a new quotation? The current cart will be cleared.')) {
+      setCurrentView('quotation_desk');
+      return;
+    }
+    setCart([]);
+    setCustomer({ name: '', phone: '', email: '', address: '' });
+    setActiveQuotation(null);
+    setActiveQuotationId(null);
+    setAddonQuotationId(null);
+    setGenerateIntent('quote');
+    setCurrentView('quotation_desk');
   };
 
   const value = {
@@ -258,6 +321,8 @@ export function AppProvider({ children }) {
     cart, setCart, cartOpen, setCartOpen,
     addToCart, updateCartQty, removeFromCart, cartTotal,
     loadQuotationForEdit,
+    addonQuotationId, startAddonOrder, cancelAddonOrder,
+    startFreshDesk,
     toasts, showToast,
     data, setData, persistConfig,
     activeQuotation, setActiveQuotation,

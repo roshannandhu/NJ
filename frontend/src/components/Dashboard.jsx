@@ -6,6 +6,7 @@ import {
   Eye,
   FileText,
   Package,
+  PackagePlus,
   PlusCircle,
   Settings,
   ShieldCheck,
@@ -241,6 +242,7 @@ export default function Dashboard() {
     setActiveWarranty,
     setActiveTab,
     loadQuotationForEdit,
+    startAddonOrder,
   } = useAppContext();
 
   const [prefs, setPrefs] = React.useState(loadPreferences);
@@ -553,6 +555,14 @@ export default function Dashboard() {
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--accent)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
                     >
                       <Edit3 size={13} /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      title="Add More Products — customer bought more later? Add them to this same quotation (originals stay unchanged)"
+                      onClick={(e) => { e.stopPropagation(); startAddonOrder(quotation); }}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px', border: '1px solid #b45309', borderRadius: 'var(--radius-sm)', background: '#FDF6EC', color: '#b45309', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      <PackagePlus size={13} /> Add More
                     </button>
                   </div>
                 ))}

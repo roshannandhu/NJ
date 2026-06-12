@@ -7,6 +7,7 @@ import {
   Lock,
   Minus,
   Package,
+  PackagePlus,
   Plus,
   Search,
   ShieldCheck,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { mediaUrl } from '../api';
 import { isToolItem } from '../brands';
+import { allItemsOf } from '../addons';
 import { useAppContext } from '../AppContext';
 import LiveQuotation from './LiveQuotation';
 import NumberField from './NumberField';
@@ -33,8 +35,17 @@ const matchesSearch = (item, cls, search) => {
 };
 
 export default function QuotationDesk() {
-  const { data, cart, addToCart, customer, setCustomer, showToast } = useAppContext();
+  const { data, cart, addToCart, customer, setCustomer, showToast, addonQuotationId, cancelAddonOrder, setCurrentView } = useAppContext();
   const cur = data?.settings?.currencySymbol || '₹';
+
+  // ── Add-on Order mode ──
+  // The session appends to this existing quotation; the desk shows a banner,
+  // keeps the customer fields read-only, and the brand lock below also counts
+  // the target quotation's items so only its brand (and tools) can be added.
+  const addonTarget = React.useMemo(
+    () => (addonQuotationId ? (data.quotations || []).find(q => q.id === addonQuotationId) || null : null),
+    [addonQuotationId, data.quotations]
+  );
 
   const [catalogView, setCatalogView] = React.useState('products');
   const [search, setSearch] = React.useState('');
@@ -85,13 +96,16 @@ export default function QuotationDesk() {
   // A Set (not a single id) keeps legacy mixed-brand quotations editable.
   const lockedByBrandIds = React.useMemo(() => {
     const ids = new Set();
-    (cart || []).forEach(it => {
+    // In add-on mode the lock also counts the target quotation's items, so the
+    // rail locks to its brand even while the (fresh) cart is still empty.
+    const source = addonTarget ? [...(cart || []), ...allItemsOf(addonTarget)] : (cart || []);
+    source.forEach(it => {
       if (isToolItem(it, data)) return;
       const id = it.brandId ?? (data.classes || []).find(c => c.name === it.className)?.brandId;
       if (id) ids.add(id);
     });
     return ids;
-  }, [cart, data]);
+  }, [cart, data, addonTarget]);
   // The orphan group's classes resolve to the fallback brand at add-time, so it
   // locks exactly when that brand does.
   const isBrandLocked = (brand) =>
@@ -102,7 +116,9 @@ export default function QuotationDesk() {
       || (cart || []).find(it => it.brandName)?.brandName || 'another brand';
   }, [lockedByBrandIds, data.brands, cart]);
   const showLockToast = () =>
-    showToast(`This quotation already has ${lockedToName} products — clear the cart to switch brands`, 'error');
+    showToast(addonTarget
+      ? `Add-on items must match the quotation's brand (${lockedToName})`
+      : `This quotation already has ${lockedToName} products — clear the cart to switch brands`, 'error');
 
   // Clear (never auto-pick) a stale selection so the rail opens fully collapsed:
   // first load shows only brands, and switching tabs never forces a class open.
@@ -266,31 +282,63 @@ export default function QuotationDesk() {
   const activeWarranty = activeClass && (data.warranties || []).find(w => w.id === activeClass.warrantyId);
 
   return (
+    <>
+    {/* ── Add-on Order banner ── */}
+    {addonQuotationId && (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+        margin: '0 0 14px', padding: '12px 16px', borderRadius: '10px',
+        background: '#FDF6EC', border: '1px solid #b45309',
+        color: '#b45309', fontSize: '13px', fontWeight: 600,
+      }}>
+        <PackagePlus size={16} style={{ flexShrink: 0 }} />
+        <span>
+          <strong>Adding more products to {addonQuotationId}</strong>
+          {addonTarget?.customer?.name ? <> ({addonTarget.customer.name})</> : null} — the original quotation will not change.
+          <span style={{ display: 'block', fontWeight: 500, marginTop: '2px' }}>
+            Step 1: pick the products below &nbsp;→&nbsp; Step 2: Go to Checkout &nbsp;→&nbsp; Step 3: press "Add to Quotation".
+          </span>
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+          <button type="button" onClick={() => setCurrentView('checkout')}
+            style={{ background: '#b45309', border: 'none', borderRadius: '999px', color: '#fff', fontSize: '12px', fontWeight: 700, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            Go to Checkout
+          </button>
+          <button type="button" onClick={() => { cancelAddonOrder(); showToast('Add-on order cancelled', 'info'); }}
+            style={{ background: 'transparent', border: '1px solid #b45309', borderRadius: '999px', color: '#b45309', fontSize: '12px', fontWeight: 700, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            Cancel add-on
+          </button>
+        </div>
+      </div>
+    )}
     <div className="qd2">
       {/* ── Customer bar ───────────────────────────────────────────────── */}
       <div className="qd2-customer">
         <div className="qd2-customer-avatar">{(customer.name || '?').trim().charAt(0).toUpperCase() || <UserRound size={18} />}</div>
-        <div className="qd2-cust-lead"><span>Quotation for</span><strong>{customer.name || 'New Customer'}</strong></div>
-        <div className="qd2-field is-name">
-          <label>Customer Name *</label>
-          <input name="name" value={customer.name || ''} onChange={e => setCustomer(p => ({ ...p, name: e.target.value }))} placeholder="Required for quotation" />
+        <div className="qd2-cust-lead">
+          <span>{addonQuotationId ? `Add-on for ${addonQuotationId}` : 'Quotation for'}</span>
+          <strong>{customer.name || 'New Customer'}</strong>
         </div>
-        <div className="qd2-field is-phone">
+        <div className="qd2-field is-name" style={addonQuotationId ? { opacity: 0.65 } : undefined}>
+          <label>Customer Name *</label>
+          <input name="name" value={customer.name || ''} onChange={e => setCustomer(p => ({ ...p, name: e.target.value }))} disabled={!!addonQuotationId} placeholder="Required for quotation" />
+        </div>
+        <div className="qd2-field is-phone" style={addonQuotationId ? { opacity: 0.65 } : undefined}>
           <label>Phone</label>
-          <input name="phone" value={customer.phone || ''} onChange={e => setCustomer(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
+          <input name="phone" value={customer.phone || ''} onChange={e => setCustomer(p => ({ ...p, phone: e.target.value }))} disabled={!!addonQuotationId} placeholder="Optional" />
         </div>
         <button type="button" className="qd2-more-btn" onClick={() => setMoreCustomer(m => !m)}>
           {moreCustomer ? 'Less' : 'More details'}
         </button>
         {moreCustomer && (
           <div className="qd2-more-fields">
-            <div className="qd2-field" style={{ flex: '1 1 240px' }}>
+            <div className="qd2-field" style={{ flex: '1 1 240px', opacity: addonQuotationId ? 0.65 : 1 }}>
               <label>Email</label>
-              <input name="email" value={customer.email || ''} onChange={e => setCustomer(p => ({ ...p, email: e.target.value }))} placeholder="Optional" />
+              <input name="email" value={customer.email || ''} onChange={e => setCustomer(p => ({ ...p, email: e.target.value }))} disabled={!!addonQuotationId} placeholder="Optional" />
             </div>
-            <div className="qd2-field" style={{ flex: '2 1 320px' }}>
+            <div className="qd2-field" style={{ flex: '2 1 320px', opacity: addonQuotationId ? 0.65 : 1 }}>
               <label>Site Address</label>
-              <input name="address" value={customer.address || ''} onChange={e => setCustomer(p => ({ ...p, address: e.target.value }))} placeholder="Delivery location" />
+              <input name="address" value={customer.address || ''} onChange={e => setCustomer(p => ({ ...p, address: e.target.value }))} disabled={!!addonQuotationId} placeholder="Delivery location" />
             </div>
           </div>
         )}
@@ -306,7 +354,7 @@ export default function QuotationDesk() {
               <Layers size={15} /> Products
             </button>
             <button type="button" className={toolsActive ? 'is-active' : ''} onClick={() => { setCatalogView(TOOLS_SECTION_ID); setSearch(''); setOpenBrandId(null); setActiveClassId(null); }}>
-              <Wrench size={15} /> Tools
+              <Wrench size={15} /> Accessories
             </button>
           </div>
         </div>
@@ -315,7 +363,7 @@ export default function QuotationDesk() {
           {brandGroups.length === 0 ? (
             <div className="qd2-empty" style={{ padding: '40px 16px' }}>
               <div className="qd2-empty-icon">{toolsActive ? <Wrench size={24} /> : <Layers size={24} />}</div>
-              <strong>No {toolsActive ? 'tools' : 'classes'} yet</strong>
+              <strong>No {toolsActive ? 'accessories' : 'classes'} yet</strong>
               <span>Add them in Settings.</span>
             </div>
           ) : (
@@ -391,7 +439,7 @@ export default function QuotationDesk() {
               {activeBrand?.name && <>{activeBrand.name} <ChevronRight size={14} /> </>}
               <b>{activeClass.name}</b> <span className="qd2-cnt">· {gridItems.length} products</span>
             </div>
-          ) : <div className="qd2-crumb">{toolsActive ? 'Select a tool or accessory' : 'Select a brand'}</div>}
+          ) : <div className="qd2-crumb">{toolsActive ? 'Select an accessory' : 'Select a brand'}</div>}
 
           <div className="qd2-search">
             <Search size={16} />
@@ -415,8 +463,8 @@ export default function QuotationDesk() {
         {!normalizedSearch && !activeClass ? (
           <div className="qd2-empty">
             <div className="qd2-empty-icon">{toolsActive ? <Wrench size={26} /> : <Layers size={26} />}</div>
-            <strong>Select a {toolsActive ? 'tool or accessory' : 'brand'} to begin</strong>
-            <span>{toolsActive ? 'Pick a tool / accessory class on the left.' : 'Pick a brand on the left to reveal its classes, then choose one.'}</span>
+            <strong>Select {toolsActive ? 'an accessory' : 'a brand'} to begin</strong>
+            <span>{toolsActive ? 'Pick an accessory class on the left.' : 'Pick a brand on the left to reveal its classes, then choose one.'}</span>
           </div>
         ) : gridItems.length === 0 ? (
           <div className="qd2-empty">
@@ -438,5 +486,6 @@ export default function QuotationDesk() {
         <LiveQuotation />
       </aside>
     </div>
+    </>
   );
 }

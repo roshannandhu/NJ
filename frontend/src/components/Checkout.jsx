@@ -1,15 +1,31 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3, Wallet } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3, Wallet, PackagePlus } from 'lucide-react';
 import { createQuotation, createWarranty } from '../api';
 import { resolveQuotationBrand, docPrefixesForBrand } from '../brands';
 import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
+import { addonItemsOf, addonTotalOf, allItemsOf } from '../addons';
 import NumberField from './NumberField';
 
 export default function Checkout() {
-  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent } = useAppContext();
+  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent, addonQuotationId, cancelAddonOrder } = useAppContext();
 
   const settings = data.settings || {};
+
+  // ── Add-on Order mode ──
+  // Finalizing APPENDS the cart to this existing quotation as a new add-on
+  // batch (no tax / no discount on add-ons; originals stay untouched). The
+  // target is re-read from the registry so a stale activeQuotation can't be
+  // appended to. Mutually exclusive with editingExisting (startAddonOrder
+  // clears activeQuotationId).
+  const addonMode = !!addonQuotationId;
+  const addonTarget = addonMode
+    ? (data.quotations || []).find(q => q.id === addonQuotationId) || null
+    : null;
+  const addonPrevTotal = addonTarget ? addonTotalOf(addonTarget) : 0;
+  const addonOriginalTotal = addonTarget
+    ? (addonTarget.originalGrandTotal ?? addonTarget.grandTotal ?? 0)
+    : 0;
 
   // Are we editing an existing quotation (entered via "Edit in Checkout" /
   // History → Edit), or creating a new one? When editing, the per-checkout
@@ -101,6 +117,21 @@ export default function Checkout() {
 
   const handleGenerateQuotation = async () => {
     if (isGenerating) return; // guard against double-submit creating duplicates
+    if (addonMode) {
+      // Add-on Order: manager/customer come from the target quotation; the
+      // only requirement is at least one product in the cart.
+      if (cart.length === 0) {
+        showToast("Add at least one product for the add-on order", "error");
+        return;
+      }
+      setIsGenerating(true);
+      try {
+        await finalizeAddon();
+      } finally {
+        setIsGenerating(false);
+      }
+      return;
+    }
     if (!managerName.trim()) {
       showToast("Manager name is required", "error");
       document.getElementById('manager-name-input')?.focus();
@@ -117,6 +148,71 @@ export default function Checkout() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // ── Add-on Order finalize ──
+  // Appends the cart to the target quotation as a NEW add-on batch. The
+  // original items / tax / discount / advance inputs are never touched; the
+  // stored grandTotal becomes original + add-on so History, the grand_total
+  // column and backups stay correct. Missing warranty certs for newly added
+  // classes are created (deterministic ids — existing certs never churn).
+  const finalizeAddon = async () => {
+    const target = (data.quotations || []).find(q => q.id === addonQuotationId);
+    if (!target) {
+      showToast("Original quotation not found — add-on cancelled", "error");
+      cancelAddonOrder();
+      setCurrentView('quotation_desk');
+      return;
+    }
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const batch = {
+      id: 'add_' + Date.now(),
+      addedAt: new Date().toISOString(),
+      items: cart.map(it => ({ ...it, addedLater: true })),
+    };
+    const addons = [...(target.addons || []), batch];
+    const addonTotal = addonTotalOf({ addons });
+    // Freeze the original section's total the first time an add-on is made.
+    const originalGrandTotal = target.originalGrandTotal ?? target.grandTotal ?? 0;
+    const grandTotal = round2(originalGrandTotal + addonTotal);
+    const advanceKept = Math.min(Math.max(0, Number(target.advanceReceived) || 0), grandTotal);
+    const updated = {
+      ...target,
+      addons, addonTotal, originalGrandTotal, grandTotal,
+      advanceReceived: advanceKept,
+      balanceDue: round2(grandTotal - advanceKept),
+    };
+
+    try {
+      await createQuotation(updated);
+    } catch {
+      showToast("Saved locally, backend sync failed", "error");
+    }
+
+    // Auto-create only the MISSING warranty certs over the WHOLE order.
+    const certsAll = buildWarrantyCertsForQuotation({ ...updated, items: allItemsOf(updated) }, data, settings);
+    const existingCerts = data.warranty_certificates || [];
+    const missing = certsAll.filter(c => !existingCerts.some(w => (w.id || w.warrantyNo) === c.id));
+    for (const cert of missing) {
+      await createWarranty(cert).catch(() => {});
+    }
+
+    setData(prev => ({
+      ...prev,
+      quotations: [updated, ...(prev.quotations || []).filter(q => q.id !== updated.id)],
+      warranty_certificates: missing.length
+        ? [...missing, ...(prev.warranty_certificates || []).filter(c => !missing.some(n => n.id === c.id))]
+        : (prev.warranty_certificates || []),
+    }));
+
+    cancelAddonOrder(); // clears add-on mode + cart + customer
+    setActiveQuotationId(null);
+    setGenerateIntent?.('quote');
+    setActiveQuotation(updated);
+    if (setActiveTab) setActiveTab('quotation');
+    setCurrentView('quotation_document');
+    showToast(`Add-on saved — ${batch.items.length} item${batch.items.length > 1 ? 's' : ''} added to ${updated.id}`
+      + (missing.length ? ` (+${missing.length} warranty)` : ''), "success");
   };
 
   const finalizeGeneration = async () => {
@@ -224,6 +320,19 @@ export default function Checkout() {
       // Keep the original issue date when updating; stamp today only for new ones.
       date: isRegenerate ? (base.date || today) : today,
     };
+
+    // A quotation with add-on batches: a full Edit recomputes the ORIGINAL
+    // section from the cart (loadQuotationForEdit loads originals only), then
+    // the updated grand total is re-derived here so the add-ons — carried
+    // forward via ...base — are never lost or double-counted.
+    if (isRegenerate && Array.isArray(base.addons) && base.addons.length) {
+      const round2 = (n) => Math.round(n * 100) / 100;
+      snapshot.originalGrandTotal = round2(grandTotal);
+      snapshot.addonTotal = addonTotalOf(base);
+      snapshot.grandTotal = round2(snapshot.originalGrandTotal + snapshot.addonTotal);
+      snapshot.advanceReceived = Math.min(advanceReceived, snapshot.grandTotal);
+      snapshot.balanceDue = round2(snapshot.grandTotal - snapshot.advanceReceived);
+    }
 
     try { localStorage.setItem('nj_last_manager', managerName.trim()); } catch { /* ignore */ }
 
@@ -343,11 +452,21 @@ export default function Checkout() {
         }}>
           <FileText size={40} strokeWidth={1.5} />
         </div>
-        <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: 'var(--ink)', fontWeight: 500, margin: 0 }}>Checkout is empty</h2>
+        <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', color: 'var(--ink)', fontWeight: 500, margin: 0 }}>
+          {addonMode ? `Adding more products to ${addonQuotationId}` : 'Checkout is empty'}
+        </h2>
         <p style={{ color: 'var(--ink-soft)', fontSize: '15px', maxWidth: '400px', margin: '0 auto 8px', lineHeight: '1.6' }}>
-          Add items to your cart from the desk catalog to review and generate a quotation.
+          {addonMode
+            ? 'Pick the additional products from the desk catalog — they will be added to this quotation without changing the original items or amounts.'
+            : 'Add items to your cart from the desk catalog to review and generate a quotation.'}
         </p>
         <button className="btn-primary" onClick={() => setCurrentView('quotation_desk')}>Return to Desk</button>
+        {addonMode && (
+          <button onClick={() => { cancelAddonOrder(); showToast('Add-on order cancelled', 'info'); }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--ink-soft)', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+            Cancel add-on order
+          </button>
+        )}
       </div>
     );
   }
@@ -387,6 +506,27 @@ export default function Checkout() {
           <ArrowLeft size={16} /> Back to Desk
         </button>
 
+        {/* Add-on Order banner */}
+        {addonMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px',
+            padding: '12px 16px', borderRadius: 'var(--radius)',
+            background: '#FDF6EC', border: '1px solid #b45309',
+            color: '#b45309', fontSize: '13px', fontWeight: 600,
+          }}>
+            <PackagePlus size={15} style={{ flexShrink: 0 }} />
+            <span>
+              <strong>Adding more products to {addonQuotationId}</strong>
+              {addonTarget?.customer?.name ? <> ({addonTarget.customer.name})</> : null} — the original quotation will not change.
+              Review the items, then press <strong>"Add to Quotation"</strong> below.
+            </span>
+            <button onClick={() => { cancelAddonOrder(); setCurrentView('quotation_desk'); showToast('Add-on order cancelled', 'info'); }}
+              style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid #b45309', borderRadius: 'var(--radius-full)', color: '#b45309', fontSize: '12px', fontWeight: 700, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Editing-an-existing-quotation banner */}
         {editingExisting && (
           <div style={{
@@ -396,15 +536,20 @@ export default function Checkout() {
             color: '#8a1856', fontSize: '13px', fontWeight: 600,
           }}>
             <Edit3 size={15} />
-            Editing quotation <strong>{activeQuotation.id}</strong> — changes update this existing record (same number &amp; date).
+            <span>
+              Editing quotation <strong>{activeQuotation.id}</strong> — changes update this existing record (same number &amp; date).
+              {addonItemsOf(activeQuotation).length > 0 && (
+                <> This quotation has <strong>{addonItemsOf(activeQuotation).length} add-on item{addonItemsOf(activeQuotation).length > 1 ? 's' : ''}</strong> — they are preserved and editable on the quotation page.</>
+              )}
+            </span>
           </div>
         )}
 
         {/* Section Title */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
           <div>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '36px', fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.02em', margin: 0 }}>{editingExisting ? 'Edit Order' : 'Review Order'}</h1>
-            <p style={{ color: 'var(--ink-soft)', fontSize: '15px', marginTop: '8px' }}>Adjust quantities, apply overrides, and finalize item details.</p>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '36px', fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.02em', margin: 0 }}>{addonMode ? 'Add More Products' : editingExisting ? 'Edit Order' : 'Review Order'}</h1>
+            <p style={{ color: 'var(--ink-soft)', fontSize: '15px', marginTop: '8px' }}>{addonMode ? 'These products will be added to the quotation, marked "Added Later".' : 'Adjust quantities, apply overrides, and finalize item details.'}</p>
           </div>
           <button
             onClick={handleAddItem}
@@ -684,7 +829,14 @@ export default function Checkout() {
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Manager / preparer — mandatory; the quotation is made under this manager. */}
+            {addonMode && (
+              <div style={{ fontSize: '12px', color: '#b45309', fontWeight: 600, background: '#FDF6EC', border: '1px dashed #b45309', borderRadius: 'var(--radius)', padding: '10px 14px' }}>
+                Customer details come from quotation {addonQuotationId} and cannot be changed here.
+              </div>
+            )}
+            {/* Manager / preparer — mandatory; the quotation is made under this manager.
+                Hidden in add-on mode (the quotation keeps its original manager). */}
+            {!addonMode && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label htmlFor="manager-name-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--accent)' }}>
                 Manager Name * <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: 'var(--ink-soft)' }}>— who is preparing this quotation</span>
@@ -702,16 +854,18 @@ export default function Checkout() {
                 }}
               />
             </div>
+            )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', opacity: addonMode ? 0.65 : 1 }}>
               <label htmlFor="customer-name-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Full Name *
               </label>
-              <input 
+              <input
                 id="customer-name-input"
-                name="name" 
-                value={customer.name || ''} 
-                onChange={e => setCustomer({...customer, name: e.target.value})} 
+                name="name"
+                value={customer.name || ''}
+                onChange={e => setCustomer({...customer, name: e.target.value})}
+                disabled={addonMode}
                 placeholder="e.g. Salim P P"
                 style={{ 
                   padding: '14px 16px', 
@@ -726,15 +880,16 @@ export default function Checkout() {
               />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', opacity: addonMode ? 0.65 : 1 }}>
               <label htmlFor="customer-phone-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Phone Number
               </label>
-              <input 
+              <input
                 id="customer-phone-input"
-                name="phone" 
-                value={customer.phone || ''} 
-                onChange={e => setCustomer({...customer, phone: e.target.value})} 
+                name="phone"
+                value={customer.phone || ''}
+                onChange={e => setCustomer({...customer, phone: e.target.value})}
+                disabled={addonMode}
                 placeholder="e.g. +91 96337 07686"
                 style={{ 
                   padding: '14px 16px', 
@@ -749,7 +904,7 @@ export default function Checkout() {
               />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', opacity: addonMode ? 0.65 : 1 }}>
               <label htmlFor="customer-address-input" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Site / Billing Address
               </label>
@@ -758,6 +913,7 @@ export default function Checkout() {
                 name="address"
                 value={customer.address || ''}
                 onChange={e => setCustomer({...customer, address: e.target.value})}
+                disabled={addonMode}
                 placeholder="Street address, site details, location..."
                 style={{
                   padding: '14px 16px',
@@ -775,7 +931,9 @@ export default function Checkout() {
               />
             </div>
 
-            {/* Quotation Bank Account (CHANGE 5) */}
+            {/* Quotation Bank Account (CHANGE 5) — hidden in add-on mode (the
+                quotation keeps its snapshotted bank). */}
+            {!addonMode && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label htmlFor="quotation-bank-select" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                 Quotation Bank Account
@@ -809,6 +967,7 @@ export default function Checkout() {
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
 
@@ -887,10 +1046,12 @@ export default function Checkout() {
           </div>
 
           <h3 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.15em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '24px' }}>
-            Order Invoice Summary
+            {addonMode ? 'Add-on Order Summary' : 'Order Invoice Summary'}
           </h3>
 
-          {/* ── Tax & Discount Controls ── */}
+          {/* ── Tax & Discount Controls — hidden in add-on mode: add-ons carry
+                 no tax and no discount, and the original advance is kept. ── */}
+          {!addonMode && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px', paddingBottom: '20px', borderBottom: '1px dashed var(--line)' }}>
 
             {/* Tax Toggle Row */}
@@ -1110,9 +1271,60 @@ export default function Checkout() {
               )}
             </div>
           </div>
+          )}
+
+          {/* ── Add-on mode summary: plain item sum + original/updated totals ── */}
+          {addonMode && (
+            <>
+              {/* Item offers work in add-ons exactly like normal lines: lowering
+                  a price below its actual creates an offer and shows the saving. */}
+              {hasOffers && productSavings > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '14px', color: 'var(--ink-soft)', fontWeight: 500 }}>
+                    <span>Add-on Actual Total</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', textDecoration: 'line-through' }}>{settings.currencySymbol || '₹'}{actualSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '14px', color: '#16a34a', fontWeight: 600 }}>
+                    <span>Add-on Offer Savings</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>-{settings.currencySymbol || '₹'}{productSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: '#b45309', fontWeight: 600 }}>
+                <span>Add-on Total <span style={{ fontWeight: 500, fontSize: '12px' }}>(no tax / discount)</span></span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>+{settings.currencySymbol || '₹'}{cartTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              {/* Existing Total = the quotation's current total (original section
+                  + any earlier add-on batches), so Existing + Add-on = Updated. */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px dashed var(--line)', fontSize: '15px', color: 'var(--ink-mid)', fontWeight: 500 }}>
+                <span>Existing Total ({addonQuotationId})</span>
+                <span style={{ fontFamily: 'var(--font-mono)' }}>{settings.currencySymbol || '₹'}{(addonOriginalTotal + addonPrevTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '8px' }}>
+                Updated Grand Total
+              </div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '44px', fontWeight: 600, marginBottom: (Number(addonTarget?.advanceReceived) || 0) > 0 ? '12px' : '40px', letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--accent-deep)' }}>
+                {settings.currencySymbol || '₹'}{(addonOriginalTotal + addonPrevTotal + cartTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+              {(Number(addonTarget?.advanceReceived) || 0) > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--line)', fontSize: '15px', color: '#1d4ed8', fontWeight: 600 }}>
+                    <span>Advance Already Received</span>
+                    <span style={{ fontFamily: 'var(--font-mono)' }}>-{settings.currencySymbol || '₹'}{(Number(addonTarget.advanceReceived) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '8px' }}>
+                    Balance Due
+                  </div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: '44px', fontWeight: 600, marginBottom: '40px', letterSpacing: '-0.02em', lineHeight: 1, color: 'var(--accent-deep)' }}>
+                    {settings.currencySymbol || '₹'}{Math.max(0, addonOriginalTotal + addonPrevTotal + cartTotal - (Number(addonTarget.advanceReceived) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </div>
+                </>
+              )}
+            </>
+          )}
 
           {/* Actual subtotal + item-offer savings (only when product offers exist) */}
-          {hasOffers && productSavings > 0 && (
+          {!addonMode && hasOffers && productSavings > 0 && (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: 'var(--ink-soft)', fontWeight: 500 }}>
                 <span>Actual Total</span>
@@ -1126,13 +1338,15 @@ export default function Checkout() {
           )}
 
           {/* Subtotal */}
+          {!addonMode && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: 'var(--ink-mid)', fontWeight: 500 }}>
             <span>{hasOffers && productSavings > 0 ? 'Offer Subtotal' : 'Subtotal'}</span>
             <span style={{ fontFamily: 'var(--font-mono)' }}>{settings.currencySymbol || '₹'}{subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
           </div>
+          )}
 
           {/* Discount row */}
-          {discountEnabled && discountAmount > 0 && (
+          {!addonMode && discountEnabled && discountAmount > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', fontSize: '15px', color: '#16a34a', fontWeight: 600 }}>
               <span>Discount {discountType === 'percent' ? `(${discountValue}%)` : '(Fixed)'}</span>
               <span style={{ fontFamily: 'var(--font-mono)' }}>-{settings.currencySymbol || '₹'}{discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -1140,16 +1354,18 @@ export default function Checkout() {
           )}
 
           {/* Tax row */}
-          {taxEnabled && (
+          {!addonMode && taxEnabled && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px dashed var(--line)', fontSize: '15px', color: 'var(--ink-mid)', fontWeight: 500 }}>
               <span>GST / Tax ({taxRate}%)</span>
               <span style={{ fontFamily: 'var(--font-mono)' }}>{settings.currencySymbol || '₹'}{taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             </div>
           )}
-          {!taxEnabled && (
+          {!addonMode && !taxEnabled && (
             <div style={{ borderBottom: '1px dashed var(--line)', marginBottom: '24px', paddingBottom: discountEnabled && discountAmount > 0 ? '12px' : '0' }} />
           )}
 
+          {!addonMode && (
+          <>
           <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-soft)', fontWeight: 700, marginBottom: '8px' }}>
             Total Amount Due
           </div>
@@ -1164,9 +1380,11 @@ export default function Checkout() {
           }}>
             {settings.currencySymbol || '₹'}{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}
           </div>
+          </>
+          )}
 
           {/* Advance received → balance due (only when an advance is set) */}
-          {advanceReceived > 0 && (
+          {!addonMode && advanceReceived > 0 && (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px dashed var(--line)', fontSize: '15px', color: '#1d4ed8', fontWeight: 600 }}>
                 <span>Advance Received</span>
@@ -1227,13 +1445,15 @@ export default function Checkout() {
               e.currentTarget.style.boxShadow = 'var(--shadow-md)';
             }}
           >
-            <FileText size={18}/> {editingExisting
-              ? 'Update Quotation'
-              : generateIntent === 'warranty'
-                ? 'Finalize & Generate Warranty'
-                : generateIntent === 'both'
-                  ? 'Finalize & Generate Quot + Warranty'
-                  : 'Finalize & Generate Quotation'}
+            {addonMode ? <PackagePlus size={18}/> : <FileText size={18}/>} {addonMode
+              ? `Add to Quotation ${addonQuotationId}`
+              : editingExisting
+                ? 'Update Quotation'
+                : generateIntent === 'warranty'
+                  ? 'Finalize & Generate Warranty'
+                  : generateIntent === 'both'
+                    ? 'Finalize & Generate Quot + Warranty'
+                    : 'Finalize & Generate Quotation'}
           </button>
           
         </div>
