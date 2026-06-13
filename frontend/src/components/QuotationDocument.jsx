@@ -408,10 +408,14 @@ function QuotationDocumentInner() {
 
   // Re-arm the budget on any content edit or font/image tick — WITHOUT dropping
   // back to the single measuring page (no flicker; blocks are re-measured in
-  // place across the already-rendered pages).
+  // place across the already-rendered pages). Also re-arm when the active tab
+  // changes: if the document was opened on a warranty tab (e.g. via a warranty's
+  // "Back" button, which sets activeTab to the warranty number), the quotation
+  // branch never mounted, so its measure pass could not run — switching to the
+  // quotation tab must get a fresh budget to paginate from scratch.
   React.useLayoutEffect(() => {
     qPagIterRef.current = 0;
-  }, [generatedDoc, layoutTick]);
+  }, [generatedDoc, layoutTick, activeTab]);
 
   // Measure-and-assign: read every block's fixed-size height (offsetHeight is
   // transform-immune, so the on-screen preview scale can't pollute it), then ask
@@ -483,7 +487,12 @@ function QuotationDocumentInner() {
       qPagIterRef.current += 1;
       setQPages(next);
     }
-  }, [qPages, generatedDoc, layoutTick]);
+    // `activeTab` is a dependency: the quotation pages (and `qPagesWrapRef`) only
+    // mount on the quotation tab, so this pass can only measure once that tab is
+    // active. Without it, arriving on a warranty tab and then switching to the
+    // quotation tab leaves `qPages` at its initial measuring value → the page
+    // renders clipped ("not showing fully").
+  }, [qPages, generatedDoc, layoutTick, activeTab]);
 
   // Re-measure once web fonts are ready (font metrics change line wrapping).
   React.useEffect(() => {
