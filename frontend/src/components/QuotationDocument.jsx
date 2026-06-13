@@ -17,10 +17,24 @@ const THEME_PRESETS = ['#8a1856', '#1e3a8a', '#14532d', '#c2410c', '#1f2937'];
 function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
+  const downPos = React.useRef(null);
 
   const startEditing = () => { setDraft(value ?? ''); setEditing(true); document.body.setAttribute('data-quotation-editing', 'true'); };
   const stopEditing  = () => { setEditing(false); document.body.removeAttribute('data-quotation-editing'); };
   const commit = () => { stopEditing(); if (String(draft) !== String(value ?? '')) onSave(numeric ? (parseFloat(draft) || 0) : draft); };
+
+  // A plain click opens edit mode, but dragging to highlight text — or clicking
+  // while a selection is active — must NOT, or the <span> is swapped for an
+  // <input> mid-selection and the value can never be copied. This guard keeps
+  // single-click-to-edit while letting users select & Ctrl+C any displayed text.
+  const onMouseDown = (e) => { downPos.current = { x: e.clientX, y: e.clientY }; };
+  const handleClick = (e) => {
+    const moved = downPos.current && (Math.abs(e.clientX - downPos.current.x) > 3 || Math.abs(e.clientY - downPos.current.y) > 3);
+    const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
+    const selecting = sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+    if (moved || selecting) return;
+    startEditing();
+  };
 
   if (editing) {
     const s = {
@@ -43,7 +57,8 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   const isEmpty = value == null || value === '';
   const display = renderValue ? renderValue(value) : (isEmpty ? <span style={{ color: '#bbb', fontStyle: 'italic' }}>{placeholder}</span> : value);
   return (
-    <span onClick={startEditing} title="Click to edit" className="q-editable" style={{ cursor: 'text', ...style }}>
+    <span onMouseDown={onMouseDown} onClick={handleClick} title="Click to edit · drag to select & copy"
+      className="q-editable" style={{ cursor: 'text', userSelect: 'text', WebkitUserSelect: 'text', ...style }}>
       {display}
     </span>
   );

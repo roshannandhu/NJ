@@ -26,10 +26,24 @@ const MAX_SCALE = 1.95;   // ceiling: grow this far to FILL the page when terms 
 export function EditableCell({ value, onSave, multiline = false, style = {}, renderValue, hideIcon }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(value || '');
+  const downPos = React.useRef(null);
   React.useEffect(() => { setDraft(value || ''); }, [value]);
 
   const stop = () => { setEditing(false); document.body.removeAttribute('data-warranty-editing'); };
   const commit = () => { stop(); if (draft !== value) onSave(draft); };
+
+  // Drag-to-highlight (or clicking with an active selection) must not flip the
+  // <span> into an <input> mid-selection, or the text can never be copied. A
+  // plain click still enters edit mode.
+  const startEdit = () => { setEditing(true); document.body.setAttribute('data-warranty-editing', 'true'); };
+  const onMouseDown = (e) => { downPos.current = { x: e.clientX, y: e.clientY }; };
+  const handleClick = (e) => {
+    const moved = downPos.current && (Math.abs(e.clientX - downPos.current.x) > 3 || Math.abs(e.clientY - downPos.current.y) > 3);
+    const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
+    const selecting = sel && !sel.isCollapsed && sel.toString().trim().length > 0;
+    if (moved || selecting) return;
+    startEdit();
+  };
 
   if (editing) {
     const s = {
@@ -50,8 +64,9 @@ export function EditableCell({ value, onSave, multiline = false, style = {}, ren
   }
   const content = renderValue ? renderValue(value) : (value || <span style={{ color: '#aaa', fontStyle: 'italic' }}>click to fill</span>);
   return (
-    <span onClick={() => { setEditing(true); document.body.setAttribute('data-warranty-editing', 'true'); }}
-      title="Click to edit" className="wc-editable" style={{ cursor: 'text', display: 'inline-block', width: '100%', ...style }}>
+    <span onMouseDown={onMouseDown} onClick={handleClick}
+      title="Click to edit · drag to select & copy" className="wc-editable"
+      style={{ cursor: 'text', display: 'inline-block', width: '100%', userSelect: 'text', WebkitUserSelect: 'text', ...style }}>
       {content}
       {hideIcon ? null : <Edit3 size={9} style={{ marginLeft: 4, opacity: 0.25, verticalAlign: 'middle', display: 'inline-block' }} />}
     </span>
