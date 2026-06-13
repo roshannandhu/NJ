@@ -55,6 +55,15 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 input, select, textarea { font-family: inherit; font-size: 14px; transition: all 0.2s; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-soft); }
 
+/* Copy & paste must work EVERYWHERE — quotation pages, settings, every catalogue.
+   Keep all text content selectable and every input / textarea / editable surface
+   fully selectable so nothing in the native window blocks Ctrl+C / V / X / A or
+   the right-click menu. (Decorative-only nodes opt out with user-select:none.) */
+input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 /* Global Utilities */
 .animate-fade-up {
   animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;

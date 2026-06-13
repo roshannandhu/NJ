@@ -1901,7 +1901,7 @@ function QuotationDocumentInner() {
                           </div>
                           {docBank.qr && (
                             <img src={docBank.qr} alt="Payment QR" crossOrigin="anonymous"
-                              style={{ width: QFIT(78), height: 'auto', objectFit: 'contain', flexShrink: 0 }} />
+                              style={{ width: QFIT(120), height: 'auto', objectFit: 'contain', flexShrink: 0 }} />
                           )}
                         </div>
                       );
