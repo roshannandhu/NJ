@@ -1,23 +1,19 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Response
 
 from database import get_db
 from models import Quotation, WarrantyCertificate
 import backup_service
+from routers.json_stream import stream_json_rows
 
 router = APIRouter()
 
 
 @router.get("/api/quotations")
 def list_quotations():
-    db = next(get_db())
-    try:
-        rows = db.query(Quotation).order_by(Quotation.created_at.desc()).all()
-        return [json.loads(r.data) for r in rows]
-    finally:
-        db.close()
+    return stream_json_rows(Quotation, order_by=Quotation.created_at.desc())
 
 
 @router.get("/api/quotations/{qid}")
@@ -27,7 +23,7 @@ def get_quotation(qid: str):
         row = db.query(Quotation).filter(Quotation.id == qid).first()
         if row is None:
             raise HTTPException(status_code=404, detail="Quotation not found")
-        return json.loads(row.data)
+        return Response(content=row.data, media_type="application/json")
     finally:
         db.close()
 
@@ -56,6 +52,8 @@ def save_quotation(body: dict = Body(...)):
         # Mirror version/updatedAt into the JSON blob so they survive in backups.
         body["version"] = new_version
         body["updatedAt"] = now.isoformat()
+        if is_new:
+            body["createdAt"] = now.isoformat()
         row.data = json.dumps(body)
         db.commit()
         db.refresh(row)

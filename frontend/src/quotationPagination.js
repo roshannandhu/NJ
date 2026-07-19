@@ -9,8 +9,9 @@
 // A Page is an ordered list of typed segments:
 //   { type: 'spec',  from, to, withHead }   — spec-table class rows [from, to)
 //   { type: 'items', from, to, withHead }   — item rows [from, to)
-//   { type: 'addonItems', from, to, withHead } — add-on order rows [from, to)
 //   { type: 'addRow' }                       — edit-only "Add line item" button
+//   { type: 'addonItems', from, to, withHead } — add-on order rows [from, to)
+//   { type: 'addonAddRow' }                  — edit-only "Add custom add-on" button
 //   { type: 'payTotals' }                    — payment + totals (atomic, never split)
 //   { type: 'deliveryNotes' }                — atomic
 //
@@ -21,7 +22,7 @@
 // (pages are overflow:hidden) — structurally near-impossible at fixed sizes.
 
 // heights: {
-//   payTotals, deliveryNotes, addRow                     — atomic block heights (0/null = absent)
+//   payTotals, deliveryNotes, addRow, addonAddRow        — atomic block heights (0/null = absent)
 //   specHead, specRows: number[], specMb                 — spec table (rows may be empty)
 //   itemsHead, itemRows: number[], itemsMb               — items table
 //   addonsHead, addonRows: number[], addonsMb            — add-on items table (absent on
@@ -82,8 +83,9 @@ export function paginateQuotation({ heights, availH }) {
 
   placeTable('spec', h.specHead || 0, h.specRows, h.specMb);
   placeTable('items', h.itemsHead || 0, h.itemRows, h.itemsMb);
-  placeTable('addonItems', h.addonsHead || 0, h.addonRows, h.addonsMb);
   placeAtomic('addRow', h.addRow);
+  placeTable('addonItems', h.addonsHead || 0, h.addonRows, h.addonsMb);
+  placeAtomic('addonAddRow', h.addonAddRow);
   placeAtomic('payTotals', h.payTotals);
   placeAtomic('deliveryNotes', h.deliveryNotes);
   flush();

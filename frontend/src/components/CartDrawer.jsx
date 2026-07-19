@@ -25,14 +25,14 @@ export default function CartDrawer() {
       }} onClick={() => setCartOpen(false)} />
 
       {/* Drawer */}
-      <div className="glass-dark" style={{
+      <div className="glass-dark cart-drawer" style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, width: '480px',
         zIndex: 1000, boxShadow: '-20px 0 60px rgba(0,0,0,0.2)',
         transform: cartOpen ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.4s cubic-bezier(0.19, 1, 0.22, 1)',
         display: 'flex', flexDirection: 'column', color: 'white'
       }}>
-        <div style={{ padding: '32px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="cart-drawer-head" style={{ padding: '32px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 400 }}>Your Cart</h2>
             <div style={{ fontSize: '13px', color: 'var(--ink-soft)', marginTop: '4px' }}>
@@ -49,7 +49,7 @@ export default function CartDrawer() {
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.cartId} style={{ padding: '20px 32px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: '16px', alignItems: 'center' }}>
+              <div className="cart-drawer-item" key={item.cartId} style={{ padding: '20px 32px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: '16px', alignItems: 'center' }}>
                 <div style={{ width: '60px', height: '60px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}></div>
                 <div>
                   <div style={{ fontSize: '15px', fontWeight: 500, marginBottom: '4px' }}>{item.name}</div>
@@ -72,7 +72,7 @@ export default function CartDrawer() {
           )}
         </div>
 
-        <div style={{ padding: '32px', background: 'rgba(0,0,0,0.5)', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="cart-drawer-footer" style={{ padding: '32px', background: 'rgba(0,0,0,0.5)', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '24px' }}>
             <span style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--ink-soft)' }}>Subtotal (before tax)</span>
             <span style={{ fontFamily: 'var(--font-display)', fontSize: '32px', fontWeight: 500 }}>{cur}{cartTotal.toFixed(2)}</span>

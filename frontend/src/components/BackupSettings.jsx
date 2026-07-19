@@ -43,8 +43,9 @@ const restoreMsg = (r) => {
   const u = r?.updated || {};
   const upd = (u.quotations || 0) + (u.warranty_certificates || 0);
   let msg = `Added ${a.quotations || 0} quotations, ${a.warranty_certificates || 0} warranties`;
-  if (upd > 0) msg += ` (${upd} existing updated)`;
-  if (r?.mode === 'replace') msg = `Replaced everything — ${msg.toLowerCase()}`;
+  if (upd > 0) msg += ` (${upd} updated)`;
+  if ((r?.restored_images || 0) > 0) msg += `, ${r.restored_images} images`;
+  if (r?.mode === 'replace') msg = `Replaced — ${msg.toLowerCase()}`;
   return msg;
 };
 
@@ -99,6 +100,7 @@ export default function BackupSettings() {
   
   const [resetConfirm, setResetConfirm] = useState('');
   const [uploadsInfo, setUploadsInfo] = useState(null);
+  const [busyExport, setBusyExport] = useState('');
 
   const fileRef = useRef(null);
   const catalogRestoreRef = useRef(null);
@@ -182,7 +184,7 @@ export default function BackupSettings() {
     const keys = items.map(it => `${kind}|${it.id ?? it}`);
     const allOn = keys.every(k => pick[k]);
     return (
-      <div style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      <div className="backup-recovery-list" style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-warm)' }}>
           <span style={{ fontWeight: 700, fontSize: 13, color: accent }}>{title} ({items.length})</span>
           <button style={{ ...btnStyle, padding: '3px 8px', fontSize: 11 }} onClick={() => pickMany(keys, !allOn)}>{allOn ? 'Clear' : 'Select all'}</button>
@@ -208,7 +210,7 @@ export default function BackupSettings() {
     const keys = rows.map(r => `cfg|${r.key}|${r.id}`);
     const allOn = keys.every(k => pick[k]);
     return (
-      <div style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      <div className="backup-recovery-list" style={{ border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--bg-warm)' }}>
           <span style={{ fontWeight: 700, fontSize: 13 }}>Missing catalog items ({rows.length})</span>
           <button style={{ ...btnStyle, padding: '3px 8px', fontSize: 11 }} onClick={() => pickMany(keys, !allOn)}>{allOn ? 'Clear' : 'Select all'}</button>
@@ -241,7 +243,7 @@ export default function BackupSettings() {
       );
     };
     return (
-      <div style={{ border: '1px solid #fde68a', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
+      <div className="backup-recovery-list" style={{ border: '1px solid #fde68a', borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
         <div style={{ padding: '8px 12px', background: '#fffbeb', fontWeight: 700, fontSize: 13, color: '#b45309', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Conflicts — review ({cq.length + cw.length})</span>
           <span style={{ fontWeight: 500, fontSize: 11 }}>tick to overwrite local with the backup version</span>
@@ -487,9 +489,9 @@ export default function BackupSettings() {
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin:'0 auto', padding: '0', fontFamily: 'var(--font-body)', color: 'var(--ink)' }}>
+    <div className="backup-settings-page" style={{ maxWidth: 1100, margin:'0 auto', padding: '0', fontFamily: 'var(--font-body)', color: 'var(--ink)' }}>
       {/* TABBED INTERFACE */}
-      <div style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--line)' }}>
+      <div className="backup-tabs" style={{ display: 'flex', gap: 24, borderBottom: '1px solid var(--line)' }}>
         {[
           { id: 'overview', label: 'Overview' },
           { id: 'destinations', label: 'Destinations' },
@@ -517,9 +519,9 @@ export default function BackupSettings() {
             TAB: DESTINATIONS
         -------------------------------------- */}
         {activeTab === 'destinations' && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}>
+              <div className="backup-destinations" style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}>
                 {/* Header */}
-                <div style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '8px 12px', background: 'var(--bg-warm)', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line)' }}>
+                <div className="backup-destination-head" style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '8px 12px', background: 'var(--bg-warm)', fontSize: 12, fontWeight: 600, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line)' }}>
                   <div>En</div><div>Location</div><div>Status</div><div>Path</div><div/>
                 </div>
 
@@ -540,7 +542,7 @@ export default function BackupSettings() {
                   return (
                     <React.Fragment key={name}>
                       {/* Master Row */}
-                      <div onClick={() => setExpandedLoc(isExpanded ? null : name)}
+                      <div className="backup-destination-row" onClick={() => setExpandedLoc(isExpanded ? null : name)}
                         style={{ display: 'grid', gridTemplateColumns: '40px 150px 100px 1fr 40px', padding: '10px 12px', borderBottom: i < DEST_NAMES.length - 1 || isExpanded ? '1px solid var(--line)' : 'none', alignItems: 'center', fontSize: 13, cursor: 'pointer', background: isExpanded ? 'var(--bg)' : 'transparent' }}>
                         
                         <div onClick={e => e.stopPropagation()}>
@@ -566,7 +568,7 @@ export default function BackupSettings() {
 
                       {/* Detail Expander */}
                       {isExpanded && isCloud && (
-                        <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                        <div className="backup-destination-detail" style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           {cs.connected ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 13, color: '#10B981', fontWeight: 600 }}>✓ Connected{cs.email ? ` as ${cs.email}` : ''}</span>
@@ -620,8 +622,8 @@ export default function BackupSettings() {
                       )}
 
                       {isExpanded && !isCloud && (
-                        <div style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div className="backup-destination-detail" style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                          <div className="backup-destination-controls" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                             {name === 'dropbox' ? (
                               <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="Dropbox folder" style={{ ...inpStyle, flex: 1 }} />
                             ) : (
@@ -671,7 +673,7 @@ export default function BackupSettings() {
             -------------------------------------- */}
             {activeTab === 'recovery' && (
               <div>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+                <div className="backup-recovery-toolbar" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
                   <select value={recBackupSel} onChange={e => setRecBackupSel(e.target.value)} style={{ ...inpStyle, minWidth: 300 }}>
                     {recBackups.length === 0 && <option value="">No backups found on connected destinations</option>}
                     {recBackups.map(b => (
@@ -747,7 +749,7 @@ export default function BackupSettings() {
         -------------------------------------- */}
         {activeTab === 'tools' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 24, alignItems: 'start' }}>
+            <div className="backup-tools-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 24, alignItems: 'start' }}>
 
               {/* Export & Utilities */}
               <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 16, background: 'var(--surface)' }}>
@@ -755,28 +757,49 @@ export default function BackupSettings() {
                   Export &amp; Utilities
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadBackup}>
-                    <Download size={14} /> Export Full Backup (Both)
-                  </button>
-                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
+                  <button
+                    style={{ ...btnStyle, justifyContent: 'flex-start', opacity: busyExport ? 0.65 : 1 }}
+                    disabled={!!busyExport}
                     onClick={async () => {
+                      setBusyExport('full');
+                      try { await downloadBackup(); }
+                      catch (e) { showToast(e.message || 'Export failed', 'error'); }
+                      finally { setBusyExport(''); }
+                    }}>
+                    <Download size={14} /> {busyExport === 'full' ? 'Exporting…' : 'Export Full Backup (Both)'}
+                  </button>
+                  <button style={{ ...btnStyle, justifyContent: 'flex-start', opacity: busyExport ? 0.65 : 1 }}
+                    disabled={!!busyExport}
+                    onClick={async () => {
+                      setBusyExport('share');
                       try {
                         const { blob, filename } = await fetchBackupBlob();
                         const r = await shareFiles([blobToFile(blob, filename, 'application/zip')], { title: 'NJ India — full backup', text: 'All quotations, warranties & catalog' });
                         showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
-                      } catch { showToast('Share failed', 'error'); }
+                      } catch (e) { showToast(e.message || 'Share failed', 'error'); }
+                      finally { setBusyExport(''); }
                     }}>
-                    <Share2 size={14} /> Share Full Backup (everything)
+                    <Share2 size={14} /> {busyExport === 'share' ? 'Preparing…' : 'Share Full Backup (everything)'}
                   </button>
-                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadCatalogBackup}>
-                    <Download size={14} /> Export Catalog
-                    {uploadsInfo && (
+                  <button
+                    style={{ ...btnStyle, justifyContent: 'flex-start', opacity: busyExport ? 0.65 : 1 }}
+                    disabled={!!busyExport}
+                    onClick={async () => {
+                      setBusyExport('catalog');
+                      try { await downloadCatalogBackup(); }
+                      catch (e) { showToast(e.message || 'Export failed', 'error'); }
+                      finally { setBusyExport(''); }
+                    }}>
+                    <Download size={14} />
+                    {busyExport === 'catalog' ? 'Exporting…' : 'Export Catalog'}
+                    {!busyExport && uploadsInfo && (
                       <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--ink-soft)', fontWeight: 600 }}>
                         {uploadsInfo.count} images · .zip
                       </span>
                     )}
                   </button>
                   <button style={{ ...btnStyle, justifyContent: 'flex-start' }}
+                    disabled={!!busyExport || busy}
                     onClick={() => catalogRestoreRef.current?.click()}>
                     <RotateCcw size={14} /> Restore Catalog
                   </button>
@@ -793,13 +816,22 @@ export default function BackupSettings() {
                       setBusy(true);
                       try {
                         const r = await restoreCatalogFromFile(file, restoreMode);
-                        showToast(`Catalogue ${replace ? 'replaced' : 'restored'}, ${r.restored_images ?? 0} images. Reloading...`);
+                        const imgs = r.restored_images > 0 ? `, ${r.restored_images} images` : '';
+                        showToast(`Catalogue ${replace ? 'replaced' : 'restored'}${imgs}. Reloading...`);
                         setTimeout(() => window.location.reload(), 1400);
                       } catch (err) { showToast(err.message || 'Restore failed', 'error'); setBusy(false); }
                     }}
                   />
-                  <button style={{ ...btnStyle, justifyContent: 'flex-start' }} onClick={downloadHistoryBackup}>
-                    <Download size={14} /> Export History
+                  <button
+                    style={{ ...btnStyle, justifyContent: 'flex-start', opacity: busyExport ? 0.65 : 1 }}
+                    disabled={!!busyExport}
+                    onClick={async () => {
+                      setBusyExport('history');
+                      try { await downloadHistoryBackup(); }
+                      catch (e) { showToast(e.message || 'Export failed', 'error'); }
+                      finally { setBusyExport(''); }
+                    }}>
+                    <Download size={14} /> {busyExport === 'history' ? 'Exporting…' : 'Export History'}
                   </button>
 
                   <div style={{ height: '1px', background: 'var(--line)', margin: '4px 0' }}></div>
@@ -834,10 +866,10 @@ export default function BackupSettings() {
 
             {/* Restore Snapshot panel (toggled by "Restore Database") */}
             {showRestore && (
-              <div style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 20, background: 'var(--surface)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div className="backup-restore-panel" style={{ border: '1px solid var(--line)', borderRadius: 6, padding: 20, background: 'var(--surface)' }}>
+                <div className="backup-restore-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                    <div style={{ fontSize: 14, fontWeight: 600 }}>Restore Snapshot</div>
-                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                   <div className="backup-restore-actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                      {/* Import mode selector — Merge (safe) is the default. */}
                      <div style={{ display: 'flex', border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
                        {[
@@ -868,12 +900,12 @@ export default function BackupSettings() {
                 {loadingFiles ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Loading...</div>
                 : !files.length ? <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>No backups found.</div>
                 : (
-                  <div style={{ border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '6px 12px', background: 'var(--bg-warm)', fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)' }}>
+                  <div className="backup-files-table" style={{ border: '1px solid var(--line)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div className="backup-files-head" style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '6px 12px', background: 'var(--bg-warm)', fontSize: 11, fontWeight: 600, color: 'var(--ink-soft)' }}>
                       <div>Date</div><div>Target</div><div>Filename</div><div></div>
                     </div>
                     {files.map((f, i) => (
-                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '8px 12px', borderTop: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
+                      <div className="backup-file-row" key={i} style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '8px 12px', borderTop: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
                         <div>{new Date(f.modified_iso).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
                         <div style={{ color: 'var(--ink-mid)' }}>{DEST[f.target]?.label}</div>
                         <div style={{ color: 'var(--ink-soft)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>{f.filename}</div>
@@ -888,7 +920,7 @@ export default function BackupSettings() {
             )}
 
             {/* Danger Zone */}
-            <div style={{ border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 6, padding: '16px 20px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="backup-danger-zone" style={{ border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 6, padding: '16px 20px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                <div>
                  <div style={{ fontSize: 14, fontWeight: 600, color: '#EF4444', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                    <Trash2 size={16}/> Factory Reset
@@ -897,7 +929,7 @@ export default function BackupSettings() {
                    Clear all history (Quotations & Warranties). Product Catalog is kept.
                  </div>
                </div>
-               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+               <div className="backup-danger-actions" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                   <input value={resetConfirm} onChange={e => setResetConfirm(e.target.value)} placeholder="Type DELETE" style={{ ...inpStyle, width: 120, borderColor: 'rgba(239, 68, 68, 0.3)', textAlign: 'center' }} />
                   <button disabled={busy || resetConfirm !== 'DELETE'} onClick={handleReset} style={{ ...btnStyle, color: resetConfirm === 'DELETE' ? '#fff' : '#EF4444', background: resetConfirm === 'DELETE' ? '#EF4444' : 'transparent', borderColor: resetConfirm === 'DELETE' ? '#EF4444' : 'rgba(239, 68, 68, 0.3)' }}>
                     Clear History
@@ -911,10 +943,11 @@ export default function BackupSettings() {
       {/* ── In-app folder browser modal (Local Disk / USB "Choose Folder") ── */}
       {browse && (
         <div
+          className="backup-folder-backdrop"
           onClick={() => setBrowse(null)}
           style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)',
             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div onClick={e => e.stopPropagation()}
+          <div className="backup-folder-modal" onClick={e => e.stopPropagation()}
             style={{ width: 560, maxWidth: '92vw', maxHeight: '82vh', display: 'flex', flexDirection: 'column',
               background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.25))', overflow: 'hidden' }}>
             {/* Header */}
@@ -960,7 +993,7 @@ export default function BackupSettings() {
             </div>
 
             {/* Footer actions */}
-            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="backup-folder-footer" style={{ padding: '12px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <button style={btnStyle} disabled={!browse.current || browse.loading} onClick={handleNewFolder}>
                 <Database size={14} /> New Folder
               </button>

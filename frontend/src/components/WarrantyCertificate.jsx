@@ -148,12 +148,12 @@ function FittedImg({ src, fallbackSrc = null, maxW, maxH, alt = '', style = {} }
       im.onerror = onFail;
       im.src = url;
     };
-    const useFallback = () => {
+    const tryFallback = () => {
       if (isImgSrc(fallbackSrc)) load(fallbackSrc, () => { if (alive) setMeta(null); });
       else if (alive) setMeta(null);
     };
-    if (isImgSrc(src)) load(src, useFallback);
-    else useFallback();
+    if (isImgSrc(src)) load(src, tryFallback);
+    else tryFallback();
     return () => { alive = false; };
   }, [src, fallbackSrc]);
 
@@ -196,7 +196,7 @@ function CustomerDetails({ customer, certData, template, fallbackDate, invoiceFa
         {field('Customer Name', customer.name, v => edit?.onUpdateCustomerField('name', v))}
         {field('Product', certData.productName, v => edit?.onUpdateCertField('productName', v))}
         {field('Date', certData.purchaseDate || fallbackDate, v => edit?.onUpdateCertField('purchaseDate', v))}
-        {field('Invoice Number', certData.invoiceNo || invoiceFallback || '', v => edit?.onUpdateCertField('invoiceNo', v))}
+        {field('Seller', certData.invoiceNo || invoiceFallback || '', v => edit?.onUpdateCertField('invoiceNo', v))}
         {field('Warranty Period', certData.warrantyPeriod || template.duration || '', v => edit?.onUpdateCertField('warrantyPeriod', v))}
       </div>
     </div>
@@ -246,13 +246,15 @@ export default function WarrantyCertificate({
   const termsRegionRef = React.useRef(null);
   const measureRef = React.useRef(null);
   const fitStRef = React.useRef({ key: '', iter: 0, frozen: false });
+  const previewShellRef = React.useRef(null);
+  const pageRef = React.useRef(null);
 
   const isDocke = template.id === 'docke';
   const sections = template.sections || [];
   const sectionsJson = JSON.stringify(sections);
   const blocks = React.useMemo(() => buildBlocks(openingText, sections), [openingText, sectionsJson]);
   const hasSeriesTable = !!(template.showSeriesTable && template.seriesTable && template.seriesTable.length > 0);
-  const hasHeatoutTable = !!template.heatoutTable;
+  const hasHeatoutTable = template.heatoutTable === true;
 
   const termsKey = `${openingText || ''}|${sectionsJson}`;
   const tablesKey = `${JSON.stringify(template.seriesTable || [])}|${!!template.heatoutTable}|${!!template.showSeriesTable}`;
@@ -351,13 +353,40 @@ export default function WarrantyCertificate({
     setFit({ scale: next, split });
   }, [fit.scale, fit.split, editingTerms, termsKey, tablesKey, detailsKey, blocks, fontTick]);
 
+  React.useLayoutEffect(() => {
+    const shell = previewShellRef.current;
+    const page = pageRef.current;
+    if (!shell || !page) return undefined;
+
+    const fitPage = () => {
+      const availableWidth = shell.clientWidth;
+      if (!availableWidth) return;
+
+      const scale = Math.min(1, availableWidth / 794);
+      page.style.transform = scale < 1 ? `scale(${scale})` : 'none';
+      page.style.transformOrigin = 'top center';
+      page.style.marginBottom = scale < 1 ? `${1123 * scale - 1123}px` : '0px';
+    };
+
+    fitPage();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitPage) : null;
+    observer?.observe(shell);
+    window.addEventListener('resize', fitPage);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', fitPage);
+    };
+  }, []);
+
   const split = (fit.split == null) ? blocks.length : fit.split;
   const col1Blocks = blocks.slice(0, split);
   const col2Blocks = blocks.slice(split);
 
 
   return (
-    <div className="wc-doc" id={domId} style={{ '--wc-term-scale': fit.scale }}>
+    <div className="wc-preview-shell" ref={previewShellRef}>
+    <div className="wc-doc" id={domId} ref={pageRef} style={{ '--wc-term-scale': fit.scale }}>
       <style dangerouslySetInnerHTML={{ __html: WC_CSS }} />
 
       {/* ══ HEADER ══ */}
@@ -365,7 +394,7 @@ export default function WarrantyCertificate({
         {/* Auto-generated identifiers — absolutely positioned at the header's
             top-right, beside the logo, so they NEVER add vertical space. */}
         {(warrantyNo || orderNo) && (
-          <div style={{ position: 'absolute', top: 0, right: 0, textAlign: 'right', fontSize: '8.5pt', lineHeight: 1.35, color: '#555', fontWeight: 700 }}>
+          <div style={{ position: 'absolute', top: 0, right: 0, textAlign: 'right', fontSize: '9pt', lineHeight: 1.35, color: '#000', fontWeight: 700 }}>
             {warrantyNo && <div>Certificate No: {warrantyNo}</div>}
             {orderNo && <div>Order No: {orderNo}</div>}
           </div>
@@ -424,8 +453,15 @@ export default function WarrantyCertificate({
             <div className="wc-term-col" style={{ '--wc-term-scale': fit.scale }}>{col1Blocks.map((b, i) => <TermBlock key={`c1-${i}`} b={b} first={i === 0} />)}</div>
             <div className="wc-term-col" style={{ '--wc-term-scale': fit.scale, paddingBottom: SEAL_BOX + 16 }}>{col2Blocks.map((b, i) => <TermBlock key={`c2-${split + i}`} b={b} first={i === 0} />)}</div>
           </div>
-          {/* Seal pinned to the bottom-right end of the terms (above the tables). */}
-          <div className="wc-term-seal"><Seal template={template} /></div>
+          {/* Seal and Signature pinned to the bottom-right end of the terms (above the tables). */}
+          <div className="wc-term-seal">
+            <div className="wc-sig-block">
+              <div className="wc-sig-area">
+                <FittedImg src={template.signImage} maxW={150} maxH={50} alt="Signature" />
+              </div>
+            </div>
+            <Seal template={template} />
+          </div>
         </div>
       )}
 
@@ -472,28 +508,22 @@ export default function WarrantyCertificate({
         ? <CertificateDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} warrantyNo={warrantyNo} orderNo={orderNo} />
         : <CustomerDetails customer={customer} certData={certData} template={template} fallbackDate={fallbackDate} invoiceFallback={invoiceFallback} edit={edit} warrantyNo={warrantyNo} />}
 
-      {/* ══ FOOTER — signature only (fixed) ══ */}
-      <div className="wc-footer">
-        <div className="wc-sig-block">
-          <div className="wc-sig-area">
-            {/* Same crisp, html2canvas-safe <img> sizing as the seal, so the
-                signature can't vanish, distort or blur in the exported PDF. */}
-            <FittedImg src={template.signImage} maxW={300} maxH={62} alt="Signature" />
-          </div>
-          <div className="wc-sig-line" />
-          <div className="wc-sig-name">Seller's Signature</div>
-        </div>
-      </div>
+    </div>
     </div>
   );
 }
 
 const WC_CSS = `
+  .wc-preview-shell {
+    width: 100%; max-width: 100%; min-width: 0; overflow: hidden;
+    display: flex; justify-content: center; align-items: flex-start;
+  }
   .wc-doc {
     background: #fff; width: 794px; max-width: 794px; height: 1123px;
+    flex-shrink: 0;
     padding: 38px 52px 32px; margin: 0 auto;
-    font-family: 'Times New Roman', Times, Georgia, serif; color: #1a1a1a;
-    font-size: 10.5pt; line-height: 1.5; box-sizing: border-box; position: relative;
+    font-family: 'Times New Roman', Times, Georgia, serif; color: #000;
+    font-size: 9pt; line-height: 1.5; box-sizing: border-box; position: relative;
     overflow: hidden; border: 1px solid #d8d8d8; box-shadow: 0 4px 32px rgba(0,0,0,0.10);
     display: flex; flex-direction: column;
   }
@@ -511,64 +541,65 @@ const WC_CSS = `
 
   .wc-logo { font-family: 'Playfair Display', Georgia, serif; font-size: 60pt; font-weight: 900; letter-spacing: 0.04em; color: #111; margin: 0; line-height: 1.02; }
   .wc-logo-sub { font-size: 9pt; letter-spacing: 0.28em; text-transform: uppercase; color: #444; font-weight: 700; margin: 2px 0 0; font-family: 'Times New Roman', Times, Georgia, serif; }
-  .wc-banner { text-align: center; font-size: calc(10.4pt * var(--wc-term-scale, 1)); letter-spacing: 0.34em; font-weight: 700; margin: 9px 0; text-transform: uppercase; color: #1a1a1a; font-family: 'Times New Roman', Times, Georgia, serif; flex-shrink: 0; }
+  .wc-banner { text-align: center; font-size: calc(9pt * var(--wc-term-scale, 1)); letter-spacing: 0.34em; font-weight: 700; margin: 9px 0; text-transform: uppercase; color: #000; font-family: 'Times New Roman', Times, Georgia, serif; flex-shrink: 0; }
 
   .wc-terms-region { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
   .wc-terms-cols { display: grid; grid-template-columns: 1fr 1fr; gap: ${COL_GAP}px; height: 100%; align-content: start; }
-  .wc-term-col { font-size: calc(10.4pt * var(--wc-term-scale, 1)); line-height: 1.4; color: #2a2a2a; min-width: 0; }
-  .wc-term-opening { font-size: calc(10.4pt * var(--wc-term-scale, 1)); margin: 0 0 calc(9px * var(--wc-term-scale, 1)); text-align: justify; }
+  .wc-term-col { font-size: calc(9pt * var(--wc-term-scale, 1)); line-height: 1.4; color: #000; min-width: 0; }
+  .wc-term-opening { font-size: calc(9pt * var(--wc-term-scale, 1)); margin: 0 0 calc(9px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-opening em { font-style: italic; font-weight: 700; }
-  .wc-term-head { font-size: calc(10.4pt * var(--wc-term-scale, 1)); font-weight: 700; color: #1a1a1a; margin: calc(9px * var(--wc-term-scale, 1)) 0 calc(5px * var(--wc-term-scale, 1)); padding-bottom: calc(3px * var(--wc-term-scale, 1)); border-bottom: 1px solid #e2e2e2; font-family: 'Times New Roman', Times, Georgia, serif; break-inside: avoid; }
+  .wc-term-head { font-size: calc(9pt * var(--wc-term-scale, 1)); font-weight: 700; color: #000; margin: calc(9px * var(--wc-term-scale, 1)) 0 calc(5px * var(--wc-term-scale, 1)); padding-bottom: calc(3px * var(--wc-term-scale, 1)); border-bottom: 1px solid #ccc; font-family: 'Times New Roman', Times, Georgia, serif; break-inside: avoid; }
   .wc-term-head-first { margin-top: 0; }
   .wc-term-para { margin: 0 0 calc(5px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-bullet { display: flex; gap: 6px; margin: 0 0 calc(4px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-dot { color: #8b1a1a; flex-shrink: 0; }
-  .wc-term-seal { position: absolute; right: 0; bottom: 0; width: ${SEAL_BOX}px; height: ${SEAL_BOX}px; display: flex; align-items: flex-end; justify-content: flex-end; }
+  .wc-term-seal { position: absolute; right: 0; bottom: 0; height: ${SEAL_BOX}px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 15px; padding-bottom: 5px; }
   .wc-measure { position: absolute; left: -99999px; top: 0; visibility: hidden; pointer-events: none; }
 
   .wc-edit-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
   .wc-edit-sec { margin-bottom: 12px; }
-  .wc-edit-sec-head { display: flex; align-items: center; gap: 8px; font-size: 12pt; font-weight: 700; margin-bottom: 4px; }
+  .wc-edit-sec-head { display: flex; align-items: center; gap: 8px; font-size: 9pt; font-weight: 700; margin-bottom: 4px; }
   .wc-rm-btn { background: transparent; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 9pt; padding: 0 0 0 6px; }
-  .wc-add-btn { padding: 6px 12px; border: 1.5px dashed #c9a3a3; border-radius: 6px; background: transparent; color: #8b1a1a; font-weight: 700; font-size: 9.5pt; cursor: pointer; margin-top: 6px; }
-  .wc-done-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; border: none; background: var(--accent, #c2410c); color: #fff; font-weight: 700; font-size: 10pt; cursor: pointer; margin-bottom: 12px; }
+  .wc-add-btn { padding: 6px 12px; border: 1.5px dashed #c9a3a3; border-radius: 6px; background: transparent; color: #8b1a1a; font-weight: 700; font-size: 9pt; cursor: pointer; margin-top: 6px; }
+  .wc-done-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; border: none; background: var(--accent, #c2410c); color: #fff; font-weight: 700; font-size: 9pt; cursor: pointer; margin-bottom: 12px; }
 
   .wc-tables { flex-shrink: 0; margin-top: 10px; }
-  .wc-table-title { font-size: calc(10.4pt * var(--wc-term-scale, 1)); font-weight: 700; color: #1a1a1a; margin: 0 0 4px; font-family: 'Times New Roman', Times, Georgia, serif; }
-  .wc-table { width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 8px; font-size: calc(10.4pt * var(--wc-term-scale, 1)); }
-  .wc-table th { color: #1a1a1a; padding: 4px 9px; text-align: left; font-size: calc(10.4pt * var(--wc-term-scale, 1)); letter-spacing: 0.04em; font-weight: 700; font-family: 'Times New Roman', Times, Georgia, serif; border: none; border-bottom: 1.5px solid #cfcfcf; }
-  .wc-table td { padding: 5px 9px; border: none; border-bottom: 1px solid #ededed; vertical-align: middle; }
+  .wc-table-title { font-size: calc(9pt * var(--wc-term-scale, 1)); font-weight: 700; color: #000; margin: 0 0 4px; font-family: 'Times New Roman', Times, Georgia, serif; }
+  .wc-table { width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 8px; font-size: calc(9pt * var(--wc-term-scale, 1)); }
+  .wc-table th { color: #000; padding: 4px 9px; text-align: left; font-size: calc(9pt * var(--wc-term-scale, 1)); letter-spacing: 0.04em; font-weight: 700; font-family: 'Times New Roman', Times, Georgia, serif; border: 1px solid #000; border-bottom: 1.5px solid #000; }
+  .wc-table td { padding: 5px 9px; border: 1px solid #000; vertical-align: middle; }
   .wc-dur, .wc-pct { font-weight: 700; color: #8b1a1a; text-align: center; }
   .wc-pct { min-width: 70px; }
 
   .wc-details { flex-shrink: 0; margin-top: 10px; padding-top: 12px; border-top: 1px solid #e2e2e2; }
-  .wc-det-title { font-size: calc(10.4pt * var(--wc-term-scale, 1)); font-weight: 700; letter-spacing: 0.04em; margin: 0 0 7px; color: #1a1a1a; font-family: 'Times New Roman', Times, Georgia, serif; }
+  .wc-det-title { font-size: calc(9pt * var(--wc-term-scale, 1)); font-weight: 700; letter-spacing: 0.04em; margin: 0 0 7px; color: #000; font-family: 'Times New Roman', Times, Georgia, serif; }
   .wc-det-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 44px; }
   .wc-det-field { display: flex; flex-direction: column; gap: 2px; }
-  .wc-doc .wc-det-lbl { font-size: calc(10.4pt * var(--wc-term-scale, 1)); letter-spacing: 0.1em; text-transform: uppercase; color: #8a8a8a; font-weight: 700; }
-  .wc-doc .wc-det-val { font-size: calc(10.4pt * var(--wc-term-scale, 1)); font-weight: 700; color: #1a1a1a; border-bottom: 1px solid #d8d8d8; padding: 1px 2px 4px; min-height: 20px; }
-  .wc-cert-row { display: flex; align-items: baseline; padding: 3px 0; border-bottom: 1px dotted #ccc; font-size: calc(10.4pt * var(--wc-term-scale, 1)); gap: 10px; }
-  .wc-doc .wc-cert-lbl { min-width: 200px; color: #444; font-weight: 600; font-size: calc(10.4pt * var(--wc-term-scale, 1)); flex-shrink: 0; }
+  .wc-doc .wc-det-lbl { font-size: calc(9pt * var(--wc-term-scale, 1)); letter-spacing: 0.1em; text-transform: uppercase; color: #333; font-weight: 700; }
+  .wc-doc .wc-det-val { font-size: calc(9pt * var(--wc-term-scale, 1)); font-weight: 700; color: #000; border-bottom: 1px solid #000; padding: 1px 2px 4px; min-height: 20px; }
+  .wc-cert-row { display: flex; align-items: baseline; padding: 3px 0; border-bottom: 1px dotted #000; font-size: calc(9pt * var(--wc-term-scale, 1)); gap: 10px; }
+  .wc-doc .wc-cert-lbl { min-width: 200px; color: #111; font-weight: 600; font-size: calc(9pt * var(--wc-term-scale, 1)); flex-shrink: 0; }
   .wc-doc .wc-cert-lbl::after { content: ':'; }
-  .wc-doc .wc-cert-val { font-weight: 700; color: #111; flex: 1; border-bottom: 1px solid #999; min-height: 20px; padding: 0 4px 1px; }
-  .wc-doc .wc-cert-val-static { font-weight: 700; color: #111; flex: 1; padding: 0 4px 1px; border-bottom: 1px solid #ddd; }
+  .wc-doc .wc-cert-val { font-weight: 700; color: #000; flex: 1; border-bottom: 1px solid #000; min-height: 20px; padding: 0 4px 1px; }
+  .wc-doc .wc-cert-val-static { font-weight: 700; color: #000; flex: 1; padding: 0 4px 1px; border-bottom: 1px solid #000; }
 
   .wc-editable { display: inline-flex; align-items: center; gap: 2px; border-radius: 2px; padding: 0 2px; width: 100%; }
   .wc-editable:hover { background: rgba(139,26,26,0.05); outline: 1px dashed rgba(139,26,26,0.35); }
   .wc-terms-click { cursor: text; }
   .wc-terms-click:hover { outline: 1px dashed rgba(139,26,26,0.25); border-radius: 3px; }
 
-  .wc-doc .wc-footer { flex-shrink: 0; margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e2e2; display: flex; justify-content: flex-end; }
-  .wc-sig-block { text-align: center; font-size: 10pt; color: #555; width: 320px; }
+  /* Footer removed since signature is now in the terms region */
+  .wc-sig-block { text-align: center; font-size: 9pt; color: #000; width: 170px; margin-bottom: -5px; }
   /* Fixed-height area the signature image sits in, resting ON the line below.
      The signature <img> is sized inline by FittedImg (definite dims = crisp +
      reliable in the html2canvas capture). */
-  .wc-sig-area { height: 62px; display: flex; align-items: flex-end; justify-content: center; }
-  .wc-sig-line { border-bottom: 1px solid #111; width: 300px; margin: 2px auto 0; }
-  .wc-sig-name { color: #111; font-weight: 700; font-size: 12pt; padding-top: 5px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
+  .wc-sig-area { height: 50px; display: flex; align-items: flex-end; justify-content: center; }
+  .wc-sig-line { border-bottom: 1px solid #000; width: 150px; margin: 2px auto 0; }
+  .wc-sig-name { color: #000; font-weight: 700; font-size: 10pt; padding-top: 5px; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0.05em; }
 
   @media print {
     @page { size: A4 portrait; margin: 0; }
+    .wc-preview-shell { width: 794px !important; max-width: none !important; overflow: visible !important; display: block !important; }
     .wc-doc { box-shadow: none !important; border: none !important; margin: 0 !important; }
   }
 `;

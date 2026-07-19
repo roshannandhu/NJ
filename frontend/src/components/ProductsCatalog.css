@@ -74,11 +74,11 @@
 
 /* ── Modals ─────────────────────────────────────────────────────────────── */
 .pc-backdrop { position: fixed; inset: 0; background: rgba(20,12,8,0.34); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; animation: pc-fade 0.18s ease; }
-.pc-modal { width: 560px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); animation: pc-pop 0.22s cubic-bezier(0.2,0.7,0.2,1); }
+.pc-modal { width: 560px; max-width: 100%; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-xl); animation: pc-pop 0.22s cubic-bezier(0.2,0.7,0.2,1); }
 .pc-vmodal { width: 880px; }
 .pc-modal-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, var(--accent-soft), transparent 70%); }
 .pc-modal-head h3 { font-size: 16px; font-weight: 800; margin: 0; color: var(--ink); flex: 1; }
-.pc-modal-body { padding: 22px; }
+.pc-modal-body { min-height: 0; overflow-y: auto; padding: 22px; overscroll-behavior: contain; }
 .pc-modal-foot { display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--bg-warm); }
 .pc-vmodal-grid { display: grid; grid-template-columns: 1fr 250px; gap: 26px; align-items: start; }
 .pc-vmodal-preview { position: sticky; top: 0; }
@@ -92,3 +92,43 @@
 @keyframes pc-pop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pc, .pc-modal, .pc-backdrop, .pc-strip { animation: none !important; transition: none !important; } }
 @media (max-width: 860px) { .pc-vmodal { width: 100%; } .pc-vmodal-grid { grid-template-columns: 1fr; } .pc-vmodal-preview { position: static; } }
+
+@media (max-width: 600px) {
+  .pc, .pc-modal, .pc-backdrop { animation: none; }
+  .pc-overview { align-items: flex-start !important; gap: 8px; }
+  .pc-overview > div:first-child { min-width: 0; line-height: 1.45; }
+  .pc-overview > div:last-child { flex: 0 0 auto; }
+  .pc-section-head { padding: 12px 14px; gap: 9px; flex-wrap: wrap; }
+  .pc-section-head h3 { min-width: 0; overflow-wrap: anywhere; }
+  .pc-section-head .pc-sub { display: none; }
+  .pc-section-body { padding: 11px; }
+  .pc-strip { gap: 9px; padding: 10px; }
+  .pc-strip-drag { display: none; }
+  .pc-strip-cover { width: 48px; height: 48px; }
+  .pc-strip-name { font-size: 14px; }
+  .pc-strip-actions { gap: 0; }
+  .pc-strip-actions .set-icon-btn { min-width: 40px; min-height: 40px; }
+  .pc-vgrid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .pc-vp-head { align-items: flex-start; gap: 10px; }
+  .pc-vp-head .pc-back { min-height: 44px; }
+  .pc-vp-crumb { min-width: 0; flex: 1 1 160px; flex-wrap: wrap; }
+  .pc-vp-crumb b { font-size: 16px; overflow-wrap: anywhere; }
+  .pc-vp-head .set-btn { width: 100%; min-height: 46px; }
+  .pc-vp-spacer { display: none; }
+  .pc-backdrop { padding: 8px; align-items: flex-end; }
+  .pc-modal { width: 100%; max-height: calc(100dvh - 76px); border-radius: 14px 14px 0 0; }
+  .pc-modal-head { flex: 0 0 auto; padding: 15px 16px; }
+  .pc-modal-body { flex: 1 1 auto; padding: 16px; }
+  .pc-modal-foot { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 8px; }
+  .pc-modal-foot .set-btn { width: 100%; min-height: 44px; padding-inline: 8px; }
+  .pc-modal-foot .set-btn:first-child { grid-column: 1 / -1; }
+  .pc-modal-foot > div:last-child { grid-column: 1 / -1; margin-left: 0 !important; text-align: center; }
+  .pc-vmodal-preview { display: none; }
+  .pc-modal .set-field > div { min-width: 0; }
+  .pc-modal .set-field > div > .set-input { min-width: 0; flex: 1 1 auto; }
+  .pc-vcard .pc-vcard-overlay { opacity: 1; }
+  .pc-vcard-overlay button { width: 38px; height: 38px; }
+  .pc-add-class { width: 100%; min-height: 44px; }
+  .pc-type-editor { padding: 12px; }
+  .pc-type-editor .set-field.span2 > div { flex-wrap: wrap; }
+}

@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
+import { ShoppingCart, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
 
-export default function Topbar({ title, subtitle, cartCount, onOpenCart, currentView }) {
+export default function Topbar({ title, subtitle, cartCount, onOpenCart, currentView, setCurrentView }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
-    <div style={{
+    <div className="app-topbar" style={{
       position: 'relative',
       zIndex: 50,
       transition: 'max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
@@ -13,13 +13,13 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
       height: isCollapsed ? '3px' : 'auto',
     }}>
       {/* Visual Topbar Content */}
-      <div style={{
+      <div className="app-topbar-content" style={{
         transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
         transform: isCollapsed ? 'translateY(calc(-100% + 3px))' : 'translateY(0)',
         background: 'var(--surface)',
       }}>
         <div 
-          className="glass" 
+          className="glass app-topbar-inner"
           style={{
             padding: '20px 40px',
             display: 'flex',
@@ -28,19 +28,22 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
             borderBottom: '1px solid var(--line)',
           }}
         >
-          <div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 400, color: 'var(--ink)' }}>
-              {title}
-            </h2>
-            {subtitle && (
-              <div style={{ fontSize: '13px', color: 'var(--ink-soft)', marginTop: '4px' }}>
-                {subtitle}
-              </div>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div className="app-topbar-title-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+              <h2 className="app-topbar-title" style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 400, color: 'var(--ink)' }}>
+                {title}
+              </h2>
+              {subtitle && (
+                <div className="app-topbar-subtitle" style={{ fontSize: '13px', color: 'var(--ink-soft)', marginTop: '4px' }}>
+                  {subtitle}
+                </div>
+              )}
+            </div>
           </div>
 
           {currentView !== 'quotation_desk' && currentView !== 'checkout' && (
-            <button 
+            <button
+              className="app-topbar-cart"
               onClick={onOpenCart}
               style={{
                 display: 'flex',
@@ -86,6 +89,7 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
         {/* Collapse Handle Tab (Visible when expanded) */}
         {!isCollapsed && (
           <button 
+            className="app-topbar-collapse"
             onClick={() => setIsCollapsed(true)}
             title="Collapse Header"
             style={{
@@ -124,6 +128,7 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
       {/* Collapsed Strip & Click Handler (Active when collapsed) */}
       {isCollapsed && (
         <div 
+          className="app-topbar-expand"
           onClick={() => setIsCollapsed(false)}
           title="Click to Expand Header"
           style={{

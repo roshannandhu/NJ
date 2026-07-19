@@ -12,17 +12,19 @@
 
 ## 1. What this app is
 
-An **offline-first desktop application** for NJ India Trading (a roofing-products
+An **EC2-backed desktop application** for NJ India Trading (a roofing-products
 seller in Kozhikode, Kerala). A salesperson builds **quotations** from a product
 catalogue, optionally issues **warranty certificates**, prints/shares them as
 PDFs, and relies on an aggressive **auto-backup & recovery** subsystem so data is
 never lost on a single shop PC.
 
-- **Runs as a native Windows window** (pywebview / WebView2), no browser, no
-  console. The FastAPI backend runs in-process on `127.0.0.1` on a random free
-  port; the built React SPA is served by that same backend (same origin).
-- **No cloud server, no multi-user, no login server.** All data lives in one
-  local SQLite file. The only "auth" is an optional local PIN.
+- **Runs as a native Windows window** (pywebview / WebView2), no browser or
+  console. In the production installer, a loopback FastAPI process serves only
+  the built SPA while API and `/uploads` requests go to the EC2 backend at the
+  `VITE_API_URL` baked into the frontend build.
+- **The production data is centralized on EC2** in one SQLite file. There is no
+  real API authentication or login server; the optional PIN remains only a UI
+  lock. Local-backend development mode is still supported.
 - **Stdlib-only backend where possible** (the backup engine has zero third-party
   deps) so the bundled Python stays small and installs clean on a seller's PC.
 
@@ -63,6 +65,7 @@ E:\IMP projects\NJ\
 │   │   ├── config.py           # /api/config  (the catalogue + company + settings blob)
 │   │   ├── quotations.py       # /api/quotations CRUD
 │   │   ├── warranties.py       # /api/warranties CRUD (enforces no-orphan rule)
+│   │   ├── json_stream.py       # memory-safe raw JSON streaming for history lists
 │   │   ├── backup.py           # ~40 endpoints: backup/restore/recovery/cloud/dashboard
 │   │   ├── uploads.py          # /api/uploads image upload
 │   │   ├── warranty_docx.py    # /api/warranties/{id}/docx  (python-docx generator)
@@ -97,6 +100,9 @@ E:\IMP projects\NJ\
 - When **installed** (under read-only Program Files), `run_app.py` sets
   `NJ_DATA_DIR=%LOCALAPPDATA%\NJ India Data` — kept separate from the program
   folder so reinstalling never deletes data.
+- On the production EC2 service, systemd sets
+  `NJ_DATA_DIR=/home/ubuntu/nj-data`; the live DB and catalogue images stay
+  outside `/home/ubuntu/app`, so code deployment does not overwrite data.
 - `NJ_DB_PATH` overrides the DB file path (used by tests to point at a throwaway
   copy). Default: `DATA_DIR/nj_india.db`.
 
@@ -178,18 +184,21 @@ out of that blob purely for querying/sorting/conflict-resolution.
 - `GET /uploads/*` → static catalogue images from `DATA_DIR/uploads`.
 
 ### Config / catalogue — `routers/config.py`
-- `GET /api/config` → catalogue JSON (auto-seeds from `DEFAULT_DATA` minus history on first run).
+- `GET /api/config` → the stored catalogue JSON directly (same public object
+  shape; avoids a memory-heavy parse/re-serialize cycle on the EC2 host).
 - `PUT /api/config` → replace whole catalogue blob; triggers `mark_catalog_changed()` + a debounced catalogue event backup.
 
 ### Quotations — `routers/quotations.py`
-- `GET /api/quotations` → list (newest first).
+- `GET /api/quotations` → list (newest first), streamed from stored JSON rows
+  while preserving the existing JSON-array response shape.
 - `GET /api/quotations/{qid}` → one (404 if missing).
 - `POST /api/quotations` → **upsert by id** (bumps `version`, stamps `updated_at`, mirrors `version`/`updatedAt` into the JSON blob). Notifies backup.
 - `DELETE /api/quotations/{qid}` → delete + **cascade** to its warranties.
 - `DELETE /api/quotations` → clear all + cascade.
 
 ### Warranties — `routers/warranties.py`
-- `GET /api/warranties`, `GET /api/warranties/{wid}` — list / one.
+- `GET /api/warranties`, `GET /api/warranties/{wid}` — list / one. The large
+  list is streamed from stored JSON rows while preserving the array shape.
 - `POST /api/warranties` → upsert by id; **rejects** missing/invalid `quotationId` (no-orphan).
 - `DELETE /api/warranties/{wid}` → delete one (used when a quotation regen drops a class).
 - `DELETE /api/warranties` → clear all.
@@ -214,14 +223,19 @@ The largest router. Groups:
 - **Intelligent recovery:** `GET /api/recovery/backups`, `GET /api/recovery/scan?backup=`, `GET /api/recovery/last`, `POST /api/recovery/recover`, `GET /api/recovery/report`, `GET /api/recovery/log`.
 - **Dashboard:** `GET /api/backup/dashboard` (health score + status + change feed), `POST /api/backup/verify-now`.
 
-> **CORS is wide open** (`allow_origins=["*"]`). Acceptable only because the
-> server binds to `127.0.0.1` on a random port in a desktop context.
+> **CORS is wide open** (`allow_origins=["*"]`). This is a material production
+> risk now that systemd binds the EC2 service to `0.0.0.0:8000`; see §13.
 
 ### Frontend API client
 **Every** backend call goes through `frontend/src/api.js` (plus `share.js` for
-`/api/share-pdfs`). `BASE` = `window.location.origin` in production (same-origin)
-or `http://127.0.0.1:8000` in Vite dev. **Add new endpoints' wrappers here — do
-not scatter `fetch` calls through components.**
+`/api/share-pdfs`). `BASE` prefers build-time `VITE_API_URL`; otherwise it is
+`window.location.origin` in production or `http://127.0.0.1:8000` in Vite dev.
+`mediaUrl()` normalizes both `/uploads/x` and legacy `uploads/x` paths against
+that same base, repairs old loopback upload URLs, and percent-encodes imported
+filenames. Catalogue `<img>` elements retry two transient failures. Automatic
+API retries are read-only (`GET`/`HEAD`) so writes that
+may already have committed are not silently repeated. **Add new endpoints'
+wrappers here — do not scatter `fetch` calls through components.**
 
 ---
 
@@ -303,6 +317,33 @@ These are enforced in code today. **Do not break them.**
 - **B-C1 — One config blob.** Brands → Classes → Varieties → Warranty templates, plus `company` & `settings`, all in `app_config.data`. `PUT /api/config` replaces it wholesale, so the frontend always sends the complete object (`AppContext.persistConfig`).
 - **B-C2 — Brand layer auto-migration.** On load, if a catalogue has no `brands`, a default "NJ" brand is created and every class assigned to it (idempotent, persisted once) — `AppContext` + `_apply_config`.
 - **B-C3 — Warranty template backfill.** On load, empty `sections`/`seriesTable` are backfilled from `DEFAULT_DATA`, but explicit user values (including `false` display flags) are preserved.
+- **B-C4 — Quotation Desk image fallback.** A product card displays selected
+  colour image → variety image → class artwork → brand artwork. If all are
+  absent it explicitly says "No image uploaded"; it must not imply that an
+  unconfigured product image is a network loading failure. Product/type artwork
+  in the Desk and Products & Classes preview uses the same CSS-background media
+  surface as the swatches; do not replace only the large preview with a separate
+  WebView `<img>` loading path.
+- **B-C5 — Catalogue swatch persistence.** Products & Classes edits update local
+  state immediately and debounce the EC2 config write. Leaving the settings
+  screen must flush the last pending edit; the UI may show "Saved" only after
+  the server write succeeds. Quotation Desk colour selection is index-stable so
+  duplicate or renamed colour labels cannot resolve to the wrong swatch image.
+- **B-C6 — Product guarantee is opt-in.** Each non-tools class has independent
+  `settings.classGuarantee[classId]` text and a
+  `settings.classGuaranteeEnabled[classId]` switch. The quotation renders it
+  only when the switch is exactly `true` and trimmed text is non-empty. There is
+  no hardcoded, keyword, default-class, or mixed-order guarantee fallback.
+- **B-C7 - Quotation Desk phone view preserves laptop logic.** At
+  `max-width: 860px` the same customer, product/accessory tabs, brand accordion,
+  class selection, varieties, type swatches, quantities, add-to-cart rules, and
+  Live Quotation remain active. Only their spatial layout changes: the three
+  laptop columns reflow into one page scroll, compact product cards put the
+  image/title first and full-width types/actions below, and Live Quotation opens
+  as a review sheet from the total bar. The catalogue must not auto-collapse or
+  introduce mobile-only selection state. Keep controls at least 42-44px and the
+  total bar above app navigation at `max-width: 760px`. Do not add another
+  competing mobile breakpoint system to `QuotationDesk.css`.
 
 ### Backup / data safety
 - **B-D1 — merge is non-destructive; replace is destructive** and always snapshots first. Recovery/verification are **additive** (never delete).
@@ -368,7 +409,11 @@ quotation into an editable session preserving its id), `persistConfig`,
 1. **Quotation Desk** — enter customer name (required); pick brand → class → variety, set colour/qty, **Add** (captures `actualPrice`).
 2. (Desk sets `generateIntent`: `quote` / `both` / `warranty`.)
 3. **Checkout** — adjust prices (offers), qty; toggle tax/discount/installation; pick bank; enter **manager name (required)**; **Finalize**.
-4. `Checkout.finalizeGeneration` → `createQuotation(snapshot)` (upsert) → if `both`/`warranty`, `buildWarrantyCertsForQuotation` + `createWarranty` per cert.
+4. `Checkout.finalizeGeneration` → `createQuotation(snapshot)` (upsert) → if
+   `both`/`warranty`, `buildWarrantyCertsForQuotation` + `createWarranty` per
+   cert. The parent must succeed before any certificate is sent. A failed remote
+   save shows the backend detail, keeps cart/customer/id for retry, and never
+   inserts a failed certificate into local state or reports false success.
 5. Lands on **Quotation Document** (or **Warranty Document** for warranty-only). Inline-editable; Download/Word/Share.
 6. Every save → backend `notify_change` → debounced event backup.
 
@@ -393,6 +438,13 @@ quotation into an editable session preserving its id), `persistConfig`,
 - **Dev frontend:** `cd frontend && npm run dev` (Vite, talks to `127.0.0.1:8000`).
 - **Dev backend:** `cd backend && python main.py` (uvicorn reload on :8000) — or `python run_app.py` for the full native-window experience (serves built SPA from `backend/dist` or `../frontend/dist`).
 - **Build SPA:** `cd frontend && npm run build` → `frontend/dist`.
+- **Production remote build:** `build_installer.bat` sets
+  `VITE_API_URL=http://18.61.159.169:8000`. `run_app.py` defaults
+  `NJ_SERVER_URL` to the same EC2 URL and, in remote mode, serves the bundled
+  SPA locally without starting a second database/API.
+- **EC2 service:** systemd runs `/home/ubuntu/app/backend/.venv/bin/uvicorn
+  main:app --host 0.0.0.0 --port 8000` from `/home/ubuntu/app/backend`, with
+  writable data in `/home/ubuntu/nj-data`.
 - **Installer:** `build_installer.bat` + `installer.iss` (Inno Setup) produce `NJ India Setup.exe`. Installs an embedded Python + the app; launcher shortcut runs `run_app.py` via `pythonw.exe`.
 - **Installed app location:** `%LOCALAPPDATA%\NJ India\app` (program) and `%LOCALAPPDATA%\NJ India Data` (data). *To fix an installed app you must patch there or rebuild the installer — editing the repo alone won't change an installed copy.*
 - **Tests:** `cd backend && pytest` (conftest redirects `NJ_DATA_DIR`/`NJ_DB_PATH` to a temp dir; `test_recovery.py` covers the backup engine).
@@ -422,11 +474,12 @@ quotation into an editable session preserving its id), `persistConfig`,
 
 ## 12. Performance considerations
 
-- **Full-table JSON deserialization:** list endpoints (`/api/quotations`,
-  `/api/warranties`) and `build_payload()` load every row and `json.loads` each
-  `data` blob. Fine for a single shop's volume; would not scale to tens of
-  thousands of records. The denormalised columns exist but list endpoints don't
-  use them (they return the parsed blob).
+- **Memory-safe history reads:** `/api/quotations` and `/api/warranties` select
+  only the stored JSON column and stream an array through `json_stream.py`.
+  Single-record/config GETs also return stored JSON directly. Do not regress to
+  building a Python list of parsed blobs: the 14 MB warranty history previously
+  drove the ~1 GB EC2 host into OOM and briefly took images and writes offline.
+  `build_payload()` still deserializes full rows for backup/export work.
 - **Backup writes copy the whole DB** each time (atomic copy + full JSON export).
   Debounced (8s quiet) + interval-gated so it's not per-keystroke, but a very
   large DB makes each backup heavier — hence the health-score size warnings
@@ -443,10 +496,13 @@ quotation into an editable session preserving its id), `persistConfig`,
 
 ## 13. Security risks / notes
 
-Context: single-user desktop app bound to `127.0.0.1`. Risks are scoped accordingly.
+Context: the desktop UI is single-user, but its API is currently exposed by EC2
+on `0.0.0.0:8000`. Treat the following as production risks, not localhost-only notes.
 
-- **No authentication on the API.** Any local process can call it. CORS is `*`.
-  Acceptable for localhost desktop; do **not** expose this server on a network.
+- **No authentication on the API.** The current EC2 deployment exposes writes,
+  history, uploads, backup/restore, and server-path helper endpoints over plain
+  HTTP with wide-open CORS. Restrict the security group immediately and plan
+  HTTPS + authentication before any broader use.
 - **PIN is plaintext** in the config blob and has a hardcoded master override
   (`999999`). It's a UI lock, not a security boundary.
 - **`restore-path` reads an arbitrary server-side file path** from the request

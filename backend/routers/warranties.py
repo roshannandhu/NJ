@@ -1,27 +1,21 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Response
 
 from database import get_db
 from models import WarrantyCertificate, Quotation
 import backup_service
+from routers.json_stream import stream_json_rows
 
 router = APIRouter()
 
 
 @router.get("/api/warranties")
 def list_warranties():
-    db = next(get_db())
-    try:
-        rows = (
-            db.query(WarrantyCertificate)
-            .order_by(WarrantyCertificate.created_at.desc())
-            .all()
-        )
-        return [json.loads(r.data) for r in rows]
-    finally:
-        db.close()
+    return stream_json_rows(
+        WarrantyCertificate, order_by=WarrantyCertificate.created_at.desc()
+    )
 
 
 @router.get("/api/warranties/{wid}")
@@ -35,7 +29,7 @@ def get_warranty(wid: str):
         )
         if row is None:
             raise HTTPException(status_code=404, detail="Warranty not found")
-        return json.loads(row.data)
+        return Response(content=row.data, media_type="application/json")
     finally:
         db.close()
 
@@ -74,6 +68,8 @@ def save_warranty(body: dict = Body(...)):
         row.updated_at = now
         body["version"] = new_version
         body["updatedAt"] = now.isoformat()
+        if is_new:
+            body["createdAt"] = now.isoformat()
         row.data = json.dumps(body)
         db.commit()
         db.refresh(row)

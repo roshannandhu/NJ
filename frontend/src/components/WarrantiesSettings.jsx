@@ -35,6 +35,7 @@ export default function WarrantiesSettings() {
   };
 
   const [activeId, setActiveId] = useState(warranties[0].id);
+  const [mobilePanel, setMobilePanel] = useState('templates');
   
   // Local state for the actively editing warranty
   const [current, setCurrent] = useState(warranties.find(w => w.id === activeId) || warranties[0]);
@@ -49,6 +50,7 @@ export default function WarrantiesSettings() {
 
   const handleSelect = (id) => {
     setActiveId(id);
+    setMobilePanel('editor');
   };
 
   const handleImageUpload = (e, callback) => {
@@ -93,6 +95,7 @@ export default function WarrantiesSettings() {
     persistConfig(nextData);
     setActiveId(newId);
     setCurrent(newWarranty);
+    setMobilePanel('editor');
     showToast('New warranty certificate created — customize and save it', 'success');
   };
 
@@ -133,10 +136,18 @@ export default function WarrantiesSettings() {
   };
 
   return (
-    <div style={{ display: 'flex', gap: '32px', height: 'calc(100vh - 120px)', padding: '24px 40px', overflow: 'hidden', background: 'var(--bg)', flexDirection: 'row' }}>
+    <div className="warranty-settings" data-mobile-panel={mobilePanel} style={{ display: 'flex', gap: '24px', padding: '20px 24px', overflow: 'hidden', background: 'var(--bg)', flexDirection: 'row' }}>
+      <nav className="warranty-mobile-nav" aria-label="Warranty builder workspace">
+        <button type="button" className={mobilePanel === 'templates' ? 'is-active' : ''} onClick={() => setMobilePanel('templates')}>
+          <ShieldCheck size={16} /> Templates <span>{warranties.length}</span>
+        </button>
+        <button type="button" className={mobilePanel === 'editor' ? 'is-active' : ''} onClick={() => setMobilePanel('editor')}>
+          <FileSignature size={16} /> Editor
+        </button>
+      </nav>
       
       {/* Left Pane: Template Selector */}
-      <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', paddingRight: '4px' }}>
+      <div className="warranty-template-pane" style={{ width: '260px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', paddingRight: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
           <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, color: 'var(--ink-soft)' }}>
             WARRANTY CERTIFICATES
@@ -206,10 +217,10 @@ export default function WarrantiesSettings() {
       </div>
 
       {/* Right Pane: Live Document CMS Editor */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#F4EFE6', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
+      <div className="warranty-editor-pane" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#F4EFE6', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-md)' }}>
         
         {/* Editor Toolbar */}
-        <div style={{ padding: '18px 32px', background: 'var(--surface)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', zIndex: 10 }}>
+        <div className="warranty-editor-toolbar" style={{ padding: '18px 32px', background: 'var(--surface)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', zIndex: 10 }}>
           <div>
             <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--ink)', fontFamily: 'var(--font-display)' }}>
               Live WYSIWYG Document Editor
@@ -218,7 +229,7 @@ export default function WarrantiesSettings() {
               Editing template: <strong>{current.title}</strong>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div className="warranty-editor-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               onClick={handleDeleteWarranty}
               className="hover-lift"
@@ -258,21 +269,22 @@ export default function WarrantiesSettings() {
         </div>
 
         {/* The CMS Workspace Scrollable Area */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '32px', display: 'flex', justifyContent: 'center' }}>
+        <div className="warranty-editor-scroll" style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
           
           {/* Certificate Representative Sheet */}
-          <div style={{ 
-            width: '100%', 
-            maxWidth: '800px', 
-            background: '#FAF6EF', 
-            boxShadow: '0 12px 32px rgba(30, 25, 20, 0.05)', 
-            padding: '48px',
-            minHeight: '1100px', 
-            display: 'flex', 
+          <div className="warranty-editor-document" style={{
+            width: '100%',
+            maxWidth: '820px',
+            background: '#FAF6EF',
+            boxShadow: '0 12px 32px rgba(30, 25, 20, 0.05)',
+            padding: '40px',
+            minHeight: '900px',
+            display: 'flex',
             flexDirection: 'column',
             border: '2px double #C2410C',
             borderRadius: '4px',
-            position: 'relative'
+            position: 'relative',
+            boxSizing: 'border-box',
           }}>
             
             {/* Watermark */}
@@ -281,8 +293,8 @@ export default function WarrantiesSettings() {
             </div>
 
             {/* HEADER AREA */}
-            <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0', borderBottom: '2px solid #C2410C', paddingBottom: '20px', marginBottom: '24px' }}>
-              <div style={{ flex: 1, paddingRight: '20px', width: '100%' }}>
+            <div className="warranty-document-header" style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0', borderBottom: '2px solid #C2410C', paddingBottom: '20px', marginBottom: '24px' }}>
+              <div className="warranty-document-identity" style={{ flex: 1, paddingRight: '20px', width: '100%' }}>
                 <span style={{ fontSize: '9px', fontWeight: '800', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C2410C', display: 'block', marginBottom: '4px' }}>
                   WARRANTY TITLE HEADER
                 </span>
@@ -330,7 +342,7 @@ export default function WarrantiesSettings() {
                 </div>
               </div>
 
-              <div style={{ textAlign: 'right', width: '180px' }}>
+              <div className="warranty-document-duration" style={{ textAlign: 'right', width: '180px' }}>
                 <span style={{ fontSize: '9px', fontWeight: '800', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C2410C', display: 'block', marginBottom: '4px' }}>
                   COVERAGE DURATION
                 </span>
@@ -407,7 +419,7 @@ export default function WarrantiesSettings() {
 
             {/* DYNAMIC SECTIONS EDITOR */}
             <div style={{ marginBottom: '28px', borderBottom: '1px solid var(--line)', paddingBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="warranty-document-section-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <label style={{ fontSize: '12px', fontWeight: '800', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink)' }}>
                   Warranty Clauses & Sections
                 </label>
@@ -481,8 +493,8 @@ export default function WarrantiesSettings() {
             </div>
 
             {/* SERIES COVERAGE SCHEDULE TABLE */}
-            <div style={{ marginBottom: '32px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div className="warranty-series-section" style={{ marginBottom: '32px' }}>
+              <div className="warranty-document-section-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <label style={{ fontSize: '10px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink)' }}>
                   7. Series Coverage & Duration Schedule
                 </label>
@@ -494,6 +506,7 @@ export default function WarrantiesSettings() {
                 </button>
               </div>
               
+              <div className="warranty-series-scroll">
               <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #E5E1D8' }}>
                 <thead>
                   <tr style={{ background: '#F4EFE6' }}>
@@ -538,10 +551,11 @@ export default function WarrantiesSettings() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {/* AUTHORIZED SIGNATORY & SEAL UPLOAD FOOTER */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '40px', marginTop: 'auto', paddingTop: '32px', borderTop: '2px solid #C2410C' }}>
+            <div className="warranty-document-footer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: 'auto', paddingTop: '28px', borderTop: '2px solid #C2410C' }}>
               
               {/* Authorized Partner Signature */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -568,7 +582,7 @@ export default function WarrantiesSettings() {
               </div>
 
               {/* Official Partner Seal */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-end' }}>
+              <div className="warranty-seal-field" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-end' }}>
                 <span style={{ fontSize: '9px', fontWeight: '800', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-soft)' }}>
                   Official Partner Stamp / Seal (Base64)
                 </span>

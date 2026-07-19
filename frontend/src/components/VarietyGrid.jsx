@@ -9,7 +9,7 @@ export default function VarietyGrid() {
   if (!cls) return <div onClick={() => setCurrentView('home')}>Back to Home</div>;
 
   return (
-    <div className="animate-fade-up">
+    <div className="animate-fade-up variety-grid-page">
       <button 
         onClick={() => setCurrentView('home')}
         style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-mid)', marginBottom: '24px', fontWeight: 500 }}
@@ -24,7 +24,7 @@ export default function VarietyGrid() {
         <p style={{ color: 'var(--ink-soft)' }}>Select a variety to configure colors and quantity.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
+      <div className="variety-grid-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '16px' }}>
         {varieties.map(v => (
           <div key={v.id} 
             onClick={() => { setSelectedVarietyId(v.id); setCurrentView('variety_detail'); }}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAppContext } from '../AppContext';
+import { mediaUrl } from '../api';
 import {
   DollarSign, FileText, Sliders,
   CheckCircle, Tag, Layers,
@@ -64,12 +65,12 @@ const DEFAULT_CLASS_TERMS = {
 function Section({ icon, title, subtitle, children }) {
   // Unified premium card — one terracotta accent for every section.
   return (
-    <div style={{
+    <div className="quotation-section" style={{
       background: 'var(--surface)', borderRadius: 'var(--radius-lg)',
       border: '1px solid var(--line)', overflow: 'hidden', marginBottom: '22px',
       boxShadow: 'var(--shadow-sm)',
     }}>
-      <div style={{
+      <div className="quotation-section-head" style={{
         padding: '18px 24px', borderBottom: '1px solid var(--line-soft)',
         display: 'flex', alignItems: 'center', gap: '13px',
         background: 'linear-gradient(90deg, var(--accent-soft), transparent 70%)',
@@ -84,7 +85,7 @@ function Section({ icon, title, subtitle, children }) {
           {subtitle && <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>{subtitle}</div>}
         </div>
       </div>
-      <div style={{ padding: '24px' }}>{children}</div>
+      <div className="quotation-section-body" style={{ padding: '24px' }}>{children}</div>
     </div>
   );
 }
@@ -92,7 +93,7 @@ function Section({ icon, title, subtitle, children }) {
 // Field wrapper
 function Field({ label, hint, children, span = 1 }) {
   return (
-    <div style={{ gridColumn: `span ${span}`, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+    <div className="quotation-field" style={{ gridColumn: `span ${span}`, display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         {label}
       </label>
@@ -105,7 +106,8 @@ function Field({ label, hint, children, span = 1 }) {
 // Toggle switch
 function Toggle({ checked, onChange, label, desc }) {
   return (
-    <div style={{
+    <button className="quotation-toggle" type="button" role="switch" aria-checked={checked} style={{
+      width: '100%', minHeight: '44px', textAlign: 'left', font: 'inherit', color: 'inherit',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '18px 20px', background: 'var(--bg-warm)', borderRadius: 'var(--radius)',
       border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--line)'}`,
@@ -119,7 +121,30 @@ function Toggle({ checked, onChange, label, desc }) {
         ? <ToggleRight size={30} color="var(--accent)" strokeWidth={2} />
         : <ToggleLeft size={30} color="var(--ink-soft)" strokeWidth={2} />
       }
-    </div>
+    </button>
+  );
+}
+
+function CompactSwitch({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={`${label}: ${checked ? 'shown on quotation' : 'hidden from quotation'}`}
+      onClick={() => onChange(!checked)}
+      style={{
+        minWidth: '92px', minHeight: '44px', padding: '8px 10px',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+        border: `1px solid ${checked ? 'var(--accent)' : 'var(--line)'}`,
+        borderRadius: 'var(--radius-full)', background: checked ? 'var(--accent-soft)' : 'var(--bg)',
+        color: checked ? 'var(--accent)' : 'var(--ink-soft)', cursor: 'pointer',
+        fontSize: '12px', fontWeight: 800,
+      }}
+    >
+      {checked ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+      {checked ? 'Shown' : 'Hidden'}
+    </button>
   );
 }
 
@@ -173,17 +198,17 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onS
   );
 
   return (
-    <div style={{
+    <div className="quotation-bank-card" style={{
       border: `1.5px solid ${bank.active ? 'var(--line)' : 'var(--line-soft)'}`,
       borderRadius: 'var(--radius-lg)', overflow: 'hidden',
       opacity: bank.active ? 1 : 0.7, background: 'var(--surface)',
     }}>
       {/* Card header */}
-      <div style={{
+      <div className="quotation-bank-head" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="quotation-bank-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <Tag size={15} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>
             {bank.bankName || `Bank ${index + 1}`}
@@ -194,7 +219,7 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onS
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div className="quotation-bank-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <button onClick={() => onMove(-1)} disabled={index === 0}
             style={{ background: 'transparent', border: 'none', cursor: index === 0 ? 'not-allowed' : 'pointer', color: 'var(--ink-soft)', opacity: index === 0 ? 0.4 : 1, fontSize: '14px', padding: '2px 6px' }} title="Move up">↑</button>
           <button onClick={() => onMove(1)} disabled={index === total - 1}
@@ -207,8 +232,8 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onS
       </div>
 
       {/* Card body */}
-      <div style={{ padding: '18px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+      <div className="quotation-bank-body" style={{ padding: '18px' }}>
+        <div className="quotation-settings-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
           {fields.map(f => (
             <div key={f.key} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={labelStyle}>{f.label}</span>
@@ -222,7 +247,7 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onS
           ))}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', marginTop: '18px', flexWrap: 'wrap' }}>
+        <div className="quotation-bank-footer" style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', marginTop: '18px', flexWrap: 'wrap' }}>
           {renderImageSlot('logo', 'Bank Logo')}
           {renderImageSlot('qr', 'QR Image (optional)')}
           {/* Default account — preselected at checkout. Only one bank is default. */}
@@ -328,6 +353,24 @@ export default function QuotationSettings() {
     return obj;
   });
 
+  // Guarantee text is always opt-in. Never seed a new class from hardcoded or
+  // keyword defaults: an empty field must stay absent from the quotation.
+  const seedGuarantee = (key) => initSettings.classGuarantee?.[key] ?? '';
+
+  const [classGuarantee, setClassGuarantee] = useState(() => {
+    const obj = {};
+    classBlocks.forEach(b => { obj[b.key] = seedGuarantee(b.key); });
+    return obj;
+  });
+
+  // No migration-time auto-enable: older saved/default text remains available
+  // in the field, but the user explicitly chooses which classes display it.
+  const [classGuaranteeEnabled, setClassGuaranteeEnabled] = useState(() => {
+    const obj = {};
+    classBlocks.forEach(b => { obj[b.key] = initSettings.classGuaranteeEnabled?.[b.key] === true; });
+    return obj;
+  });
+
   const [saved, setSaved] = useState(false);
 
   const handleImageUpload = (e) => {
@@ -339,7 +382,7 @@ export default function QuotationSettings() {
     e.target.value = '';
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Re-number bank display order from the current list order before saving.
     const orderedBanks = banks.map((b, i) => ({ ...b, order: i }));
     const nextData = {
@@ -348,11 +391,14 @@ export default function QuotationSettings() {
         ...data.settings,
         ...settings,
         classTerms,   // preserved unchanged for old-quotation backward compatibility
+        classGuarantee,
+        classGuaranteeEnabled,
         banks: orderedBanks,
       },
     };
     setData(nextData);
-    persistConfig(nextData);
+    const didSave = await persistConfig(nextData);
+    if (!didSave) return;
     setBanks(orderedBanks);
     setSaved(true);
     showToast('Quotation settings saved ✓');
@@ -396,7 +442,7 @@ export default function QuotationSettings() {
   };
 
   return (
-    <div className="animate-fade-up" style={{ maxWidth: '900px', margin: '0 auto' }}>
+    <div className="animate-fade-up quotation-settings-page" style={{ maxWidth: '900px', margin: '0 auto' }}>
 
       {/* ── Section 1: Financial Rules ── */}
       <Section
@@ -405,7 +451,7 @@ export default function QuotationSettings() {
         subtitle="Tax, currency, validity and document prefix settings"
         accent="#0284C7"
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div className="quotation-settings-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
 
           {/* GST Toggle */}
           <Field label="GST / Tax" span={2}>
@@ -416,7 +462,7 @@ export default function QuotationSettings() {
               desc="Appends a tax row (Subtotal → GST → Grand Total) to every quotation"
             />
             {settings.taxEnabled && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
+              <div className="quotation-settings-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
                 <Field label="Default Tax Rate (%)">
                   {/* NumberField normalises on blur/Enter (never per keystroke),
                       so the value can be cleared and retyped freely. */}
@@ -448,9 +494,9 @@ export default function QuotationSettings() {
               desc="Enables a discount toggle on the checkout page. Cashier can apply or skip per order."
             />
             {settings.discountEnabled && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
+              <div className="quotation-settings-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
                 <Field label="Default Discount Type">
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div className="quotation-choice-row" style={{ display: 'flex', gap: '8px' }}>
                     {[{ v: 'percent', label: '% Percentage' }, { v: 'fixed', label: `${settings.currencySymbol || '₹'} Fixed Amount` }].map(opt => (
                       <button
                         key={opt.v}
@@ -612,7 +658,7 @@ export default function QuotationSettings() {
         subtitle="One central Terms &amp; Conditions list applied to every new quotation. Edit here and all future quotations use the latest version."
         accent="#0284C7"
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div className="quotation-settings-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Terms &amp; Conditions (one per line)
@@ -709,8 +755,96 @@ export default function QuotationSettings() {
       {/* Per-class Class Description + Installation Guidance are now edited in
           Products & Catalog → (class) → Edit, alongside the class itself. */}
 
+      {/* ── Per-class Guarantee Text (grouped by parent brand) ── */}
+      <Section icon={<Star size={18} />} title="Product Guarantee Text" subtitle="Shown on quotation spec box per product class">
+        {(() => {
+          const productBlocks = classBlocks.filter(b => b.key !== 'default');
+          const sortedBrands  = [...(data.brands || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+          const blockBrandId = (b) => {
+            const cls = (data.classes || []).find(c => c.id === b.key);
+            return cls?.brandId || sortedBrands[0]?.id || 'nj';
+          };
+
+          const renderInput = (b) => {
+            const enabled = classGuaranteeEnabled[b.key] === true;
+            const inputId = `class-guarantee-${b.key}`;
+            const helpId = `${inputId}-help`;
+            return (
+            <div key={b.key} className="quotation-guarantee-item" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', border: '1px solid var(--line-soft)', borderRadius: 'var(--radius)', background: 'var(--surface)' }}>
+              <div className="quotation-guarantee-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <label htmlFor={inputId} style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: b.color, display: 'inline-block', flexShrink: 0 }} />
+                  {b.label}
+                </label>
+                <CompactSwitch
+                  checked={enabled}
+                  onChange={value => setClassGuaranteeEnabled(prev => ({ ...prev, [b.key]: value }))}
+                  label={`${b.label} product guarantee`}
+                />
+              </div>
+              <input
+                id={inputId}
+                type="text"
+                value={classGuarantee[b.key] ?? ''}
+                onChange={e => setClassGuarantee(prev => ({ ...prev, [b.key]: e.target.value }))}
+                disabled={!enabled}
+                aria-describedby={helpId}
+                placeholder="Enter guarantee text (optional)"
+                style={{ padding: '10px 14px', minHeight: '44px', borderRadius: 'var(--radius)', border: '1px solid var(--line)', fontSize: '13px', background: 'var(--bg)', color: 'var(--ink)', width: '100%', boxSizing: 'border-box', opacity: enabled ? 1 : 0.5, cursor: enabled ? 'text' : 'not-allowed' }}
+              />
+              <div id={helpId} style={{ fontSize: '11px', lineHeight: 1.45, color: 'var(--ink-soft)' }}>
+                {enabled
+                  ? ((classGuarantee[b.key] || '').trim() ? 'This text will appear in the quotation product details.' : 'Nothing will appear until guarantee text is entered.')
+                  : 'Guarantee is hidden for this product class.'}
+              </div>
+            </div>
+            );
+          };
+
+          const groups = sortedBrands.map(brand => ({
+            brand,
+            blocks: productBlocks.filter(b => blockBrandId(b) === brand.id),
+          })).filter(g => g.blocks.length > 0);
+
+          const assignedKeys = new Set(groups.flatMap(g => g.blocks.map(b => b.key)));
+          const unassigned   = productBlocks.filter(b => !assignedKeys.has(b.key));
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {groups.map(({ brand, blocks }) => (
+                <div key={brand.id}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--line-soft)' }}>
+                    {brand.logo && (
+                      <img src={mediaUrl(brand.logo)} alt="" style={{ height: '18px', width: 'auto', objectFit: 'contain' }} />
+                    )}
+                    <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      {brand.name}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {blocks.map(renderInput)}
+                  </div>
+                </div>
+              ))}
+
+              {unassigned.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px', paddingBottom: '8px', borderBottom: '1px solid var(--line-soft)' }}>
+                    Other
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {unassigned.map(renderInput)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Section>
+
       {/* ── Save Button ── */}
-      <div style={{
+      <div className="settings-sticky-actions" style={{
         position: 'sticky', bottom: '24px', zIndex: 10,
         display: 'flex', justifyContent: 'flex-end', marginTop: '8px',
       }}>

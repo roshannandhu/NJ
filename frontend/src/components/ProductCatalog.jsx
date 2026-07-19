@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { useAppContext } from '../AppContext';
+import { mediaUrl } from '../api';
+
+const cssMediaUrl = (url) => `url("${mediaUrl(url).replace(/(["\\])/g, '\\$1')}")`;
 
 export default function ProductCatalog() {
   const { data, addToCart } = useAppContext();
@@ -27,15 +30,18 @@ export default function ProductCatalog() {
     const qty = sel.qty || 1;
     // Default to first color if none selected and colors exist
     const color = sel.color || (variety.colors?.length > 0 ? variety.colors[0].name : 'Standard');
+    const colorInfo = variety.colors?.find(c => c.name === color);
 
     addToCart({
       id: variety.id + '-' + color, // unique id for cart
       name: variety.name,
+      classId: cls.id,
       className: cls.name,
       price: variety.basePrice,
       qty: qty,
       unit: variety.unit,
-      color: color
+      color: color,
+      image: colorInfo?.image || variety.image
     });
   };
 
@@ -71,7 +77,7 @@ export default function ProductCatalog() {
                     background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', 
                     overflow: 'hidden', display: 'flex', flexDirection: 'column'
                   }}>
-                    <div style={{ height: '160px', background: v.image ? `url(${v.image}) center/cover no-repeat` : cls.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.4)' }}>
+                    <div style={{ height: '160px', background: v.image ? `${cssMediaUrl(v.image)} center/cover no-repeat` : cls.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.4)' }}>
                       {!v.image && <span style={{ fontFamily: 'var(--font-display)', fontSize: '24px', letterSpacing: '0.05em' }}>{cls.name.split(' ')[0]}</span>}
                     </div>
                     <div style={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -97,7 +103,7 @@ export default function ProductCatalog() {
                                 onClick={() => handleColorSelect(v.id, c)}
                                 style={{ 
                                   width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer',
-                                  background: c.image ? `url(${c.image}) center/cover` : c.hex,
+                                  background: c.image ? `${cssMediaUrl(c.image)} center/cover` : c.hex,
                                   border: selectedColor === c.name ? '3px solid var(--accent)' : '1px solid var(--line)',
                                   boxShadow: selectedColor === c.name ? '0 0 0 2px var(--surface) inset' : 'none',
                                   title: c.name,

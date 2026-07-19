@@ -1,7 +1,7 @@
 import json
 from copy import deepcopy
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Response
 
 from database import get_db
 from models import AppConfig
@@ -29,7 +29,10 @@ def get_config():
     db = next(get_db())
     try:
         config = _get_or_create_config(db)
-        return json.loads(config.data)
+        # The config can contain several MB of embedded warranty artwork.  It is
+        # already valid JSON, so avoid a deserialize/re-serialize copy on the
+        # small EC2 instance.
+        return Response(content=config.data, media_type="application/json")
     finally:
         db.close()
 

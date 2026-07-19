@@ -97,7 +97,11 @@ def _sha256(path):
 
 
 def default_local_dir():
-    return Path.home() / "Documents" / "NJ India Backups"
+    import os
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        return Path(local) / "NJ India Backups"
+    return Path.home() / "NJ India Backups"
 
 
 # ── persistent backup state (settings + log) ────────────────────────────────
@@ -666,6 +670,7 @@ def make_backup(reason="manual", force_catalog=False):
                     shutil.copy2(tmp_manifest, dest / tmp_manifest.name)
                     _rotate(dest, keep)
                     manifest["targets"][name] = "ok"
+                    manifest.setdefault("target_paths", {})[name] = cfg.get("path", "")
                     any_target = True
                 except Exception as e:
                     manifest["targets"][name] = f"error ({type(e).__name__}: {e})"

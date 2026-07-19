@@ -7,6 +7,9 @@
 // backend can't share (non-Windows dev), the files download instead.
 
 import { API_BASE } from './api';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+
 
 const safe = (s) => String(s || '').replace(/[^\w.-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
 
@@ -81,8 +84,36 @@ function restoreFrame(s) {
 // The warranty certificate is a fixed-height A4 box (794×1123) whose terms are
 // auto-scaled to fit (see WarrantyDocument.jsx), so its capture height ≈ one A4 and
 // it always lands in the single-page branch below — never a second page.
+// Fetch one URL and return a base64 data URL, or null on failure.
+async function _toDataUrl(src) {
+  try {
+    const res = await fetch(src, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise(resolve => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
+
 // Capture one element to a canvas at natural full size (scale/ frame neutralised).
 async function _captureCanvas(el) {
+  // Pre-convert all external <img> srcs to data URLs so html2canvas never hits
+  // CORS-cache conflicts (browser caches images without CORS headers; when
+  // html2canvas re-fetches with crossOrigin="anonymous" it gets the cached
+  // response that lacks the header and the draw silently fails).
+  const imgs = [...el.querySelectorAll('img[src]')].filter(
+    img => img.src && !img.src.startsWith('data:') && !img.src.startsWith('blob:')
+  );
+  const origSrcs = imgs.map(img => img.src);
+  await Promise.allSettled(imgs.map(async (img) => {
+    const dataUrl = await _toDataUrl(img.src);
+    if (dataUrl) img.src = dataUrl;
+  }));
+
   const saved = neutralizeScale(el);
   const savedFrame = stripFrame(el); // remove the page border/shadow from the capture only
   void el.offsetHeight; // force a synchronous reflow so the capture sees full size
@@ -104,6 +135,8 @@ async function _captureCanvas(el) {
   } finally {
     restoreFrame(savedFrame);
     restoreScale(saved);
+    // Restore original srcs so the on-screen preview is unchanged.
+    imgs.forEach((img, i) => { img.src = origSrcs[i]; });
   }
 }
 
@@ -169,6 +202,37 @@ export async function elementsToPdfFile(els, filename) {
   return new File([pdf.output('blob')], filename, { type: 'application/pdf', lastModified: Date.now() });
 }
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// True when running inside a Capacitor Android/iOS WebView.
+// True when running inside a Capacitor Android/iOS WebView.
+function isCapacitor() {
+  return typeof window !== 'undefined' && !!window.Capacitor;
+}
+
+// True on any mobile browser or WebView (Android, iOS, Capacitor).
+// showSaveFilePicker is unreliable on mobile — it either auto-cancels or
+// is undefined, and <a download> is silently dropped in WebViews.
+function isMobileDevice() {
+  return isCapacitor() || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+}
+
+// Attempt Web Share API with files. Returns true on success, false if unsupported,
+// throws AbortError if user cancelled.
+async function _webShare(files, title) {
+  if (!navigator.share) return false;
+  if (navigator.canShare && !navigator.canShare({ files })) return false;
+  await navigator.share({ files, title: title || 'NJ India — Document' });
+  return true;
+}
+
 // "Always ask where to save" defaults ON — only an explicit '0' turns it off.
 export function askWhereToSave() {
   try { return localStorage.getItem('nj_ask_save_location') !== '0'; } catch { return true; }
@@ -181,7 +245,10 @@ export function askWhereToSave() {
 // back to Downloads after a 1–2s render).
 // Returns: { mode:'pick', handle } | { mode:'download' } | { mode:'cancelled' }
 export async function beginPdfSave(filename) {
-  if (askWhereToSave() && typeof window.showSaveFilePicker === 'function') {
+  // showSaveFilePicker is a desktop-only API — on mobile it either isn't defined
+  // or opens a picker that the user can't interact with, returning AbortError and
+  // showing a misleading "Save cancelled" toast. Skip it entirely on mobile.
+  if (!isMobileDevice() && askWhereToSave() && typeof window.showSaveFilePicker === 'function') {
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: filename,
@@ -211,6 +278,43 @@ export async function finishPdfSave(pdf, filename, dest) {
       return 'downloaded';
     }
   }
+
+  // Capacitor requires writing to Filesystem before sharing/saving properly.
+  if (isCapacitor()) {
+    try {
+      const blob = pdf.output('blob');
+      const base64Data = await blobToBase64(blob);
+      const base64String = base64Data.split(',')[1];
+      
+      const savedFile = await Filesystem.writeFile({
+        path: filename,
+        data: base64String,
+        directory: Directory.Documents
+      });
+      
+      // Share it to allow saving to device or sending
+      await Share.share({
+        title: filename,
+        url: savedFile.uri,
+        dialogTitle: 'Save or Share PDF'
+      });
+      return 'saved';
+    } catch (e) {
+      console.error('[NJ Share] Capacitor finishPdfSave error:', e);
+      return 'downloaded';
+    }
+  }
+
+  // On standard mobile browsers (not capacitor), fallback to webShare
+  if (isMobileDevice()) {
+    const file = new File([pdf.output('blob')], filename, { type: 'application/pdf' });
+    try {
+      const ok = await _webShare([file], filename);
+      if (ok) return 'saved';
+    } catch (e) {
+      if (e.name === 'AbortError') return 'downloaded'; // user cancelled share
+    }
+  }
   pdf.save(filename);
   return 'downloaded';
 }
@@ -235,6 +339,40 @@ export async function shareFiles(files, { title } = {}) {
     console.log(`  file[${i}]: name="${f.name}" size=${f.size} type="${f.type}"`);
   });
 
+  if (isCapacitor()) {
+    try {
+      const uris = [];
+      for (const f of files) {
+        const base64Data = await blobToBase64(f);
+        const base64String = base64Data.split(',')[1];
+        const saved = await Filesystem.writeFile({
+          path: f.name,
+          data: base64String,
+          directory: Directory.Documents
+        });
+        uris.push(saved.uri);
+      }
+      await Share.share({
+        title: title || 'NJ India - Document',
+        files: uris,
+        dialogTitle: 'Share Documents'
+      });
+      console.groupEnd();
+      return 'shared';
+    } catch (e) {
+      console.error('[NJ Share] Capacitor shareFiles error:', e);
+    }
+  }
+
+  // Web Share API (mobile Chrome/Safari)
+  // Try navigator.share on any device that supports it.
+  try {
+    const ok = await _webShare(files, title);
+    if (ok) { console.groupEnd(); return 'shared'; }
+  } catch (e) {
+    if (e.name === 'AbortError') { console.groupEnd(); return 'cancelled'; }
+  }
+
   // ── Native Windows Share via the backend ─────────────────────────────────
   // POST the PDF bytes to the backend, which writes real .pdf files to disk and
   // launches the genuine Windows Share flyout (ShareHelper.exe) with them
@@ -245,7 +383,21 @@ export async function shareFiles(files, { title } = {}) {
     form.append('title', title || 'NJ India — Document');
     for (const f of files) form.append('files', f, f.name);
 
-    const res = await fetch(`${API_BASE}/api/share-pdfs`, { method: 'POST', body: form });
+    let res;
+    let retries = 2;
+    while (true) {
+      try {
+        res = await fetch(`${API_BASE}/api/share-pdfs`, { method: 'POST', body: form });
+        break;
+      } catch (err) {
+        if (retries > 0) {
+          retries--;
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          throw err;
+        }
+      }
+    }
     if (res.ok) {
       const data = await res.json();
       console.log('[NJ Share] backend response:', data);

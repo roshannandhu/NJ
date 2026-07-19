@@ -93,8 +93,8 @@ export default function BrandsSettings() {
   const labelStyle = { fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.05em' };
 
   return (
-    <div className="animate-fade-up" style={{ maxWidth: '900px', margin: '0 auto', padding: '8px 0 40px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+    <div className="animate-fade-up brand-settings-page" style={{ maxWidth: '900px', margin: '0 auto', padding: '8px 0 40px' }}>
+      <div className="brand-settings-intro" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
         <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--accent-soft)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <Award size={20} />
         </div>
@@ -108,12 +108,12 @@ export default function BrandsSettings() {
         {brands.map((brand, idx) => {
           const count = classCount(brand.id);
           return (
-            <div key={brand.id} style={{
+            <div key={brand.id} className="brand-settings-card" style={{
               border: `1.5px solid ${brand.active ? 'var(--line)' : 'var(--line-soft)'}`,
               borderRadius: 'var(--radius-lg)', overflow: 'hidden', opacity: brand.active ? 1 : 0.7, background: 'var(--surface)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div className="brand-settings-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--bg-warm)' }}>
+                <div className="brand-settings-card-summary" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <Award size={15} color="var(--accent)" />
                   <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--ink)' }}>{brand.name || `Brand ${idx + 1}`}</span>
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-soft)', border: '1px solid var(--line)', borderRadius: '20px', padding: '2px 8px' }}>
@@ -121,16 +121,16 @@ export default function BrandsSettings() {
                   </span>
                   {!brand.active && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase' }}>Inactive</span>}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div className="brand-settings-card-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <button onClick={() => move(brand.id, -1)} disabled={idx === 0} style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: 'var(--ink-soft)', opacity: idx === 0 ? 0.4 : 1, padding: '2px' }} title="Move up"><ArrowUp size={15} /></button>
                   <button onClick={() => move(brand.id, 1)} disabled={idx === brands.length - 1} style={{ background: 'transparent', border: 'none', cursor: idx === brands.length - 1 ? 'not-allowed' : 'pointer', color: 'var(--ink-soft)', opacity: idx === brands.length - 1 ? 0.4 : 1, padding: '2px' }} title="Move down"><ArrowDown size={15} /></button>
                   <button onClick={() => removeBrand(brand.id)} style={{ background: 'transparent', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: '2px' }} title="Delete brand"><Trash2 size={15} /></button>
                 </div>
               </div>
 
-              <div style={{ padding: '18px', display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div className="brand-settings-card-body" style={{ padding: '18px', display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 {/* Logo */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="brand-settings-logo-field" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <span style={labelStyle}>Brand Logo</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <label className="hover-lift" style={{
@@ -149,7 +149,7 @@ export default function BrandsSettings() {
                 </div>
 
                 {/* Fields */}
-                <div style={{ flex: 1, minWidth: '260px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="brand-settings-card-fields" style={{ flex: 1, minWidth: '260px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <span style={labelStyle}>Brand Name</span>
                     <input value={brand.name} onChange={e => update(brand.id, 'name', e.target.value)} style={inputStyle} placeholder="e.g. HighLander" />
@@ -172,7 +172,7 @@ export default function BrandsSettings() {
                       <span style={labelStyle}>Address</span>
                       <textarea value={brand.address || ''} onChange={e => update(brand.id, 'address', e.target.value)} style={{ ...inputStyle, minHeight: '56px', resize: 'vertical' }} placeholder={'Street, building\nCity — PIN, State'} />
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="brand-company-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <span style={labelStyle}>Phone</span>
                         <input value={brand.phone || ''} onChange={e => update(brand.id, 'phone', e.target.value)} style={inputStyle} placeholder="+91 …" />
@@ -199,7 +199,7 @@ export default function BrandsSettings() {
                     </div>
                   </div>
 
-                  <div onClick={() => update(brand.id, 'active', !brand.active)} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <div className="brand-settings-status" onClick={() => update(brand.id, 'active', !brand.active)} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                     {brand.active ? <ToggleRight size={26} color="var(--accent)" strokeWidth={2} /> : <ToggleLeft size={26} color="var(--ink-soft)" strokeWidth={2} />}
                     <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}>{brand.active ? 'Active' : 'Inactive'}</span>
                     <span style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>— {brand.active ? 'shown in catalogue & checkout' : 'hidden from catalogue filters'}</span>
@@ -219,7 +219,7 @@ export default function BrandsSettings() {
         </button>
       </div>
 
-      <div style={{ position: 'sticky', bottom: '24px', display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+      <div className="settings-sticky-actions" style={{ position: 'sticky', bottom: '24px', display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
         <button onClick={handleSave} style={{
           display: 'flex', alignItems: 'center', gap: '10px', padding: '14px 32px', fontSize: '15px', fontWeight: 700,
           background: saved ? 'var(--green)' : 'var(--accent)', color: 'white', border: 'none', borderRadius: 'var(--radius-full)',

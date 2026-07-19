@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAppContext } from '../AppContext';
 import { Search, Eye, ShieldCheck, FileText, Trash2, Calendar, Edit3, PackagePlus } from 'lucide-react';
 import { clearQuotations, clearWarranties, deleteQuotation, deleteWarranty } from '../api';
@@ -17,8 +17,17 @@ export default function History({ type }) {
   // while on, clicking a quotation row starts an add-on for THAT quotation
   // instead of opening it.
   const [addonSelectMode, setAddonSelectMode] = useState(false);
+  const isCombined = type === 'history';
+  const [historyTab, setHistoryTab] = useState('quotations');
 
-  const isQuotation = type === 'quotations';
+  const resolvedType = isCombined ? historyTab : type;
+  const isQuotation = resolvedType === 'quotations';
+
+  useEffect(() => {
+    setSearch('');
+    setVisibleCount(PAGE_SIZE);
+    setAddonSelectMode(false);
+  }, [historyTab]);
 
   // Load live data from context registry. Hidden "warranty-only" quotations
   // (backing records for standalone warranties) never appear in Quotation History.
@@ -151,7 +160,7 @@ export default function History({ type }) {
   };
 
   const handleClearHistory = async () => {
-    if (window.confirm(`Are you sure you want to delete all historical ${type} from local storage? This action is irreversible.`)) {
+    if (window.confirm(`Are you sure you want to delete all historical ${resolvedType} from local storage? This action is irreversible.`)) {
       try {
         if (isQuotation) {
           await clearQuotations();
@@ -168,7 +177,7 @@ export default function History({ type }) {
           [key]: []
         };
       });
-      showToast(`Cleared all historical ${type} successfully`, "success");
+      showToast(`Cleared all historical ${resolvedType} successfully`, "success");
     }
   };
 
@@ -182,13 +191,23 @@ export default function History({ type }) {
   };
 
   return (
-    <div className="animate-fade-up" style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 160px)' }}>
+    <div className="animate-fade-up history-page" style={{ background: 'var(--bg)', minHeight: 'calc(100vh - 160px)' }}>
+      {isCombined && (
+        <div className="history-mode-tabs" role="tablist" aria-label="History type">
+          <button type="button" role="tab" aria-selected={isQuotation} className={isQuotation ? 'is-active' : ''} onClick={() => setHistoryTab('quotations')}>
+            <FileText size={16} /> Quotations <span>{data.quotations?.filter(q => !q.warrantyOnly).length || 0}</span>
+          </button>
+          <button type="button" role="tab" aria-selected={!isQuotation} className={!isQuotation ? 'is-active' : ''} onClick={() => setHistoryTab('warranties')}>
+            <ShieldCheck size={16} /> Warranties <span>{data.warranty_certificates?.length || 0}</span>
+          </button>
+        </div>
+      )}
       
       {/* History Header Controls */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+      <div className="history-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         
         {/* Search Input Block */}
-        <div style={{ 
+        <div className="history-search" style={{
           display: 'flex', 
           alignItems: 'center', 
           background: 'var(--surface)', 
@@ -277,12 +296,12 @@ export default function History({ type }) {
       )}
 
       {/* Database Results Container */}
-      <div style={{ background: 'var(--surface)', border: addonSelectMode && isQuotation ? '1.5px solid #b45309' : '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
+      <div className="history-table" style={{ background: 'var(--surface)', border: addonSelectMode && isQuotation ? '1.5px solid #b45309' : '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflowX: 'auto', WebkitOverflowScrolling: 'touch', boxShadow: 'var(--shadow-sm)' }}>
         
         {/* Table Header Row */}
-        <div style={{ 
+        <div className="history-table-head" style={{
           display: 'grid', 
-          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px',
+          gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 2fr 1.2fr 130px 100px',
           background: 'var(--bg-warm)',
           padding: '16px 24px', 
           fontSize: '11px', 
@@ -311,12 +330,13 @@ export default function History({ type }) {
 
             return (
               <div
+                className="history-row"
                 key={i}
                 onClick={() => handleRowClick(row)}
                 title={addonSelectMode && isQuotation ? `Add more products to ${rowId}` : undefined}
                 style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 1.5fr 1.5fr 120px 110px',
+                  gridTemplateColumns: isQuotation ? '140px 1.5fr 1fr 120px 120px 160px' : '160px 2fr 1.2fr 130px 100px',
                   padding: '18px 24px',
                   borderBottom: '1px solid var(--line-soft)', 
                   alignItems: 'center', 
@@ -327,23 +347,24 @@ export default function History({ type }) {
                 onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
               >
                 {/* ID block with custom monospace */}
-                <div style={{ 
-                  fontFamily: 'var(--font-mono)', 
-                  fontSize: '12.5px', 
-                  fontWeight: 700, 
+                <div className="history-id" style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
                   color: isQuotation ? 'var(--ink)' : 'var(--accent)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>
                   {rowId}
                 </div>
 
                 {/* Customer Details */}
-                <div style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '14.5px' }}>
+                <div className="history-customer" style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '14.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                   {customerName}
                 </div>
                 
                 {/* Spec specifics */}
                 {isQuotation ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div className="history-product" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <FileText size={14} color="var(--ink-soft)" />
                       <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink-mid)' }}>
@@ -364,9 +385,9 @@ export default function History({ type }) {
                     )}
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-mid)', fontWeight: 600 }}>
-                    <ShieldCheck size={14} color="var(--accent)" />
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}>
+                  <div className="history-product" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-mid)', fontWeight: 600, overflow: 'hidden', minWidth: 0 }}>
+                    <ShieldCheck size={14} color="var(--accent)" style={{ flexShrink: 0 }} />
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {row.certData?.productName || row.template?.title || 'Certified Tiles'}
                     </span>
                   </div>
@@ -374,21 +395,28 @@ export default function History({ type }) {
                 
                 {/* Quotation Amount */}
                 {isQuotation && (
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--accent-deep)', fontFamily: 'var(--font-mono)' }}>
+                  <div className="history-total" style={{ fontWeight: 700, fontSize: '14px', color: 'var(--accent-deep)', fontFamily: 'var(--font-mono)' }}>
                     ₹{Math.round(row.grandTotal || row.amount || 0).toLocaleString('en-IN')}
                   </div>
                 )}
                 
                 {/* Date */}
-                <div style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div className="history-date" style={{ fontSize: '13px', color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Calendar size={13} color="var(--ink-soft)" />
-                  {dateVal}
+                  <span>
+                    {dateVal}
+                    {(row.createdAt || row.updatedAt) && (
+                      <span style={{ display: 'block', fontSize: '11px', color: 'var(--ink-soft)', opacity: 0.75 }}>
+                        {new Date(row.createdAt || row.updatedAt).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 
                 {/* Actions — compact icon buttons so they never overflow the
                     column (text labels for 3-4 actions used to spill into the
                     Date / Grand Total columns). Tooltips carry the meaning. */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                <div className="history-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                   {isQuotation && rowCerts.length > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openWarranty(row, rowCerts[0]); }}
@@ -465,7 +493,7 @@ export default function History({ type }) {
               <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--ink)', margin: '0 0 4px' }}>No records found</h4>
               <p style={{ fontSize: '13px', margin: 0 }}>
                 {rawList.length === 0 
-                  ? `There are no historical ${type} logged in this terminal database.`
+                  ? `There are no historical ${resolvedType} logged in this terminal database.`
                   : "Try searching with a different client name or certificate ID number."}
               </p>
             </div>

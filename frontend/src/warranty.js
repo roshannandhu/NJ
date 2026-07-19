@@ -20,7 +20,9 @@ export function warrantyTemplatesForQuotation(quotation, data) {
   const seen = new Set();
   const list = [];
   (quotation.items || []).forEach((item) => {
-    const cls = data.classes?.find((c) => c.name === item.className);
+    const cls = data.classes?.find((c) =>
+      (item.classId && c.id === item.classId) || c.name === item.className
+    );
     if (cls?.warrantyId && !seen.has(cls.warrantyId)) {
       const tmpl = data.warranties?.find((w) => w.id === cls.warrantyId);
       if (tmpl) { seen.add(cls.warrantyId); list.push({ ...tmpl, forClass: cls.name }); }
@@ -65,7 +67,12 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
   const cart = quotation.items || [];
 
   return templates.map((tmpl) => {
-    const matchingItems = cart.filter((item) => item.className === tmpl.forClass);
+    const matchingItems = cart.filter((item) => {
+      const cls = data.classes?.find((c) =>
+        (item.classId && c.id === item.classId) || c.name === item.className
+      );
+      return cls?.warrantyId === tmpl.id || item.className === tmpl.forClass;
+    });
     const selectedItem = matchingItems.length > 0 ? matchingItems[0] : (cart[0] || null);
     const wNo = certIdFor(tmpl);
     return {

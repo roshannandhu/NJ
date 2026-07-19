@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { DEFAULT_DATA } from './data';
 import { isToolItem } from './brands';
 import { allItemsOf } from './addons';
+import { App as CapApp } from '@capacitor/app';
 import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus } from './api';
 
 const AppContext = createContext();
@@ -30,6 +31,34 @@ const normalizeCartSpelling = (record) => {
 };
 
 export function AppProvider({ children }) {
+  // --- Hardware Back Button Interception (Capacitor) ---
+  const backHandlers = useRef([]);
+  const registerBackHandler = useCallback((handler) => {
+    backHandlers.current.push(handler);
+    return () => {
+      backHandlers.current = backHandlers.current.filter(h => h !== handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    let listener = null;
+    CapApp.addListener('backButton', () => {
+      if (backHandlers.current.length > 0) {
+        const handler = backHandlers.current[backHandlers.current.length - 1];
+        const handled = handler();
+        if (handled) return;
+      }
+      
+      const hash = window.location.hash.replace('#', '');
+      if (hash && hash !== 'dashboard' && hash !== 'quotation_desk') {
+        window.history.back();
+      } else {
+        CapApp.exitApp();
+      }
+    }).then(l => listener = l).catch(() => {});
+    return () => { if (listener) listener.remove(); };
+  }, []);
+
   const [currentView, setCurrentView] = useState('quotation_desk'); // dashboard, quotation_desk, checkout, quotations, warranties, settings
   const [selectedClassId, setSelectedClassId] = useState(null);
   const [selectedVarietyId, setSelectedVarietyId] = useState(null);
@@ -93,12 +122,19 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Held so the reconnect effect can call the same function without re-registering.
+  const _loadData = useRef(null);
+
   useEffect(() => {
-    (async () => {
+    const loadData = async () => {
       try {
-        let cfg = await getConfig();
-        const quotations = (await listQuotations()).map(normalizeCartSpelling);
-        const warranty_certificates = (await listWarranties()).map(normalizeCartSpelling);
+        // Fire all three in parallel — on EC2 this cuts startup time by ~2/3.
+        const [cfg_raw, rawQ, rawW] = await Promise.all([
+          getConfig(), listQuotations(), listWarranties(),
+        ]);
+        let cfg = cfg_raw;
+        const quotations = rawQ.map(normalizeCartSpelling);
+        const warranty_certificates = rawW.map(normalizeCartSpelling);
 
         if (cfg && cfg.warranties) {
           cfg.warranties = cfg.warranties.map(w => {
@@ -164,8 +200,24 @@ export function AppProvider({ children }) {
         setBackendOffline(true);
         showToast("Backend offline — your data is NOT loaded", "error");
       }
-    })();
+    };
+    _loadData.current = loadData;
+    loadData();
   }, []);
+
+  // Auto-reconnect: retry when network comes back online or the user returns
+  // to the app (tab/app becomes visible) after a connection drop.
+  useEffect(() => {
+    if (!backendOffline) return;
+    const retry = () => _loadData.current?.();
+    const onVisible = () => { if (!document.hidden) _loadData.current?.(); };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [backendOffline]);
 
   const persistConfig = async (nextData = data) => {
     try {
@@ -333,6 +385,7 @@ export function AppProvider({ children }) {
     backendOffline,
     backupStatus, refreshBackupStatus,
     askSaveLocation, setAskSaveLocation,
+    registerBackHandler,
   };
 
   const days = backupStatus?.days_since_last_backup;

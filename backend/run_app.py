@@ -37,10 +37,15 @@ os.environ.setdefault(
 import traceback
 import datetime
 import urllib.request
+import urllib.parse
 
 import uvicorn
 
-HOST = "127.0.0.1"
+# Always connect to EC2 backend. NJ_SERVER_URL can override the default URL.
+REMOTE_URL = os.environ.get("NJ_SERVER_URL", "http://18.61.159.169:8000").strip()
+
+BIND_HOST = "0.0.0.0"   # listen on all LAN interfaces so other PCs can connect
+HOST = "127.0.0.1"     # local webview still uses loopback
 
 # A launch log next to the data lets us see exactly what happened when the window
 # is the only thing the user can see (pythonw has no console).
@@ -90,7 +95,7 @@ URL = f"http://{HOST}:{PORT}"
 
 def _serve():
     try:
-        uvicorn.run("main:app", host=HOST, port=PORT, log_config=None)
+        uvicorn.run("main:app", host=BIND_HOST, port=PORT, log_config=None)
     except Exception as e:  # surface a dead server instead of a silent refusal
         log("SERVER CRASHED: " + repr(e) + "\n" + traceback.format_exc())
 
@@ -110,13 +115,49 @@ def _wait_ready(timeout=40.0):
 
 
 if __name__ == "__main__":
-    log(f"==== launch ==== url={URL} python={sys.executable}")
-    if not _is_only_instance():
-        log("another instance is already running; exiting (no second window)")
-        sys.exit(0)
-    threading.Thread(target=_serve, daemon=True).start()
-    ready = _wait_ready()
-    log(f"server ready: {ready}")
+    if REMOTE_URL:
+        # Remote mode: serve local frontend on loopback, API calls go to EC2 (baked into JS)
+        log(f"==== launch (remote) ==== remote={REMOTE_URL} local={URL} python={sys.executable}")
+        def _serve_static():
+            from fastapi import FastAPI
+            from fastapi.staticfiles import StaticFiles
+            from fastapi.responses import FileResponse, Response
+            from pathlib import Path
+            _static = FastAPI()
+            _local_uploads = Path(os.environ["NJ_DATA_DIR"]) / "uploads"
+
+            @_static.get("/api/health")
+            def _health(): return {"status": "ok"}
+
+            @_static.get("/uploads/{path:path}")
+            def _serve_upload(path: str):
+                # Try local disk first (covers images uploaded before EC2 was configured),
+                # then proxy to EC2 (covers images uploaded via the current app or APK).
+                local = (_local_uploads / path).resolve()
+                if str(local).startswith(str(_local_uploads.resolve())) and local.exists():
+                    return FileResponse(str(local))
+                try:
+                    safe = urllib.parse.quote(path, safe="/-._~")
+                    with urllib.request.urlopen(f"{REMOTE_URL}/uploads/{safe}", timeout=15) as r:
+                        data = r.read()
+                        ct = r.headers.get("content-type", "application/octet-stream")
+                    return Response(content=data, media_type=ct)
+                except Exception:
+                    return Response(status_code=404)
+
+            _dist = Path(__file__).parent / "dist"
+            _static.mount("/", StaticFiles(directory=str(_dist), html=True), name="spa")
+            uvicorn.run(_static, host=HOST, port=PORT, log_config=None)
+        threading.Thread(target=_serve_static, daemon=True).start()
+        _wait_ready()
+    else:
+        log(f"==== launch ==== url={URL} python={sys.executable}")
+        if not _is_only_instance():
+            log("another instance is already running; exiting (no second window)")
+            sys.exit(0)
+        threading.Thread(target=_serve, daemon=True).start()
+        ready = _wait_ready()
+        log(f"server ready: {ready}")
     try:
         import webview
         log(f"webview imported (v{getattr(webview, '__version__', '?')}); creating window")

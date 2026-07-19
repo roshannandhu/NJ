@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppContext } from '../AppContext';
-import { mediaUrl, uploadImage } from '../api';
+import { mediaUrl, retryMediaImage, uploadImage } from '../api';
 import {
   Plus, Image as ImageIcon, Trash2, Package, Palette, FileText, CheckCircle2, Loader,
   Award, Wrench, X, ChevronLeft, ChevronRight, Copy, GripVertical, Pencil,
@@ -10,7 +10,8 @@ import './ProductsCatalog.css';
 
 const newId = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 const move = (arr, from, to) => { const a = [...arr]; const [m] = a.splice(from, 1); a.splice(to, 0, m); return a; };
-const cssUrl = (url) => `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/cover no-repeat`;
+const cssImageUrl = (url) => `url("${mediaUrl(url).replace(/"/g, '\\"')}")`;
+const cssUrl = (url) => `${cssImageUrl(url)} center/cover no-repeat`;
 
 export default function ProductsClassesSettings() {
   const { data, setData, showToast, persistConfig } = useAppContext();
@@ -24,14 +25,34 @@ export default function ProductsClassesSettings() {
   const [dragOver, setDragOver] = useState(null);
   const dragRef = useRef(null);
   const saveTimer = useRef(null);
+  const saveStatusTimer = useRef(null);
+  const pendingSave = useRef(null);
+  const mounted = useRef(true);
 
   // ── One simple save path ──────────────────────────────────────────────────
+  const saveNow = async (next) => {
+    pendingSave.current = null;
+    const saved = await persistConfig(next);
+    if (!mounted.current) return;
+    setSaveStatus(saved ? 'saved' : 'error');
+    clearTimeout(saveStatusTimer.current);
+    saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 1500);
+  };
   const commit = (next) => {
     setData(next); setSaveStatus('pending');
+    pendingSave.current = next;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { persistConfig(next); setSaveStatus('saved'); setTimeout(() => setSaveStatus('idle'), 1500); }, 600);
+    saveTimer.current = setTimeout(() => { void saveNow(next); }, 600);
   };
-  useEffect(() => () => clearTimeout(saveTimer.current), []);
+  useEffect(() => () => {
+    mounted.current = false;
+    clearTimeout(saveTimer.current);
+    clearTimeout(saveStatusTimer.current);
+    // Navigating to the Quotation Desk used to cancel the debounced write. The
+    // thumbnail remained visible in local state, but a refresh could restore
+    // the older catalogue without the uploaded swatch. Flush the last edit.
+    if (pendingSave.current) void persistConfig(pendingSave.current);
+  }, []);
 
   const imagePreview = (url, fit = 'cover') => (url ? `url("${mediaUrl(url).replace(/"/g, '\\"')}") center/${fit} no-repeat` : undefined);
   const upload = async (e, cb) => {
@@ -151,7 +172,8 @@ export default function ProductsClassesSettings() {
 
   const statusEl = () => saveStatus === 'pending'
     ? <span className="pc-saving"><Loader size={13} style={{ animation: 'spin 1s linear infinite' }} /> Saving…</span>
-    : saveStatus === 'saved' ? <span className="pc-saving ok"><CheckCircle2 size={13} /> Saved</span> : null;
+    : saveStatus === 'saved' ? <span className="pc-saving ok"><CheckCircle2 size={13} /> Saved</span>
+      : saveStatus === 'error' ? <span className="pc-saving" style={{ color: 'var(--red)' }}>Save failed</span> : null;
 
   // The Quotation Desk card look (media + body), reused for grid cards + modal preview.
   const qd2Inner = (v, isTool, active) => {
@@ -162,7 +184,7 @@ export default function ProductsClassesSettings() {
     return (
       <>
         <div className={`qd2-card-media${isTool ? ' is-tool' : ''}`}>
-          {img ? <img src={mediaUrl(img)} alt={v.name} crossOrigin="anonymous" />
+          {img ? <span key={img} className="qd2-media-image" role="img" aria-label={v.name} style={{ backgroundImage: cssImageUrl(img) }} />
             : <div className="qd2-card-fallback">{isTool ? <Wrench size={26} /> : <ImageIcon size={26} />}<span>{v.name || 'Product'}</span></div>}
           {!isTool && colors.length > 0 && <span className="qd2-color-badge">{ac?.name}</span>}
         </div>
@@ -348,7 +370,7 @@ export default function ProductsClassesSettings() {
 
   return (
     <div className="set-page wide pc">
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+      <div className="pc-overview" style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Brands group your product classes. Tools & accessories are separate. Click a class to manage its varieties.</div>
         <div style={{ marginLeft: 'auto' }}>{statusEl()}</div>
       </div>
@@ -359,7 +381,7 @@ export default function ProductsClassesSettings() {
         return (
           <div key={brand.id} className="pc-section">
             <div className="pc-section-head">
-              {brand.logo ? <img className="pc-section-logo" src={mediaUrl(brand.logo)} alt="" /> : <div className="pc-section-badge"><Award size={18} /></div>}
+              {brand.logo ? <img className="pc-section-logo" src={mediaUrl(brand.logo)} alt="" onError={retryMediaImage} /> : <div className="pc-section-badge"><Award size={18} /></div>}
               <h3>{brand.name}</h3>
               <span className="pc-count">{classes.length} {classes.length === 1 ? 'class' : 'classes'}</span>
             </div>

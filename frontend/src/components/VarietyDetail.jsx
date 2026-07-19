@@ -1,15 +1,26 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, Minus, Plus, ShoppingCart } from 'lucide-react';
 import NumberField from './NumberField';
 
 export default function VarietyDetail() {
-  const { data, selectedVarietyId, selectedClassId, setCurrentView, addToCart, setCartOpen } = useAppContext();
+  const { data, selectedVarietyId, selectedClassId, setCurrentView, addToCart, setCartOpen, registerBackHandler } = useAppContext();
   const cls = data.classes.find(c => c.id === selectedClassId);
   const variety = data.varieties.find(v => v.id === selectedVarietyId);
   
   const [selectedColorIdx, setSelectedColorIdx] = useState(0);
   const [qty, setQty] = useState(1);
+
+  
+
+  React.useEffect(() => {
+    if (selectedVarietyId && registerBackHandler) {
+      return registerBackHandler(() => {
+        setCurrentView('quotation_desk');
+        return true;
+      });
+    }
+  }, [selectedVarietyId, registerBackHandler, setCurrentView]);
 
   if (!variety) return <div onClick={() => setCurrentView('varieties')}>Back</div>;
 
@@ -20,19 +31,20 @@ export default function VarietyDetail() {
     addToCart({
       id: variety.id,
       name: variety.name,
+      classId: cls.id,
       className: cls.name,
       price: finalPrice,
       qty,
       unit: variety.unit,
       color: selectedColor ? selectedColor.name : 'Standard',
-      image: variety.image
+      image: selectedColor?.image || variety.image
     });
     setCurrentView('varieties');
     setCartOpen(true);
   };
 
   return (
-    <div className="animate-fade-up">
+    <div className="animate-fade-up variety-detail-page">
       <button 
         onClick={() => setCurrentView('varieties')}
         style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-mid)', marginBottom: '24px', fontWeight: 500 }}
@@ -40,8 +52,8 @@ export default function VarietyDetail() {
         <ArrowLeft size={16} /> Back to Varieties
       </button>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '48px' }}>
-        <div style={{ background: 'var(--line-soft)', borderRadius: 'var(--radius-lg)', height: '480px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="variety-detail-layout" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '48px' }}>
+        <div className="variety-detail-preview" style={{ background: 'var(--line-soft)', borderRadius: 'var(--radius-lg)', height: '480px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ width: '100px', height: '100px', background: selectedColor ? selectedColor.hex : '#ccc', borderRadius: '50%', boxShadow: 'var(--shadow-lg)' }}></div>
         </div>
         
@@ -91,7 +103,7 @@ export default function VarietyDetail() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '40px' }}>
+          <div className="variety-detail-actions" style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '40px' }}>
             <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
               <button onClick={() => setQty(Math.max(1, qty - 1))} style={{ padding: '12px 16px', background: 'var(--surface)', borderRight: '1px solid var(--line)' }}><Minus size={16}/></button>
               <NumberField min={1} fallback={1} value={qty} onCommit={setQty} style={{ width: '80px', border: 'none', textAlign: 'center', fontSize: '16px', fontWeight: 500, background: 'transparent' }} />

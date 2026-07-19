@@ -1,9 +1,12 @@
 // In the packaged desktop app the SPA is served BY the FastAPI backend, so the
 // API lives at the same origin (whatever port run_app.py picked). Only in Vite
 // dev (separate port) do we point at the fixed backend port.
-const BASE =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? "http://127.0.0.1:8000" : window.location.origin);
+const BASE = import.meta.env.VITE_API_URL || window.location.origin;
+
+// True only in the Windows desktop shell (run_app.py REMOTE mode): the SPA is
+// served from http://127.0.0.1:PORT. Capacitor uses http://localhost (no
+// 127.0.0.1), so this stays false on Android.
+const _localDesktopShell = /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(window.location.origin);
 
 // Same-origin base used by non-api.js modules (e.g. share.js) that need to hit
 // the backend directly.
@@ -11,17 +14,117 @@ export const API_BASE = BASE;
 
 export function mediaUrl(url) {
   if (!url) return "";
-  if (/^(data:|blob:|https?:\/\/)/i.test(url)) return url;
-  if (url.startsWith("/")) return `${BASE}${url}`;
-  return url;
+  const value = String(url).trim();
+  if (/^(data:|blob:)/i.test(value)) return value;
+
+  // URL() safely percent-encodes the spaces and punctuation found in imported
+  // WhatsApp filenames. Also repair old absolute upload URLs with a foreign host
+  // (loopback, LAN IPs like 192.168.x.x) that are unreachable from phones/APK.
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      const baseHost = (() => { try { return new URL(BASE).hostname; } catch { return ""; } })();
+      if (parsed.hostname !== baseHost && parsed.pathname.startsWith("/uploads/")) {
+        // In the Windows desktop shell, route through the local server so it can
+        // try local files before proxying to EC2.
+        const target = _localDesktopShell ? window.location.origin : BASE;
+        return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, `${target}/`).href;
+      }
+      return parsed.href;
+    } catch {
+      return value;
+    }
+  }
+
+  // Older catalogue records contain both "/uploads/x" and "uploads/x".
+  const path = value.startsWith("/") ? value : `/${value}`;
+  // In the Windows desktop shell, route /uploads/ through the local server
+  // (run_app.py REMOTE mode serves local files first, then proxies to EC2).
+  const base = (_localDesktopShell && path.startsWith('/uploads/')) ? window.location.origin : BASE;
+  try {
+    return new URL(path, `${base}/`).href;
+  } catch {
+    return `${base}${path}`;
+  }
+}
+
+// Same as mediaUrl but appends ?cors=1 to force a fresh CORS request,
+// preventing cache collisions if the image was previously loaded in no-cors mode (e.g. CSS background).
+export function corsMediaUrl(url) {
+  const resolved = mediaUrl(url);
+  if (!resolved || resolved.startsWith("data:") || resolved.startsWith("blob:")) return resolved;
+  try {
+    const u = new URL(resolved);
+    u.searchParams.set("cors", "1");
+    return u.href;
+  } catch {
+    return resolved;
+  }
+}
+
+// A catalogue request can fail once while the small EC2 service is restarting
+// or a mobile connection changes. Browsers do not automatically retry a broken
+// <img>, so retry twice with a cache-busting query instead of leaving a broken
+// tile until the whole application is reloaded.
+export function retryMediaImage(event) {
+  const image = event.currentTarget;
+  const attempt = Number(image.dataset.mediaRetry || 0);
+  const current = image.currentSrc || image.src || "";
+  if (attempt >= 2) {
+    const fallback = image.dataset.mediaFallback;
+    if (fallback && fallback !== current) {
+      delete image.dataset.mediaFallback;
+      image.dataset.mediaRetry = "0";
+      image.src = fallback;
+    }
+    return;
+  }
+  if (/^(data:|blob:)/i.test(current)) return;
+
+  image.dataset.mediaRetry = String(attempt + 1);
+  window.setTimeout(() => {
+    if (!image.isConnected) return;
+    try {
+      const retryUrl = new URL(current, window.location.href);
+      retryUrl.searchParams.set("nj_image_retry", String(attempt + 1));
+      image.src = retryUrl.href;
+    } catch {
+      // The bounded retry is best-effort; preserve the browser's error state.
+    }
+  }, 500 * (attempt + 1));
+}
+
+async function fetchWithRetry(url, opts = {}, retries = 2) {
+  try {
+    const res = await fetch(url, opts);
+    // Retry on common load balancer / keep-alive drop gateway errors
+    if (!res.ok && res.status >= 502 && res.status <= 504) {
+      throw new Error(`Server error ${res.status}`);
+    }
+    return res;
+  } catch (err) {
+    // A write may have committed before its response was interrupted. Retrying
+    // it automatically can duplicate side effects/version bumps; UI flows keep
+    // their stable id and let the user retry intentionally instead.
+    const method = String(opts.method || "GET").toUpperCase();
+    if (retries > 0 && (method === "GET" || method === "HEAD")) {
+      await new Promise(r => setTimeout(r, 500));
+      return fetchWithRetry(url, opts, retries - 1);
+    }
+    throw err;
+  }
 }
 
 async function req(path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetchWithRetry(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...opts.headers },
     ...opts,
   });
-  if (!res.ok) throw new Error(`API ${opts.method || "GET"} ${path} → ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const detail = typeof body.detail === "string" ? body.detail : "";
+    throw new Error(detail || `Server request failed (${res.status})`);
+  }
   return res.json();
 }
 
@@ -66,7 +169,7 @@ export async function clearWarranties() {
 }
 
 export async function downloadWarrantyDocx(warrantyId, warrantyData, filename) {
-  const res = await fetch(`${BASE}/api/warranties/${encodeURIComponent(warrantyId)}/docx`, {
+  const res = await fetchWithRetry(`${BASE}/api/warranties/${encodeURIComponent(warrantyId)}/docx`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(warrantyData || {}),
@@ -97,7 +200,7 @@ export async function downloadWarrantyDocx(warrantyId, warrantyData, filename) {
 export async function uploadImage(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${BASE}/api/uploads`, { method: "POST", body: fd });
+  const res = await fetchWithRetry(`${BASE}/api/uploads`, { method: "POST", body: fd });
   if (!res.ok) throw new Error("Upload failed");
   return res.json();
 }
@@ -127,28 +230,51 @@ export async function restoreFromFile(file, mode = "merge") {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("mode", mode);
-  const res = await fetch(`${BASE}/api/backup/restore-file`, { method: "POST", body: fd });
+  const res = await fetchWithRetry(`${BASE}/api/backup/restore-file`, { method: "POST", body: fd });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Restore failed: ${res.status}`);
   return body;
 }
 
-async function _downloadFromEndpoint(endpoint, fallbackPrefix) {
-  const res = await fetch(`${BASE}${endpoint}`);
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+async function _downloadFromEndpoint(endpoint, fallbackPrefix, ext = '.zip') {
+  // Open the Save dialog FIRST while the user-click gesture is still active.
+  // Fetching first (the old order) takes several seconds and expires the gesture,
+  // causing showSaveFilePicker to throw NotAllowedError and silently fall back to
+  // a Downloads-folder blob download the user never sees.
+  const suggestedName = `${fallbackPrefix}_${new Date().toISOString().slice(0, 10)}${ext}`;
+  let fileHandle = null;
+  if (window.showSaveFilePicker) {
+    try {
+      fileHandle = await window.showSaveFilePicker({ suggestedName });
+    } catch (err) {
+      if (err.name === 'AbortError') return null; // user cancelled — stop here
+      // picker unavailable / not allowed — fall through to blob download after fetch
+    }
+  }
+
+  // Fetch the file — re-throw on error so callers can show a toast.
+  const res = await fetchWithRetry(`${BASE}${endpoint}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Export failed (${res.status})`);
+  }
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `${fallbackPrefix}_${Date.now()}.json`;
-  if (window.showSaveFilePicker) {
+  const filename = match ? match[1] : suggestedName;
+
+  if (fileHandle) {
+    let writable;
     try {
-      const handle = await window.showSaveFilePicker({ suggestedName: filename });
-      const writable = await handle.createWritable();
+      writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
       return filename;
-    } catch (err) {
-      if (err.name === 'AbortError') return filename;
+    } catch {
+      // Write failed — close the stream cleanly then fall back to blob download.
+      if (writable) {
+        try { await writable.abort(); } catch { /* best-effort stream cleanup */ }
+      }
     }
   }
 
@@ -161,12 +287,12 @@ async function _downloadFromEndpoint(endpoint, fallbackPrefix) {
 }
 
 export async function downloadBackup() {
-  return _downloadFromEndpoint("/api/backup", "nj_backup");
+  return _downloadFromEndpoint("/api/backup", "nj_backup", ".zip");
 }
 
 // Fetch the full backup as a Blob (for the Share feature). Returns { blob, filename }.
 export async function fetchBackupBlob() {
-  const res = await fetch(`${BASE}/api/backup`);
+  const res = await fetchWithRetry(`${BASE}/api/backup`);
   if (!res.ok) throw new Error(`Backup failed: ${res.status}`);
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") || "";
@@ -175,21 +301,21 @@ export async function fetchBackupBlob() {
 }
 
 export async function downloadCatalogBackup() {
-  return _downloadFromEndpoint("/api/backup/catalog", "nj_catalog");
+  return _downloadFromEndpoint("/api/backup/catalog", "nj_catalog", ".zip");
 }
 
 export async function restoreCatalogFromFile(file, mode = "merge") {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("mode", mode);
-  const res = await fetch(`${BASE}/api/backup/restore-catalog`, { method: "POST", body: fd });
+  const res = await fetchWithRetry(`${BASE}/api/backup/restore-catalog`, { method: "POST", body: fd });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Restore failed: ${res.status}`);
   return body;
 }
 
 export async function downloadHistoryBackup() {
-  return _downloadFromEndpoint("/api/backup/history", "nj_history");
+  return _downloadFromEndpoint("/api/backup/history", "nj_history", ".json");
 }
 
 export async function getUploadsInfo() {
@@ -197,7 +323,18 @@ export async function getUploadsInfo() {
 }
 
 export async function downloadUploadsBackup() {
-  const res = await fetch(`${BASE}/api/backup/uploads`);
+  // Open Save dialog FIRST (user gesture is still active at this point).
+  const suggestedName = `nj_uploads_${new Date().toISOString().slice(0, 10)}.zip`;
+  let fileHandle = null;
+  if (window.showSaveFilePicker) {
+    try {
+      fileHandle = await window.showSaveFilePicker({ suggestedName });
+    } catch (err) {
+      if (err.name === 'AbortError') return suggestedName;
+    }
+  }
+
+  const res = await fetchWithRetry(`${BASE}/api/backup/uploads`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Download failed: ${res.status}`);
@@ -205,18 +342,15 @@ export async function downloadUploadsBackup() {
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match ? match[1] : `nj_uploads_${Date.now()}.zip`;
+  const filename = match ? match[1] : suggestedName;
 
-  if (window.showSaveFilePicker) {
+  if (fileHandle) {
     try {
-      const handle = await window.showSaveFilePicker({ suggestedName: filename });
-      const writable = await handle.createWritable();
+      const writable = await fileHandle.createWritable();
       await writable.write(blob);
       await writable.close();
       return filename;
-    } catch (err) {
-      if (err.name === 'AbortError') return filename;
-    }
+    } catch { /* write failed — fall through */ }
   }
 
   const url = URL.createObjectURL(blob);
@@ -230,7 +364,7 @@ export async function downloadUploadsBackup() {
 export async function restoreUploadsFromFile(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch(`${BASE}/api/backup/restore-uploads`, { method: "POST", body: fd });
+  const res = await fetchWithRetry(`${BASE}/api/backup/restore-uploads`, { method: "POST", body: fd });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Restore failed: ${res.status}`);
   return body;

@@ -63,6 +63,26 @@ export default function Checkout() {
     return def ? def.id : '';
   });
   const [isGenerating, setIsGenerating] = React.useState(false);
+
+  // Scroll the focused input above the soft keyboard when it appears on mobile.
+  // visualViewport.resize fires after the keyboard animation; we check if the
+  // active element is now below the visible area and nudge the scroll container.
+  React.useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const el = document.activeElement;
+      if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom > vv.height - 12) {
+        const scroller = document.querySelector('.main-content-scroll-container');
+        if (scroller) scroller.scrollTop += rect.bottom - vv.height + 72;
+      }
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+
   // Manager / preparer — mandatory; a quotation is always made "under" a manager.
   const [managerName, setManagerName] = React.useState(() => {
     if (editingExisting && activeQuotation.managerName) return activeQuotation.managerName;
@@ -183,36 +203,49 @@ export default function Checkout() {
       balanceDue: round2(grandTotal - advanceKept),
     };
 
+    let savedUpdated;
     try {
-      await createQuotation(updated);
-    } catch {
-      showToast("Saved locally, backend sync failed", "error");
+      savedUpdated = await createQuotation(updated);
+    } catch (error) {
+      showToast(`Could not save the add-on: ${error.message}. Your cart is still here.`, "error");
+      return;
     }
 
     // Auto-create only the MISSING warranty certs over the WHOLE order.
-    const certsAll = buildWarrantyCertsForQuotation({ ...updated, items: allItemsOf(updated) }, data, settings);
+    const certsAll = buildWarrantyCertsForQuotation({ ...savedUpdated, items: allItemsOf(savedUpdated) }, data, settings);
     const existingCerts = data.warranty_certificates || [];
     const missing = certsAll.filter(c => !existingCerts.some(w => (w.id || w.warrantyNo) === c.id));
+    const savedMissing = [];
+    let warrantySaveError = null;
     for (const cert of missing) {
-      await createWarranty(cert).catch(() => {});
+      try {
+        savedMissing.push(await createWarranty(cert));
+      } catch (error) {
+        warrantySaveError = error;
+        break;
+      }
     }
 
     setData(prev => ({
       ...prev,
-      quotations: [updated, ...(prev.quotations || []).filter(q => q.id !== updated.id)],
-      warranty_certificates: missing.length
-        ? [...missing, ...(prev.warranty_certificates || []).filter(c => !missing.some(n => n.id === c.id))]
+      quotations: [savedUpdated, ...(prev.quotations || []).filter(q => q.id !== savedUpdated.id)],
+      warranty_certificates: savedMissing.length
+        ? [...savedMissing, ...(prev.warranty_certificates || []).filter(c => !savedMissing.some(n => n.id === c.id))]
         : (prev.warranty_certificates || []),
     }));
 
     cancelAddonOrder(); // clears add-on mode + cart + customer
     setActiveQuotationId(null);
     setGenerateIntent?.('quote');
-    setActiveQuotation(updated);
+    setActiveQuotation(savedUpdated);
     if (setActiveTab) setActiveTab('quotation');
     setCurrentView('quotation_document');
-    showToast(`Add-on saved — ${batch.items.length} item${batch.items.length > 1 ? 's' : ''} added to ${updated.id}`
-      + (missing.length ? ` (+${missing.length} warranty)` : ''), "success");
+    if (warrantySaveError) {
+      showToast(`Add-on saved, but a warranty failed: ${warrantySaveError.message}. Open the quotation and retry warranty creation.`, "error");
+    } else {
+      showToast(`Add-on saved — ${batch.items.length} item${batch.items.length > 1 ? 's' : ''} added to ${savedUpdated.id}`
+        + (savedMissing.length ? ` (+${savedMissing.length} warranty)` : ''), "success");
+    }
   };
 
   const finalizeGeneration = async () => {
@@ -249,8 +282,13 @@ export default function Checkout() {
     // A standalone warranty-only finalize is backed by its OWN hidden quotation,
     // so it must NEVER reuse — and overwrite — the active quotation draft: doing
     // so would clobber a real quotation (marking it warrantyOnly and zeroing its
-    // total). So warranty-only always mints a fresh id; only quote/both reuse it.
-    const reuseId = intent !== 'warranty' ? activeQuotationId : null;
+    // total). A warranty-only flow mints a fresh id initially, then reuses only
+    // that hidden backing quotation if an interrupted remote save is retried.
+    const retryingWarrantyOnly = intent === 'warranty'
+      && activeQuotationId
+      && activeQuotation?.id === activeQuotationId
+      && activeQuotation?.warrantyOnly;
+    const reuseId = (intent !== 'warranty' || retryingWarrantyOnly) ? activeQuotationId : null;
     // The quotation's parent brand: brands its number (HL-Q-… via docPrefix)
     // and is stored on the snapshot. Rendering still resolves the brand LIVE
     // from the items, so renames/profile edits update existing quotations.
@@ -343,24 +381,44 @@ export default function Checkout() {
     // never orphaned but the backing record stays out of Quotation History.
     if (intent === 'warranty') snapshot.warrantyOnly = true;
 
+    let savedSnapshot;
     try {
-      await createQuotation(snapshot);
-    } catch {
-      showToast("Saved locally, backend sync failed", "error");
+      savedSnapshot = await createQuotation(snapshot);
+      setActiveQuotation(savedSnapshot);
+    } catch (error) {
+      // Remote mode has no local persistence. Keep the complete draft in the UI
+      // and reuse its id on retry instead of claiming that it was saved.
+      setActiveQuotation(snapshot);
+      showToast(`Could not save quotation: ${error.message}. Your draft is still here; please retry.`, "error");
+      return;
     }
 
     let certs = [];
     if (wantsWarranty) {
-      certs = buildWarrantyCertsForQuotation(snapshot, data, settings);
-      for (const cert of certs) {
-        await createWarranty(cert).catch(() => {});
+      const pendingCerts = buildWarrantyCertsForQuotation(savedSnapshot, data, settings);
+      try {
+        for (const cert of pendingCerts) {
+          certs.push(await createWarranty(cert));
+        }
+      } catch (error) {
+        // The parent is stored, but a failed certificate must never be added to
+        // local history or reported as successful. Keep the draft for retry.
+        setData(prev => ({
+          ...prev,
+          quotations: [savedSnapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)],
+          warranty_certificates: certs.length
+            ? [...certs, ...(prev.warranty_certificates || []).filter(c => !certs.some(n => n.id === c.id))]
+            : (prev.warranty_certificates || []),
+        }));
+        showToast(`Quotation saved, but warranty creation failed: ${error.message}. Your draft is kept; retry to finish.`, "error");
+        return;
       }
     }
 
     // Update the local registry: upsert this quotation by id; add any new certs.
     setData(prev => ({
       ...prev,
-      quotations: [snapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)],
+      quotations: [savedSnapshot, ...(prev.quotations || []).filter(q => q.id !== qNo)],
       warranty_certificates: certs.length
         ? [...certs, ...(prev.warranty_certificates || []).filter(c => !certs.some(n => n.id === c.id))]
         : (prev.warranty_certificates || []),
@@ -386,7 +444,7 @@ export default function Checkout() {
     }
 
     if (setActiveTab) setActiveTab('quotation');
-    setActiveQuotation(snapshot);
+    setActiveQuotation(savedSnapshot);
     setCurrentView('quotation_document');
 
     if (intent === 'both') {
@@ -413,6 +471,10 @@ export default function Checkout() {
 
   const handleQtyChange = (cartId, newQty) => {
     setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, qty: Math.max(1, parseInt(newQty) || 1) } : item));
+  };
+
+  const handleUnitChange = (cartId, newUnit) => {
+    setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, unit: newUnit } : item));
   };
 
   const removeFromCart = (cartId) => {
@@ -472,10 +534,21 @@ export default function Checkout() {
   }
 
   return (
-    <div className="animate-fade-up" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '48px', minHeight: 'calc(100vh - 120px)' }}>
+    <div className="animate-fade-up checkout-layout" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '48px', minHeight: 'calc(100vh - 120px)' }}>
+      <nav className="checkout-mobile-nav" aria-label="Checkout sections">
+        <button type="button" onClick={() => document.getElementById('checkout-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          <span>1</span><strong>Items</strong><small>{cart.length}</small>
+        </button>
+        <button type="button" onClick={() => document.getElementById('checkout-customer')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          <span>2</span><strong>Customer</strong>
+        </button>
+        <button type="button" onClick={() => document.getElementById('checkout-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          <span>3</span><strong>Finalize</strong>
+        </button>
+      </nav>
       
       {/* LEFT: Premium Order Review */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="checkout-review" id="checkout-items" style={{ display: 'flex', flexDirection: 'column' }}>
         
         {/* Back Link with hover animation */}
         <button 
@@ -546,7 +619,7 @@ export default function Checkout() {
         )}
 
         {/* Section Title */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
+        <div className="checkout-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px' }}>
           <div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '36px', fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.02em', margin: 0 }}>{addonMode ? 'Add More Products' : editingExisting ? 'Edit Order' : 'Review Order'}</h1>
             <p style={{ color: 'var(--ink-soft)', fontSize: '15px', marginTop: '8px' }}>{addonMode ? 'These products will be added to the quotation, marked "Added Later".' : 'Adjust quantities, apply overrides, and finalize item details.'}</p>
@@ -592,6 +665,7 @@ export default function Checkout() {
             return (
               <div key={item.cartId} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div 
+                  className="checkout-item-card"
                   style={{ 
                     background: 'var(--surface)', 
                   border: '1px solid var(--line)', 
@@ -616,9 +690,9 @@ export default function Checkout() {
               >
                 
                 {/* Item Info with inline editable name */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="checkout-item-info" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ position: 'relative', width: '100%' }}>
-                    <input 
+                    <input
                       value={item.name} 
                       onChange={e => handleNameChange(item.cartId, e.target.value)}
                       style={{ 
@@ -662,7 +736,7 @@ export default function Checkout() {
                 </div>
 
                 {/* Price Override */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="checkout-item-price" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--ink-soft)' }}>
                     {hasOffer(item) ? 'Offer Price' : 'Unit Price'}
                   </div>
@@ -715,7 +789,7 @@ export default function Checkout() {
                 </div>
 
                 {/* Qty */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div className="checkout-item-qty" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--ink-soft)' }}>Quantity</div>
                   <div style={{ 
                     display: 'flex', 
@@ -744,12 +818,32 @@ export default function Checkout() {
                         color: 'var(--ink)'
                       }}
                     />
-                    <span style={{ fontSize: '13px', color: 'var(--ink-soft)', marginLeft: '4px', fontWeight: 600 }}>{item.unit}</span>
+                    <input
+                      value={item.unit || ''}
+                      onChange={e => handleUnitChange(item.cartId, e.target.value)}
+                      style={{
+                        fontSize: '13px',
+                        color: 'var(--ink-soft)',
+                        marginLeft: '4px',
+                        fontWeight: 600,
+                        background: 'transparent',
+                        border: 'none',
+                        borderBottom: '1.5px solid transparent',
+                        width: '46px',
+                        outline: 'none',
+                        padding: '2px 0',
+                        transition: 'border-color 0.2s'
+                      }}
+                      onFocus={e => e.target.style.borderBottomColor = 'var(--accent)'}
+                      onBlur={e => e.target.style.borderBottomColor = 'transparent'}
+                      title="Edit unit (e.g. Sqft, Box)"
+                      placeholder="Unit"
+                    />
                   </div>
                 </div>
 
                 {/* Line Total & Remove */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', minWidth: '130px' }}>
+                <div className="checkout-item-total" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', minWidth: '130px' }}>
                   <div style={{ fontSize: '19px', fontWeight: 700, color: 'var(--accent-deep)', letterSpacing: '-0.02em', fontFamily: 'var(--font-mono)' }}>
                     {settings.currencySymbol || '₹'}{(item.price * item.qty).toLocaleString(undefined, {minimumFractionDigits: 2})}
                   </div>
@@ -817,10 +911,10 @@ export default function Checkout() {
       </div>
 
       {/* RIGHT: Premium Control Panel (Customer Details + Order Summary) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div className="checkout-controls" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
         {/* Customer Attachment (Cleaned up, premium labels) */}
-        <div style={{ background: 'var(--surface)', padding: '32px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-sm)' }}>
+        <div className="checkout-customer-card" id="checkout-customer" style={{ background: 'var(--surface)', padding: '32px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-sm)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
             <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <User size={18} color="var(--accent)"/>
@@ -973,7 +1067,7 @@ export default function Checkout() {
 
         {/* Live Warranty Detector (Added visual feedback matching rules) */}
         {detectedWarranties.length > 0 && (
-          <div style={{ 
+          <div className="checkout-warranty-card" style={{
             background: 'var(--accent-soft)', 
             padding: '24px 32px', 
             borderRadius: 'var(--radius-lg)', 
@@ -1017,7 +1111,7 @@ export default function Checkout() {
         )}
 
         {/* receipt-style Order Summary Panel */}
-        <div style={{ 
+        <div className="checkout-summary" id="checkout-summary" style={{
           background: 'var(--surface)', 
           padding: '40px', 
           borderRadius: 'var(--radius-lg)', 

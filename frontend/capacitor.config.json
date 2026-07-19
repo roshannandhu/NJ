@@ -1,0 +1,11 @@
+{
+  "appId": "com.njindia.quotation",
+  "appName": "NJ",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

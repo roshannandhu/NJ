@@ -10,8 +10,22 @@
 ; ===========================================================================
 
 #define AppName "NJ India System"
-#define AppVersion "1.0"
+#define AppVersion "1.0.0"
 #define AppPublisher "NJ India Trading"
+#define AppPublisherURL "https://njindia.in"
+
+; ── Code signing ────────────────────────────────────────────────────────────
+; To sign the installer and eliminate the Windows SmartScreen "unknown publisher"
+; block, obtain an OV or EV code-signing certificate (.pfx) from DigiCert,
+; Sectigo, or similar, then pass the path and password via /DSIGN_CERT_PATH and
+; /DSIGN_CERT_PASSWORD when calling iscc.exe, or set them as environment variables
+; and pass via /D.  Leave undefined to build unsigned.
+;
+; Example:  iscc /DSIGN_CERT_PATH="C:\cert.pfx" /DSIGN_CERT_PASSWORD="pw" installer.iss
+;
+#ifdef SIGN_CERT_PATH
+SignTool=standard sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "{#SIGN_CERT_PATH}" /p "{#SIGN_CERT_PASSWORD}" $f
+#endif
 
 [Setup]
 ; A stable AppId lets future versions upgrade/uninstall cleanly. Do not change.
@@ -19,6 +33,10 @@ AppId={{31205D20-92CE-4113-B198-AD2A53D3A80A}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
+AppPublisherURL={#AppPublisherURL}
+VersionInfoVersion=1.0.0.0
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription={#AppName} Setup
 DefaultDirName={localappdata}\NJ India
 DefaultGroupName={#AppName}
 ; Per-user, NO admin / NO UAC prompt - works on locked-down PCs.
@@ -49,6 +67,10 @@ Source: "installer\app.ico";   DestDir: "{app}";        Flags: ignoreversion
 Name: "{userdesktop}\NJ India System"; Filename: "{app}\python\pythonw.exe"; Parameters: "run_app.py"; WorkingDir: "{app}\app"; IconFilename: "{app}\app.ico"
 Name: "{group}\NJ India System";       Filename: "{app}\python\pythonw.exe"; Parameters: "run_app.py"; WorkingDir: "{app}\app"; IconFilename: "{app}\app.ico"
 Name: "{group}\Uninstall NJ India System"; Filename: "{uninstallexe}"
+
+[Registry]
+; Set NJ_SERVER_URL so the app connects to EC2 backend instead of starting a local server
+Root: HKCU; Subkey: "Environment"; ValueType: string; ValueName: "NJ_SERVER_URL"; ValueData: "http://18.61.159.169:8000"; Flags: uninsdeletevalue
 
 [Run]
 ; Auto-launch after install (the "Finish" step), like Cursor.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, FileText, ShieldCheck, PlusCircle, LayoutDashboard, ShieldAlert } from 'lucide-react';
+import { Settings, FileText, ShieldCheck, PlusCircle, LayoutDashboard, History as HistoryIcon } from 'lucide-react';
 import { useAppContext } from '../AppContext';
 
 export default function Sidebar({ currentView, setCurrentView }) {
@@ -8,10 +8,10 @@ export default function Sidebar({ currentView, setCurrentView }) {
 
   const navItems = [
     { id: 'dashboard',      label: 'Dashboard',          icon: LayoutDashboard },
-    { id: 'quotation_desk', label: 'Quotation Desk',     icon: PlusCircle      },
-    { id: 'quotations',     label: 'Quotation History',  icon: FileText        },
-    { id: 'warranties',     label: 'Warranty History',   icon: ShieldCheck     },
-    { id: 'backup',         label: 'Backup & Recovery',  icon: ShieldAlert     },
+    { id: 'quotation_desk', label: 'Quotation Desk', shortLabel: 'Quotation', icon: PlusCircle },
+    { id: 'history',        label: 'History',             icon: HistoryIcon, mobileOnly: true },
+    { id: 'quotations',     label: 'Quotation History',  icon: FileText, desktopOnly: true },
+    { id: 'warranties',     label: 'Warranty History',   icon: ShieldCheck, desktopOnly: true },
     { id: 'settings',       label: 'Settings',           icon: Settings        },
   ];
 
@@ -23,6 +23,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
       {/* ── Backdrop overlay (mobile / click-outside close) ── */}
       {expanded && (
         <div
+          className="app-sidebar-backdrop"
           onClick={() => setExpanded(false)}
           style={{
             position: 'fixed', inset: 0, zIndex: 99,
@@ -35,6 +36,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
 
       {/* ── Sidebar panel ── */}
       <div
+        className="app-sidebar"
         style={{
           width: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
           minWidth: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
@@ -53,7 +55,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
         }}
       >
         {/* ── Top: Hamburger + Logo ── */}
-        <div style={{
+        <div className="app-sidebar-head" style={{
           padding: '0',
           borderBottom: '1px solid #2a2a2a',
           display: 'flex',
@@ -129,7 +131,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
         </div>
 
         {/* ── Nav Items ── */}
-        <nav style={{ padding: '12px 8px', flex: 1, overflow: 'hidden' }}>
+        <nav className="app-sidebar-nav" style={{ padding: '12px 8px', flex: 1, overflow: 'hidden' }}>
           {navItems.map(item => {
             const Icon = item.icon;
             const isActive = currentView === item.id ||
@@ -137,7 +139,9 @@ export default function Sidebar({ currentView, setCurrentView }) {
 
             return (
               <button
+                className={`app-sidebar-item${isActive ? ' is-active' : ''}${item.mobileOnly ? ' app-nav-mobile-only' : ''}${item.desktopOnly ? ' app-nav-desktop-only' : ''}`}
                 key={item.id}
+                aria-current={isActive ? 'page' : undefined}
                 // Quotation Desk always opens a FRESH desk (clears leftover
                 // cart / edit / add-on sessions, with a confirm guard).
                 onClick={() => { item.id === 'quotation_desk' ? startFreshDesk() : setCurrentView(item.id); setExpanded(false); }}
@@ -173,28 +177,31 @@ export default function Sidebar({ currentView, setCurrentView }) {
               >
                 {/* Active indicator dot */}
                 {isActive && !expanded && (
-                  <div style={{
+                  <div className="app-sidebar-active" style={{
                     position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
                     width: '3px', height: '20px', borderRadius: '0 2px 2px 0',
                     background: 'var(--accent)',
                   }} />
                 )}
 
-                <Icon
-                  size={18}
-                  strokeWidth={1.6}
-                  color={isActive ? '#1a1a1a' : 'currentColor'}
-                  style={{ flexShrink: 0 }}
-                />
+                <span className="app-sidebar-icon" aria-hidden="true">
+                  <Icon
+                    size={18}
+                    strokeWidth={1.6}
+                    color="currentColor"
+                    style={{ flexShrink: 0 }}
+                  />
+                </span>
 
-                <span style={{
+                <span className="app-sidebar-label" style={{
                   fontSize: '14px', fontWeight: 400,
                   opacity: expanded ? 1 : 0,
                   transition: 'opacity 0.15s',
                   overflow: 'hidden',
                   flex: 1,
                 }}>
-                  {item.label}
+                  <span className="app-sidebar-label-full">{item.label}</span>
+                  <span className="app-sidebar-label-short">{item.shortLabel || item.label}</span>
                 </span>
               </button>
             );
@@ -202,7 +209,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
         </nav>
 
         {/* ── Footer ── */}
-        <div style={{
+        <div className="app-sidebar-footer" style={{
           padding: '16px 0',
           borderTop: '1px solid #2a2a2a',
           fontSize: '11px',

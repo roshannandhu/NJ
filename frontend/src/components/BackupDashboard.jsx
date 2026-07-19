@@ -116,8 +116,20 @@ export default function BackupDashboard() {
     setFlash('');
     try {
       const m = await runBackup();
-      if (m.ok) setFlash('Backup completed.');
-      else setError(m.hint || 'Backup created but not stored — enable a destination under Destinations.');
+      if (m.ok) {
+        const paths = m.target_paths || {};
+        const okPaths = Object.entries(m.targets || {})
+          .filter(([, v]) => v === 'ok')
+          .map(([name]) => paths[name] || name)
+          .join(', ');
+        setFlash(`Backup saved${okPaths ? ` → ${okPaths}` : ''}.`);
+      } else {
+        const details = Object.entries(m.targets || {})
+          .filter(([, v]) => v !== 'disabled')
+          .map(([name, status]) => `${name}: ${status}`)
+          .join(' | ');
+        setError(`${m.hint || 'Backup failed'}${details ? ` — ${details}` : ''}`);
+      }
       await refresh();
     } catch (e) {
       setError(e.message || 'Backup failed');
@@ -153,7 +165,7 @@ export default function BackupDashboard() {
   const journal = data?.change_journal || [];
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="backup-dashboard" style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── Alerts ── */}
       {error && (
@@ -170,8 +182,8 @@ export default function BackupDashboard() {
       )}
 
       {/* ── Top row: health score + headline facts ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20 }}>
-        <div style={{ ...card, textAlign: 'center', display: 'flex', flexDirection: 'column',
+      <div className="backup-health-grid" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20 }}>
+        <div className="backup-health-card" style={{ ...card, textAlign: 'center', display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 6 }}>
           <div style={{ fontSize: 13, color: 'var(--ink-soft)', fontWeight: 600,
             textTransform: 'uppercase', letterSpacing: '0.06em' }}>Backup Health</div>
@@ -212,7 +224,7 @@ export default function BackupDashboard() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+        <div className="backup-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
           <StatCard icon={<Clock size={18} />} label="Last Backup" value={fmtDateTime(health.last_backup_iso)} />
           <StatCard icon={<ShieldCheck size={18} />} label="Last Verification" value={fmtDateTime(health.last_verification_iso)} />
           <StatCard icon={<FileBox size={18} />} label="Files Protected"
@@ -232,7 +244,7 @@ export default function BackupDashboard() {
             {health.factors.map((f) => {
               const pct = f.max ? Math.round((f.points / f.max) * 100) : 0;
               return (
-                <div key={f.name} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 90px',
+                <div className="backup-factor-row" key={f.name} style={{ display: 'grid', gridTemplateColumns: '180px 1fr 90px',
                   alignItems: 'center', gap: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{f.name}</div>
                   <div style={{ height: 8, background: 'var(--bg-warm)', borderRadius: 4, overflow: 'hidden' }}>
@@ -381,7 +393,7 @@ export default function BackupDashboard() {
           <div style={sectionTitle}><Activity size={15} /> Recent Activity</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {journal.slice(0, 10).map((c, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, fontSize: 13, color: 'var(--ink)' }}>
+              <div className="backup-activity-row" key={i} style={{ display: 'flex', gap: 10, fontSize: 13, color: 'var(--ink)' }}>
                 <span style={{ color: 'var(--ink-soft)', minWidth: 150 }}>{fmtDateTime(c.iso)}</span>
                 <span style={{ textTransform: 'capitalize' }}>
                   {c.item_type} {c.action}{c.record_id ? ` · ${c.record_id}` : ''}
@@ -402,7 +414,7 @@ const td = { padding: '9px 10px', verticalAlign: 'top' };
 
 function StatCard({ icon, label, value, sub, tone }) {
   return (
-    <div style={{ ...card, padding: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div className="backup-stat-card" style={{ ...card, padding: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink-soft)',
         fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         {icon} {label}
@@ -415,7 +427,7 @@ function StatCard({ icon, label, value, sub, tone }) {
 
 function ToggleRow({ label, hint, checked, disabled, onChange }) {
   return (
-    <div>
+    <div className="backup-toggle-row">
       <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: disabled ? 'default' : 'pointer' }}>
         <span
           onClick={() => !disabled && onChange(!checked)}

@@ -24,6 +24,7 @@ echo.
 echo ========== [1/5] Building frontend + share helper ==========
 cd /d "%ROOT%frontend" || goto :err
 call npm install || goto :err
+set "VITE_API_URL=http://18.61.159.169:8000"
 call npm run build || goto :err
 
 REM Compile the native Windows Share helper (ShareHelper.exe) with the in-box
@@ -102,7 +103,52 @@ echo Using Inno Setup compiler: "%ISCC%"
 "%ISCC%" "%ROOT%installer.iss" || goto :err
 
 echo.
-echo ========== [5/5] Done ==========
+echo ========== [5/5] Code signing ==========
+REM ── Default to the bundled self-signed certificate ──────────────────────────
+REM installer\nj_india_codesign.pfx is a self-signed cert (publisher: NJ India
+REM Trading, valid until 2029-07-06).  It makes Windows show the company name
+REM instead of "Unknown Publisher" and is safe to use for WhatsApp/USB sharing.
+REM
+REM For web downloads, upgrade to a commercial OV/EV cert (DigiCert, Sectigo):
+REM   set SIGN_CERT_PATH=C:\path\to\commercial_cert.pfx
+REM   set SIGN_CERT_PASSWORD=yourpassword
+REM   build_installer.bat
+REM
+REM signtool.exe ships with the Windows SDK; signing is skipped if not found.
+if not defined SIGN_CERT_PATH (
+  if exist "%ROOT%installer\nj_india_codesign.pfx" (
+    set "SIGN_CERT_PATH=%ROOT%installer\nj_india_codesign.pfx"
+    set "SIGN_CERT_PASSWORD=NJIndiaSign2024"
+  )
+)
+
+if defined SIGN_CERT_PATH (
+  REM Locate signtool.exe
+  set "SIGNTOOL="
+  for %%I in (signtool.exe) do if not defined SIGNTOOL if exist "%%~$PATH:I" set "SIGNTOOL=%%~$PATH:I"
+  for /r "%ProgramFiles(x86)%\Windows Kits\10\bin" %%I in (signtool.exe) do if not defined SIGNTOOL set "SIGNTOOL=%%I"
+  for /r "%ProgramFiles%\Windows Kits\10\bin"      %%I in (signtool.exe) do if not defined SIGNTOOL set "SIGNTOOL=%%I"
+
+  if defined SIGNTOOL (
+    echo Signing with: %SIGN_CERT_PATH%
+    "%SIGNTOOL%" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
+      /f "%SIGN_CERT_PATH%" /p "%SIGN_CERT_PASSWORD%" ^
+      "%BUILD%\Output\NJ India Setup.exe"
+    if errorlevel 1 (
+      echo WARNING: Signing failed. Installer is UNSIGNED.
+    ) else (
+      echo Installer signed successfully.
+    )
+  ) else (
+    echo NOTE: signtool.exe not found. Using PowerShell to sign with self-signed cert.
+    powershell -NoProfile -Command "$cert=Get-PfxCertificate -FilePath '%SIGN_CERT_PATH%' -Password (ConvertTo-SecureString '%SIGN_CERT_PASSWORD%' -AsPlainText -Force); $r=Set-AuthenticodeSignature -FilePath '%BUILD%\Output\NJ India Setup.exe' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256; Write-Host 'Sign:' $r.Status $r.StatusMessage"
+  )
+) else (
+  echo NOTE: No certificate found. Installer is UNSIGNED.
+)
+
+echo.
+echo ========== Done ==========
 echo Installer created: %BUILD%\Output\NJ India Setup.exe
 goto :done
 

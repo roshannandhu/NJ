@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus } from 'lucide-react';
-import { mediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus, Maximize2, Minimize2 } from 'lucide-react';
+import { mediaUrl, corsMediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
 import { paginateQuotation } from '../quotationPagination';
@@ -138,9 +138,11 @@ function QuotationDocumentInner() {
   const [isDownloading, setIsDownloading] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [isSharing, setIsSharing] = React.useState(false);
+  const [phoneEditMode, setPhoneEditMode] = React.useState(false);
   // Native color-picker draft: held locally while dragging, committed on close
   // so we don't fire a backend upsert per drag tick.
   const [draftColor, setDraftColor] = React.useState(null);
+  const colorCommitTimer = React.useRef(null);
 
   // ── In-place quotation editing (CHANGE 3) — warranty-style inline editing ──
   // The quotation document itself is directly editable: click any field to edit
@@ -530,9 +532,12 @@ function QuotationDocumentInner() {
       el.style.transformOrigin = 'top center';
       el.style.marginBottom = '0';
     });
-    if (document.body.getAttribute('data-quotation-editing') === 'true') return;
-    const parent = root.parentElement;
-    const availW = parent ? parent.clientWidth : root.offsetWidth;
+    if (phoneEditMode || document.body.getAttribute('data-quotation-editing') === 'true') return;
+    // Use the scroll container's width — it's always correctly sized to the
+    // actual viewport (sidebar excluded). Parent div widths are unreliable here
+    // because nested flex/align-items:center contexts can stretch to content width.
+    const scroller = root.closest('.main-content-scroll-container');
+    const availW = scroller ? scroller.clientWidth : (root.parentElement?.clientWidth ?? root.offsetWidth);
     const s = Math.min(1, availW / 794);
     if (s < 1) {
       els.forEach(el => {
@@ -542,7 +547,7 @@ function QuotationDocumentInner() {
         el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
       });
     }
-  }, [generatedDoc, qPages]);
+  }, [generatedDoc, qPages, phoneEditMode]);
 
   // ── Per-class product image: click-to-upload + Ctrl+V paste ────────────────
   // `imgTargetKey` is the class image box the user last clicked; Ctrl+V drops a
@@ -741,6 +746,13 @@ function QuotationDocumentInner() {
   // logo; two or more brands render the combined "Brand1 × Brand2" text. Shared
   // with the warranty view via ../brands (watermarkBrandForItems).
 
+  // Returns guarantee text for a class only when the toggle is on AND text is set.
+  const getGuaranteeText = (className) => {
+    const key = classDescKey(className);
+    if (!settings.classGuaranteeEnabled?.[key]) return '';
+    return (settings.classGuarantee?.[key] || '').trim();
+  };
+
   // Table 1: Class Description cell. Priority: per-quotation override →
   // settings.classSpecs (string form) → legacy object form → hard fallback.
   const getClassSpecRow = (className) => {
@@ -783,15 +795,15 @@ function QuotationDocumentInner() {
       );
     }
 
-    // Hard fallback definitions
+    // Hard fallback definitions — product specs only, no warranty/guarantee text
+    // (warranty duration is controlled via Settings → Product Guarantee Text toggle)
     const n = className.toLowerCase();
     if (n.includes('laminated') || n.includes('asphalt')) return (
       <>
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM LAMINATED SHINGLES</div>
         <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.7' }}>
           One bundle shingles covers : 32.7 sq/ft<br />
-          One bundle ridge covers : 32 RFT<br />
-          Warranty : 35 years
+          One bundle ridge covers : 32 RFT
         </div>
       </>
     );
@@ -800,27 +812,26 @@ function QuotationDocumentInner() {
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ STONE COATED METAL TILES</div>
         <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.7' }}>
           One Bundle : 72 sq/ft — 12 Tiles<br />
-          Ridge : 1.3 RFT — 1 tile<br />
-          <strong>50 years Warranty · 10 years free service</strong>
+          Ridge : 1.3 RFT — 1 tile
         </div>
       </>
     );
     if (n.includes('heat') || n.includes('ceiling')) return (
       <>
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM HEAT OUT CEILING</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>High thermal insulation &amp; ceiling panel technology<br />25 years graduated warranty</div>
+        <div style={{ fontSize: '12px', color: '#444' }}>High thermal insulation &amp; ceiling panel technology</div>
       </>
     );
     if (n.includes('ceramic') || n.includes('clay')) return (
       <>
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM CERAMIC ROOF TILES</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>30 years warranty · 10 years free service</div>
+        <div style={{ fontSize: '12px', color: '#444' }}>Premium fired clay roofing tile</div>
       </>
     );
     if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return (
       <>
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>DOCKE PIE BITUMEN SHINGLES</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>30 years warranty · 10 years free service</div>
+        <div style={{ fontSize: '12px', color: '#444' }}>Self-adhesive bitumen shingle tile</div>
       </>
     );
     return <div style={{ fontSize: '12px', color: '#888', fontStyle: 'italic' }}>Standard Roofing Products</div>;
@@ -1138,7 +1149,7 @@ function QuotationDocumentInner() {
             -webkit-print-color-adjust: exact !important; 
             print-color-adjust: exact !important; 
           }
-          .actions-bar, .sidebar, .topbar, .document-tab-bar, .cert-customizer-sidebar, .q-edit-hint, .q-edit-only {
+          .actions-bar, .sidebar, .topbar, .document-tab-bar, .cert-customizer-sidebar, .q-edit-hint, .q-edit-only, .q-phone-edit-btn {
             display: none !important;
           }
           .q-editable { background: transparent !important; outline: none !important; }
@@ -1188,6 +1199,21 @@ function QuotationDocumentInner() {
             margin: 15mm 20mm;
           }
         }
+        .q-phone-edit-btn { display: none; }
+        @media (max-width: 760px) {
+          .q-phone-edit-btn {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            width: 100%; padding: 11px 16px; margin-bottom: 14px;
+            background: rgba(138,24,86,0.07); color: #8a1856;
+            border: 1.5px solid rgba(138,24,86,0.25); border-radius: var(--radius-full);
+            font-weight: 700; font-size: 13px; cursor: pointer;
+          }
+          .q-phone-edit-btn.is-active {
+            background: #8a1856; color: white; border-color: #8a1856;
+          }
+          .q-pages-edit-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; }
+          .q-pages-edit-scroll .q-pages { align-items: flex-start !important; }
+        }
       `}} />
 
       {/* ── TOP: Document Hub Tab Switching System ── */}
@@ -1233,43 +1259,36 @@ function QuotationDocumentInner() {
           {activeTabId === 'quotation' ? (
             /* ── Actions Bar for Quotation Tab ── */
             <>
-            <div className="actions-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
-              <button onClick={() => loadQuotationForEdit(generatedDoc)} className="hover-lift"
+            <div className="actions-bar document-actions" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
+              <button onClick={() => loadQuotationForEdit(generatedDoc)} className="hover-lift doc-action"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                <ArrowLeft size={18} /> Edit in Checkout
+                <Edit3 size={18} /> Edit Quotation
               </button>
               {!generatedDoc.warrantyOnly && (
-                <button onClick={() => startAddonOrder?.(generatedDoc)} className="hover-lift"
+                <button onClick={() => startAddonOrder?.(generatedDoc)} className="hover-lift doc-action"
                   title="Add-on Order: the customer bought more later? Add the new products to this same quotation — the original items and amounts stay unchanged."
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#FDF6EC', color: '#b45309', border: '1px solid #b45309', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                  <PackagePlus size={18} /> Add More Products
+                  <PackagePlus size={18} /> Add More
                 </button>
               )}
-              <button onClick={downloadQuotationPDF} disabled={isDownloading} className="hover-lift"
+              <button onClick={downloadQuotationPDF} disabled={isDownloading} className="hover-lift doc-action is-download"
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '12px 24px',
-                  background: 'var(--accent)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 'var(--radius-full)',
-                  fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px',
+                  background: 'var(--accent)', color: 'white', border: 'none',
+                  borderRadius: 'var(--radius-full)', fontWeight: 600,
                   cursor: isDownloading ? 'not-allowed' : 'pointer',
-                  opacity: isDownloading ? 0.7 : 1,
-                  marginLeft: 'auto'
+                  opacity: isDownloading ? 0.7 : 1, marginLeft: 'auto'
                 }}>
                 <Download size={18} /> {isDownloading ? 'Downloading...' : 'Download PDF'}
               </button>
-              <div style={{ position: 'relative' }}>
-                <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift"
+              <div className="doc-share" style={{ position: 'relative' }}>
+                <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift doc-action is-share"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer', opacity: isSharing ? 0.7 : 1 }}>
                   <Share2 size={18} /> {isSharing ? 'Preparing…' : 'Share'}
                 </button>
                 {shareOpen && (<>
                   <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />
-                  <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)', minWidth: 270, overflow: 'hidden' }}>
+                  <div className="doc-share-menu" style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 30, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)', minWidth: 270, overflow: 'hidden' }}>
                     <button style={shareItemStyle} onClick={shareCurrent}>Share this quotation</button>
                     <button style={{ ...shareItemStyle, borderBottom: 'none' }} onClick={shareFullSet}>Share full set (quotation + all warranties)</button>
                   </div>
@@ -1279,29 +1298,29 @@ function QuotationDocumentInner() {
               {/* ── Create / View Warranty ── */}
               {bundledWarranties.length > 0 ? (
                 <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '0 14px', color: '#15803d', fontWeight: 700, fontSize: '14px', whiteSpace: 'nowrap' }}
+                  <div className="doc-warranty-status" style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '0 14px', color: '#15803d', fontWeight: 700, fontSize: '14px', whiteSpace: 'nowrap' }}
                     title={bundledWarranties.map(w => w.warrantyNo || w.id).join(', ')}>
                     <ShieldCheck size={18} /> Warranty Created
                   </div>
-                  <button onClick={() => setActiveTab(bundledWarranties[0].warrantyNo || bundledWarranties[0].id)} className="hover-lift"
+                  <button onClick={() => setActiveTab(bundledWarranties[0].warrantyNo || bundledWarranties[0].id)} className="hover-lift doc-action"
                     style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--accent-soft)', color: 'var(--accent-deep)', border: '1px solid var(--accent)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                     <ShieldCheck size={18} /> View Warranty
                   </button>
                   {missingCerts.length > 0 && (
-                    <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift"
+                    <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift doc-action"
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                       <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Remaining'}
                     </button>
                   )}
                 </>
               ) : applicableCerts.length > 0 ? (
-                <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift"
+                <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift doc-action"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#15803d', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: isCreatingWarranty ? 'not-allowed' : 'pointer', opacity: isCreatingWarranty ? 0.7 : 1 }}>
                   <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Warranty'}
                 </button>
               ) : null}
 
-              <button onClick={startNew} className="hover-lift"
+              <button onClick={startNew} className="hover-lift doc-action is-new"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                 <RotateCcw size={18} /> Start New
               </button>
@@ -1309,8 +1328,14 @@ function QuotationDocumentInner() {
 
             {/* Inline-edit hint (hidden in print/PDF) */}
             <div className="q-edit-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', padding: '10px 14px', background: 'rgba(138,24,86,0.05)', border: '1px solid rgba(138,24,86,0.18)', borderRadius: '8px', fontSize: '12px', color: '#8a1856', fontWeight: 600, width: '100%', maxWidth: '860px' }}>
-              <Edit3 size={13} /> Click any text, price, quantity, or detail on the quotation below to edit it directly. Changes affect only this quotation.
+              <Edit3 size={13} /> <span><strong>Tap any field to edit</strong> — the document expands automatically on phone. Or use <strong>Edit Quotation</strong> above to edit in the Quotation Desk.</span>
             </div>
+            <button
+              className={`q-phone-edit-btn${phoneEditMode ? ' is-active' : ''}`}
+              onClick={() => setPhoneEditMode(m => !m)}
+            >
+              {phoneEditMode ? <><Minimize2 size={14}/> Collapse Preview</> : <><Maximize2 size={14}/> Expand to Edit Fields</>}
+            </button>
 
             {/* ── Document options: watermark toggle + design color (screen-only;
                    sits outside #quotationSheet so it never reaches the PDF) ── */}
@@ -1332,12 +1357,20 @@ function QuotationDocumentInner() {
                 <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Design Color</span>
                 {THEME_PRESETS.map(c => (
                   <button key={c} onClick={() => applyThemeColor(c)} title={c}
-                    style={{ width: '22px', height: '22px', borderRadius: '50%', background: c, border: 'none', padding: 0, cursor: 'pointer', boxShadow: PLUM.toLowerCase() === c ? `0 0 0 2px var(--surface), 0 0 0 4px ${c}` : 'inset 0 0 0 1px rgba(0,0,0,0.12)' }} />
+                    style={{ width: '36px', height: '36px', borderRadius: '50%', background: c, border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, boxShadow: PLUM.toLowerCase() === c ? `0 0 0 2px var(--surface), 0 0 0 4px ${c}` : 'inset 0 0 0 1px rgba(0,0,0,0.12)' }} />
                 ))}
                 <input type="color" value={draftColor ?? PLUM} title="Custom color"
-                  onChange={e => setDraftColor(e.target.value)}
-                  onBlur={() => { if (draftColor && draftColor.toLowerCase() !== PLUM.toLowerCase()) applyThemeColor(draftColor); setDraftColor(null); }}
-                  style={{ width: '30px', height: '26px', padding: 0, border: '1px solid var(--line)', borderRadius: '6px', background: 'var(--surface)', cursor: 'pointer' }} />
+                  onChange={e => {
+                    setDraftColor(e.target.value);
+                    clearTimeout(colorCommitTimer.current);
+                    colorCommitTimer.current = setTimeout(() => applyThemeColor(e.target.value), 600);
+                  }}
+                  onBlur={() => {
+                    clearTimeout(colorCommitTimer.current);
+                    if (draftColor && draftColor.toLowerCase() !== PLUM.toLowerCase()) applyThemeColor(draftColor);
+                    setDraftColor(null);
+                  }}
+                  style={{ width: '44px', height: '44px', padding: '2px', border: '1px solid var(--line)', borderRadius: '8px', background: 'var(--surface)', cursor: 'pointer' }} />
               </div>
             </div>
             </>
@@ -1433,7 +1466,7 @@ function QuotationDocumentInner() {
                 }}>
                   {brandLogoSrc ? (
                     <img
-                      src={brandLogoSrc}
+                      src={corsMediaUrl(brandLogoSrc)}
                       alt="Brand logo"
                       crossOrigin="anonymous"
                       style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
@@ -1541,7 +1574,7 @@ function QuotationDocumentInner() {
                       // the small NJ mark); a missing image shows the placeholder instead.
                       const itemImg = doc.items.find(it => it.className === className && it.image)?.image;
                       const rawImg = doc.classImages?.[imgKey] || itemImg || '';
-                      const imgSrc = rawImg ? mediaUrl(rawImg) : '';
+                      const imgSrc = rawImg ? corsMediaUrl(rawImg) : '';
                       const svgPlaceholder = (
                         <svg viewBox="0 0 100 60" style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'block' }}>
                           <rect width="100" height="60" fill={brandColor} opacity="0.1" />
@@ -1557,7 +1590,7 @@ function QuotationDocumentInner() {
                               return (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '6px' }}>
                                   {brand.logo && (
-                                    <img src={mediaUrl(brand.logo)} alt={brand.name} crossOrigin="anonymous"
+                                    <img src={corsMediaUrl(brand.logo)} alt={brand.name} crossOrigin="anonymous"
                                       style={{ height: QFIT(20), width: 'auto', maxWidth: QFIT(70), objectFit: 'contain', display: 'block' }} />
                                   )}
                                   {brand.name && (
@@ -1579,7 +1612,12 @@ function QuotationDocumentInner() {
                                   onSave={v => updateClassDesc(key, v)}
                                   multiline
                                   placeholder="click to add class description"
-                                  renderValue={() => getClassSpecRow(className)}
+                                  renderValue={() => {
+                                    const spec = getClassSpecRow(className);
+                                    const g = getGuaranteeText(className);
+                                    if (!g) return spec;
+                                    return <>{spec}<div style={{ fontSize: '12px', color: '#555', marginTop: '5px', whiteSpace: 'pre-line', borderTop: '1px solid #eee', paddingTop: '4px' }}>{g}</div></>;
+                                  }}
                                   style={{ display: 'block', width: '100%' }}
                                 />
                               );
@@ -1680,7 +1718,9 @@ function QuotationDocumentInner() {
                     const actualUnit = rowActualUnit(item);
                     const itemClass = data.classes?.find(c => c.name === item.className);
                     const brandColor = itemClass ? itemClass.color : PLUM;
-                    const imgSrc = item.image ? mediaUrl(item.image) : '';
+                    const fallbackImg = doc.classImages?.[classDescKey(item.className)] || itemClass?.logo || '';
+                    const finalImg = item.image || fallbackImg;
+                    const imgSrc = finalImg ? corsMediaUrl(finalImg) : '';
                     return (
                     <tr key={item.cartId ?? i} data-q-item-row={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
@@ -1723,7 +1763,7 @@ function QuotationDocumentInner() {
                       {docAnyOffer && (
                         <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
                           {offer
-                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN')} style={{ width: '70px', textAlign: 'right' }} /></>
+                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })} style={{ width: '70px', textAlign: 'right' }} /></>
                             : <EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
                         </td>
                       )}
@@ -1782,7 +1822,9 @@ function QuotationDocumentInner() {
                     const actualUnit = rowActualUnit(item);
                     const itemClass = data.classes?.find(c => c.name === item.className);
                     const brandColor = itemClass ? itemClass.color : PLUM;
-                    const imgSrc = item.image ? mediaUrl(item.image) : '';
+                    const fallbackImg = doc.classImages?.[classDescKey(item.className)] || itemClass?.logo || '';
+                    const finalImg = item.image || fallbackImg;
+                    const imgSrc = finalImg ? corsMediaUrl(finalImg) : '';
                     return (
                     <tr key={`${item._batchId}-${item.cartId ?? i}`} data-q-addon-row={i} style={{ background: i % 2 === 0 ? '#FFFDF8' : '#FBF5EA' }}>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
@@ -1830,7 +1872,7 @@ function QuotationDocumentInner() {
                       {docAnyOffer && (
                         <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
                           {offer
-                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN')} style={{ width: '70px', textAlign: 'right' }} /></>
+                            ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })} style={{ width: '70px', textAlign: 'right' }} /></>
                             : <EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
                         </td>
                       )}
@@ -1887,7 +1929,7 @@ function QuotationDocumentInner() {
                             {(docBank.logo || docBank.bankName) && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
                                 {docBank.logo && (
-                                  <img src={docBank.logo} alt="" crossOrigin="anonymous"
+                                  <img src={corsMediaUrl(docBank.logo)} alt="" crossOrigin="anonymous"
                                     style={{ height: QFIT(22), width: 'auto', maxWidth: QFIT(90), objectFit: 'contain', display: 'block' }} />
                                 )}
                                 <span style={{ fontSize: D.rowFont, fontWeight: '800', color: '#1A1A1A' }}>
@@ -1909,7 +1951,7 @@ function QuotationDocumentInner() {
                             {bankPicker}
                           </div>
                           {docBank.qr && (
-                            <img src={docBank.qr} alt="Payment QR" crossOrigin="anonymous"
+                            <img src={corsMediaUrl(docBank.qr)} alt="Payment QR" crossOrigin="anonymous"
                               style={{ width: QFIT(120), height: 'auto', objectFit: 'contain', flexShrink: 0 }} />
                           )}
                         </div>
@@ -2131,6 +2173,7 @@ function QuotationDocumentInner() {
               const pageList = (qPages && qPages.length) ? qPages : [allSegments];
 
               return (
+            <div className={phoneEditMode ? 'q-pages-edit-scroll' : ''} style={phoneEditMode ? undefined : { width: '100%', overflow: 'hidden' }}>
             <div className="q-pages" ref={qPagesWrapRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: '100%' }}>
               {pageList.map((segs, pi) => (
               <div
@@ -2172,6 +2215,7 @@ function QuotationDocumentInner() {
                 </div>
               </div>
               ))}
+            </div>
             </div>
             );
             })()}

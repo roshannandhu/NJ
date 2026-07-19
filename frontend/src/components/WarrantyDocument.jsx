@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, Maximize2, Minimize2 } from 'lucide-react';
 import { createWarranty } from '../api';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
@@ -17,6 +17,7 @@ export default function WarrantyDocument() {
   } = useAppContext();
 
   const [isDownloading, setIsDownloading] = React.useState(false);
+  const [phoneEditMode, setPhoneEditMode] = React.useState(false);
 
   if (!doc) {
     return (
@@ -52,7 +53,7 @@ export default function WarrantyDocument() {
   // of that type. Per-customer data lives in doc.customer / doc.certData (never in
   // the template), so it is untouched. Only when the template was deleted do we
   // fall back to the snapshot frozen on the certificate.
-  let template = matched ? { ...matched } : { ...storedTpl };
+  let template = matched ? { heatoutTable: false, ...matched } : { heatoutTable: false, ...storedTpl };
   if (!template.id) template.id = tplId || storedTpl.id;
 
   const customer = doc.customer || {};
@@ -138,22 +139,44 @@ export default function WarrantyDocument() {
   };
 
   return (
-    <div className="animate-fade-up" style={{ paddingBottom: '100px', background: 'var(--bg)', minHeight: '100vh' }}>
+    <div className="warranty-document-page animate-fade-up" style={{ paddingBottom: '100px', background: 'var(--bg)', minHeight: '100%' }}>
       <style dangerouslySetInnerHTML={{ __html: `
         .wd-page-wrap { max-width: 880px; margin: 0 auto; padding: 24px 24px 0; }
         .wd-actions   { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
         .wd-hint      { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 10px 14px; background: rgba(139,26,26,0.05); border-radius: 8px; border: 1px solid rgba(139,26,26,0.15); font-size: 12px; color: #8b1a1a; font-weight: 600; }
+        .wd-phone-edit-btn { display: none; }
+        @media (max-width: 760px) {
+          .wd-phone-edit-btn {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            width: 100%; padding: 11px 16px; margin-bottom: 14px;
+            background: rgba(139,26,26,0.07); color: #8b1a1a;
+            border: 1.5px solid rgba(139,26,26,0.25); border-radius: 999px;
+            font-weight: 700; font-size: 13px; cursor: pointer;
+          }
+          .wd-phone-edit-btn.is-active { background: #8b1a1a; color: white; border-color: #8b1a1a; }
+          .wd-preview-frame.is-phone-edit { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .wd-preview-frame.is-phone-edit .wc-preview-shell { min-width: 794px; width: 794px; }
+        }
         @media print {
           body, html { background: #fff !important; margin: 0 !important; padding: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          .wd-actions, .wd-hint { display: none !important; }
+          .wd-actions, .wd-hint, .wd-mobile-context, .wd-preview-title, .wd-phone-edit-btn { display: none !important; }
           .wd-page-wrap { padding: 0 !important; max-width: 100% !important; }
           .main-content-scroll-container { padding: 0 !important; overflow: visible !important; }
         }
       `}} />
 
       <div className="wd-page-wrap">
+        <div className="wd-mobile-context">
+          <span><ShieldCheck size={19} /></span>
+          <div>
+            <small>Warranty certificate</small>
+            <strong>{doc.warrantyNo || doc.id || 'Warranty'}</strong>
+            <p>{customer.name || 'Customer document'}</p>
+          </div>
+          <b>1 page</b>
+        </div>
         {/* ── ACTION BAR ── */}
-        <div className="wd-actions">
+        <div className="wd-actions document-actions is-warranty-editor">
           <button
             onClick={() => {
               if (isStandalone) { setCurrentView('warranties'); return; }
@@ -161,26 +184,26 @@ export default function WarrantyDocument() {
               setActiveTab?.(doc.warrantyNo || doc.id);
               setCurrentView('quotation_document');
             }}
-            className="hover-lift"
+            className="hover-lift wd-action is-secondary"
             style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
             <ArrowLeft size={15}/> {isStandalone ? 'Back to Warranties' : 'Back'}
           </button>
           {!isStandalone && (
-            <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift"
+            <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift wd-action is-secondary"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-              <FileText size={15}/> Edit Checkout
+              <Edit3 size={15}/> Edit Quotation
             </button>
           )}
           <div style={{ marginLeft:'auto', display:'flex', gap:'10px' }}>
-            <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift"
+            <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift wd-action is-download"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
               <Download size={15}/> {isDownloading ? 'Generating…' : 'Download PDF'}
             </button>
-            <button onClick={shareWarranty} disabled={isDownloading} className="hover-lift"
+            <button onClick={shareWarranty} disabled={isDownloading} className="hover-lift wd-action is-share"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
               <Share2 size={15}/> Share
             </button>
-            <button onClick={startNew} className="hover-lift"
+            <button onClick={startNew} className="hover-lift wd-action is-new"
               style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
               <RotateCcw size={15}/> New Order
             </button>
@@ -188,22 +211,31 @@ export default function WarrantyDocument() {
         </div>
 
         <div className="wd-hint">
-          <Edit3 size={13} />
-          Click the terms to edit them, or click any customer field to fill it in. The certificate always stays on one page.
+          <span className="wd-hint-icon"><Edit3 size={14} /></span>
+          <div><strong>Tap any field to edit</strong><span> — the certificate expands on phone. Use <strong>Edit Quotation</strong> above to change products or prices.</span></div>
         </div>
+        <button
+          className={`wd-phone-edit-btn${phoneEditMode ? ' is-active' : ''}`}
+          onClick={() => setPhoneEditMode(m => !m)}
+        >
+          {phoneEditMode ? <><Minimize2 size={14}/> Collapse Preview</> : <><Maximize2 size={14}/> Expand to Edit Fields</>}
+        </button>
 
-        <WarrantyCertificate
-          template={template}
-          openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-          variant="customer"
-          customer={customer}
-          certData={certData}
-          fallbackDate={doc.date}
-          invoiceFallback={doc.quotationId || parentQuote?.id || ''}
-          warrantyNo={doc.warrantyNo || doc.id}
-          orderNo={doc.quotationId || parentQuote?.id || ''}
-          edit={edit}
-        />
+        <div className={`wd-preview-frame${phoneEditMode ? ' is-phone-edit' : ''}`}>
+          <div className="wd-preview-title"><ShieldCheck size={14} /><strong>A4 certificate preview</strong><span>Tap highlighted fields to edit</span></div>
+          <WarrantyCertificate
+            template={template}
+            openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
+            variant="customer"
+            customer={customer}
+            certData={certData}
+            fallbackDate={doc.date}
+            invoiceFallback={doc.quotationId || parentQuote?.id || ''}
+            warrantyNo={doc.warrantyNo || doc.id}
+            orderNo={doc.quotationId || parentQuote?.id || ''}
+            edit={edit}
+          />
+        </div>
       </div>
     </div>
   );
