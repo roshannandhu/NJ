@@ -1,5 +1,6 @@
 import React from 'react';
 import { Edit3, Check } from 'lucide-react';
+import { mediaUrl } from '../api';
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Shared single-A4-page warranty certificate.
@@ -18,7 +19,7 @@ import { Edit3, Check } from 'lucide-react';
 // ════════════════════════════════════════════════════════════════════════════
 
 const COL_GAP = 22;
-const SEAL_BOX = 140;
+const SEAL_BOX = 195;
 const MIN_SCALE = 0.42;   // floor: shrink this far so even very long terms fit one page (no clipping)
 const MAX_SCALE = 1.95;   // ceiling: grow this far to FILL the page when terms are short (no gaps)
 
@@ -149,10 +150,10 @@ function FittedImg({ src, fallbackSrc = null, maxW, maxH, alt = '', style = {} }
       im.src = url;
     };
     const tryFallback = () => {
-      if (isImgSrc(fallbackSrc)) load(fallbackSrc, () => { if (alive) setMeta(null); });
+      if (isImgSrc(fallbackSrc)) load(mediaUrl(fallbackSrc), () => { if (alive) setMeta(null); });
       else if (alive) setMeta(null);
     };
-    if (isImgSrc(src)) load(src, tryFallback);
+    if (isImgSrc(src)) load(mediaUrl(src), tryFallback);
     else tryFallback();
     return () => { alive = false; };
   }, [src, fallbackSrc]);
@@ -254,10 +255,10 @@ export default function WarrantyCertificate({
   const sectionsJson = JSON.stringify(sections);
   const blocks = React.useMemo(() => buildBlocks(openingText, sections), [openingText, sectionsJson]);
   const hasSeriesTable = !!(template.showSeriesTable && template.seriesTable && template.seriesTable.length > 0);
-  const hasHeatoutTable = template.heatoutTable === true;
+  const hasHeatoutTable = !!(template.heatoutTable && template.liabilityTable?.length > 0);
 
   const termsKey = `${openingText || ''}|${sectionsJson}`;
-  const tablesKey = `${JSON.stringify(template.seriesTable || [])}|${!!template.heatoutTable}|${!!template.showSeriesTable}`;
+  const tablesKey = `${JSON.stringify(template.seriesTable || [])}|${JSON.stringify(template.liabilityTable || [])}|${!!template.heatoutTable}|${!!template.showSeriesTable}`;
   const detailsKey = JSON.stringify({ customer, certData, variant, period: certData.warrantyPeriod || template.duration });
 
   React.useEffect(() => {
@@ -371,11 +372,9 @@ export default function WarrantyCertificate({
     fitPage();
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fitPage) : null;
     observer?.observe(shell);
-    window.addEventListener('resize', fitPage);
 
     return () => {
       observer?.disconnect();
-      window.removeEventListener('resize', fitPage);
     };
   }, []);
 
@@ -399,9 +398,9 @@ export default function WarrantyCertificate({
             {orderNo && <div>Order No: {orderNo}</div>}
           </div>
         )}
-        {template.logo && template.logo.startsWith('data:image/') ? (
+        {isImgSrc(template.logo) ? (
           <>
-            <img src={template.logo} alt="Logo" style={{ height: 92, width: 'auto', maxWidth: 560, objectFit: 'contain', margin: '0 auto 3px', display: 'block' }} />
+            <img src={mediaUrl(template.logo)} alt="Logo" style={{ height: 92, width: 'auto', maxWidth: 560, objectFit: 'contain', margin: '0 auto 3px', display: 'block' }} />
             <p className="wc-logo-sub">{template.title || 'Warranty Certificate'}</p>
           </>
         ) : isDocke ? (
@@ -455,12 +454,12 @@ export default function WarrantyCertificate({
           </div>
           {/* Seal and Signature pinned to the bottom-right end of the terms (above the tables). */}
           <div className="wc-term-seal">
+            <Seal template={template} />
             <div className="wc-sig-block">
               <div className="wc-sig-area">
                 <FittedImg src={template.signImage} maxW={150} maxH={50} alt="Signature" />
               </div>
             </div>
-            <Seal template={template} />
           </div>
         </div>
       )}
@@ -477,12 +476,9 @@ export default function WarrantyCertificate({
                   <th style={{ textAlign: 'center', width: '50%' }}>Share of the Warrantor liability (% of the purchase price for the replaced element and its installation)</th>
                 </tr></thead>
                 <tbody>
-                  <tr><td>0-10 years</td><td className="wc-pct">100%</td></tr>
-                  <tr><td>10-12 years</td><td className="wc-pct">50%</td></tr>
-                  <tr><td>12-18 years</td><td className="wc-pct">40%</td></tr>
-                  <tr><td>18-20 years</td><td className="wc-pct">30%</td></tr>
-                  <tr><td>20-21 years</td><td className="wc-pct">20%</td></tr>
-                  <tr><td>21-25 years</td><td className="wc-pct">10%</td></tr>
+                  {(template.liabilityTable || []).map((row, i) => (
+                    <tr key={i}><td>{row.years}</td><td className="wc-pct">{row.pct}</td></tr>
+                  ))}
                 </tbody>
               </table>
             </>
@@ -553,7 +549,7 @@ const WC_CSS = `
   .wc-term-para { margin: 0 0 calc(5px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-bullet { display: flex; gap: 6px; margin: 0 0 calc(4px * var(--wc-term-scale, 1)); text-align: justify; }
   .wc-term-dot { color: #8b1a1a; flex-shrink: 0; }
-  .wc-term-seal { position: absolute; right: 0; bottom: 0; height: ${SEAL_BOX}px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 15px; padding-bottom: 5px; }
+  .wc-term-seal { position: absolute; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px; padding-bottom: 5px; }
   .wc-measure { position: absolute; left: -99999px; top: 0; visibility: hidden; pointer-events: none; }
 
   .wc-edit-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }

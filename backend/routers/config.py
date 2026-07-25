@@ -36,6 +36,19 @@ def get_config():
     finally:
         db.close()
 
+@router.get("/api/version")
+def get_version():
+    try:
+        import os
+        from pathlib import Path
+        version_file = Path(__file__).parent.parent / "version.json"
+        if version_file.exists():
+            with open(version_file, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"version": "1.0.0", "url": ""}
+
 
 @router.put("/api/config")
 def update_config(body: dict = Body(...)):

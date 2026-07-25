@@ -2,7 +2,8 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, Maximize2, Minimize2 } from 'lucide-react';
 import { createWarranty } from '../api';
-import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { DEFAULT_DATA } from '../data';
+import { elementToPdf, elementToPdfFile, shareElementPdf, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -53,7 +54,10 @@ export default function WarrantyDocument() {
   // of that type. Per-customer data lives in doc.customer / doc.certData (never in
   // the template), so it is untouched. Only when the template was deleted do we
   // fall back to the snapshot frozen on the certificate.
-  let template = matched ? { heatoutTable: false, ...matched } : { heatoutTable: false, ...storedTpl };
+  const defaultTpl = DEFAULT_DATA.warranties.find(w => w.id === (matched?.id || tplId)) || {};
+  let template = matched
+    ? { heatoutTable: false, ...defaultTpl, ...matched, seriesTable: matched.seriesTable?.length ? matched.seriesTable : defaultTpl.seriesTable || [], liabilityTable: matched.liabilityTable?.length ? matched.liabilityTable : defaultTpl.liabilityTable || [] }
+    : { heatoutTable: false, ...storedTpl };
   if (!template.id) template.id = tplId || storedTpl.id;
 
   const customer = doc.customer || {};
@@ -111,7 +115,7 @@ export default function WarrantyDocument() {
     try {
       const pdf = await elementToPdf(el);
       const r = await finishPdfSave(pdf, wName, dest);
-      if (showToast) showToast(r === 'saved' ? 'PDF saved!' : 'PDF downloaded!', 'success');
+      if (showToast) showToast(r === 'shared' ? 'Choose where to save or share the warranty PDF.' : r === 'saved' ? 'PDF saved!' : 'PDF downloaded!', 'success');
     } catch (err) {
       console.error(err);
       if (showToast) showToast('PDF failed. Use Print (Ctrl+P).', 'error');

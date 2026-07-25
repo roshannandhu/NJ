@@ -121,10 +121,14 @@ if __name__ == "__main__":
         def _serve_static():
             from fastapi import FastAPI
             from fastapi.staticfiles import StaticFiles
-            from fastapi.responses import FileResponse, Response
+            from fastapi.responses import FileResponse, Response, RedirectResponse
             from pathlib import Path
+            from routers import share
+            
             _static = FastAPI()
             _local_uploads = Path(os.environ["NJ_DATA_DIR"]) / "uploads"
+
+            _static.include_router(share.router)
 
             @_static.get("/api/health")
             def _health(): return {"status": "ok"}
@@ -138,18 +142,112 @@ if __name__ == "__main__":
                     return FileResponse(str(local))
                 try:
                     safe = urllib.parse.quote(path, safe="/-._~")
-                    with urllib.request.urlopen(f"{REMOTE_URL}/uploads/{safe}", timeout=15) as r:
-                        data = r.read()
-                        ct = r.headers.get("content-type", "application/octet-stream")
-                    return Response(content=data, media_type=ct)
+                    return RedirectResponse(f"{REMOTE_URL}/uploads/{safe}")
                 except Exception:
                     return Response(status_code=404)
+
+            @_static.post("/api/local/update")
+            def _local_update(payload: dict):
+                import subprocess
+                import tempfile
+                url = payload.get("url")
+                if not url:
+                    return {"error": "Missing URL"}
+
+                # Download to a temporary file
+                exe_path = os.path.join(tempfile.gettempdir(), "NJ_India_Update.exe")
+                try:
+                    urllib.request.urlretrieve(url, exe_path)
+                    # Launch silently and exit
+                    subprocess.Popen([exe_path, "/SILENT", "/CLOSEAPPLICATIONS"])
+                    return {"status": "ok"}
+                except Exception as e:
+                    return {"error": str(e)}
+
+            from routers.share import save_pdf, share_pdfs
+            _static.post("/api/share-pdfs")(share_pdfs)
+            _static.post("/api/save-pdf")(save_pdf)
 
             _dist = Path(__file__).parent / "dist"
             _static.mount("/", StaticFiles(directory=str(_dist), html=True), name="spa")
             uvicorn.run(_static, host=HOST, port=PORT, log_config=None)
         threading.Thread(target=_serve_static, daemon=True).start()
         _wait_ready()
+
+        # ── Auto-backup: download from EC2 daily → local disk + Google Drive ──
+        def _local_backup_worker():
+            KEEP = 7
+
+            def _gdrive_nj_dir():
+                """Find Google Drive Desktop sync root and return NJ India Backups inside it."""
+                import winreg
+                candidates = []
+                # Google Drive for Desktop stores its root in the registry
+                for hive, sub in [
+                    (winreg.HKEY_LOCAL_MACHINE,
+                     r"SOFTWARE\Google\DriveFS\Share"),
+                    (winreg.HKEY_CURRENT_USER,
+                     r"Software\Google\DriveFS"),
+                ]:
+                    try:
+                        k = winreg.OpenKey(hive, sub)
+                        val, _ = winreg.QueryValueEx(k, "RootPath")
+                        if val:
+                            candidates.append(Path(val))
+                    except Exception:
+                        pass
+                # Fallback: common default locations
+                up = os.environ.get("USERPROFILE", "")
+                for p in [Path(up) / "Google Drive", Path(up) / "My Drive",
+                          Path(up) / "GoogleDrive", Path.home() / "Google Drive"]:
+                    candidates.append(p)
+                for c in candidates:
+                    if c.exists():
+                        return c / "NJ India Backups"
+                return None
+
+            def _save_zip(data: bytes, folder: Path, name: str):
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / name).write_bytes(data)
+                old = sorted(folder.glob("nj_backup_*.zip"), reverse=True)
+                for f in old[KEEP:]:
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+
+            def _run_backup():
+                try:
+                    import datetime
+                    with urllib.request.urlopen(
+                        f"{REMOTE_URL}/api/backup", timeout=120
+                    ) as resp:
+                        data = resp.read()
+                    name = f"nj_backup_{datetime.datetime.now():%Y%m%d_%H%M}.zip"
+
+                    # 1 — local AppData folder (always)
+                    local_dir = Path(os.environ["NJ_DATA_DIR"]) / "local_backups"
+                    _save_zip(data, local_dir, name)
+                    log(f"local_backup: saved {name} ({len(data)//1024} KB) → {local_dir}")
+
+                    # 2 — Google Drive Desktop folder (if installed)
+                    gd = _gdrive_nj_dir()
+                    if gd:
+                        _save_zip(data, gd, name)
+                        log(f"local_backup: copied to Google Drive → {gd}")
+                    else:
+                        log("local_backup: Google Drive Desktop not found — skipped cloud copy")
+                except Exception as e:
+                    log(f"local_backup: failed — {e}")
+
+            # First run 60 s after launch (let uvicorn settle), then every 24 h.
+            time.sleep(60)
+            _run_backup()
+            while True:
+                time.sleep(24 * 3600)
+                _run_backup()
+
+        threading.Thread(target=_local_backup_worker, daemon=True).start()
     else:
         log(f"==== launch ==== url={URL} python={sys.executable}")
         if not _is_only_instance():

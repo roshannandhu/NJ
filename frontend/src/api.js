@@ -11,6 +11,7 @@ const _localDesktopShell = /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(window.locati
 // Same-origin base used by non-api.js modules (e.g. share.js) that need to hit
 // the backend directly.
 export const API_BASE = BASE;
+export const SHARE_API_BASE = _localDesktopShell ? window.location.origin : API_BASE;
 
 export function mediaUrl(url) {
   if (!url) return "";
@@ -108,7 +109,7 @@ async function fetchWithRetry(url, opts = {}, retries = 2) {
     // their stable id and let the user retry intentionally instead.
     const method = String(opts.method || "GET").toUpperCase();
     if (retries > 0 && (method === "GET" || method === "HEAD")) {
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 150));
       return fetchWithRetry(url, opts, retries - 1);
     }
     throw err;
@@ -403,9 +404,9 @@ export async function testConnection(path) {
 export async function cloudStatus(provider) {
   return req(`/api/backup/cloud/${encodeURIComponent(provider)}/status`);
 }
-export async function saveCloudConfig(provider, clientId, clientSecret = "") {
+export async function saveCloudConfig(provider, clientId, clientSecret = "", folderId = "") {
   return req(`/api/backup/cloud/${encodeURIComponent(provider)}/config`, {
-    method: "PUT", body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+    method: "PUT", body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, folder_id: folderId }),
   });
 }
 // Opens the system browser and blocks on the backend until login finishes.

@@ -22,6 +22,7 @@ set "PYEMBED=python-%PYVER%-embed-amd64"
 
 echo.
 echo ========== [1/5] Building frontend + share helper ==========
+python "%ROOT%sync_version.py" || goto :err
 cd /d "%ROOT%frontend" || goto :err
 call npm install || goto :err
 set "VITE_API_URL=http://18.61.159.169:8000"
@@ -56,6 +57,9 @@ copy /y "%ROOT%installer\Start NJ India.bat" "%BUILD%\app\Start NJ India.bat" >n
 
 REM Application icon for the window
 copy /y "%ROOT%installer\app.ico" "%BUILD%\app\app.ico" >nul || goto :err
+
+REM Version info
+copy /y "%ROOT%version.json" "%BUILD%\app\version.json" >nul || goto :err
 
 echo.
 echo ========== [3/5] Preparing embedded Python ==========
@@ -104,7 +108,7 @@ echo Using Inno Setup compiler: "%ISCC%"
 
 echo.
 echo ========== [5/5] Code signing ==========
-REM ── Default to the bundled self-signed certificate ──────────────────────────
+REM ?????? Default to the bundled self-signed certificate ??????????????????????????????????????????????????????????????????????????????
 REM installer\nj_india_codesign.pfx is a self-signed cert (publisher: NJ India
 REM Trading, valid until 2029-07-06).  It makes Windows show the company name
 REM instead of "Unknown Publisher" and is safe to use for WhatsApp/USB sharing.

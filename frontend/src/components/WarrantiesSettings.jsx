@@ -2,9 +2,13 @@ import { useMemo, useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { Image as ImageIcon, FileSignature, ShieldAlert, Stamp, Plus, Trash2, ShieldCheck, Save } from 'lucide-react';
 import { DEFAULT_DATA } from '../data';
+import { uploadImage, mediaUrl } from '../api';
 
 export default function WarrantiesSettings() {
   const { data, setData, showToast, persistConfig } = useAppContext();
+
+  const isImgSrc = (s) => typeof s === 'string' && (s.startsWith('data:image/') || s.startsWith('http') || s.startsWith('/'));
+
 
   // Resolve active warranties array, preserving saved edits while filling any missing defaults.
   const warranties = useMemo(() => {
@@ -16,6 +20,7 @@ export default function WarrantiesSettings() {
         ...warranty,
         sections: warranty.sections?.length ? warranty.sections : fallback.sections || [],
         seriesTable: warranty.seriesTable?.length ? warranty.seriesTable : fallback.seriesTable || [],
+        liabilityTable: warranty.liabilityTable?.length ? warranty.liabilityTable : fallback.liabilityTable || [],
       };
     });
   }, [data.warranties]);
@@ -53,13 +58,19 @@ export default function WarrantiesSettings() {
     setMobilePanel('editor');
   };
 
-  const handleImageUpload = (e, callback) => {
+  const handleImageUpload = async (e, callback) => {
     const file = e.target.files[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => callback(reader.result);
-      reader.readAsDataURL(file);
+      try {
+        showToast('Uploading image...');
+        const up = await uploadImage(file);
+        callback(up.url);
+        showToast('Image added');
+      } catch (err) {
+        showToast('Upload failed', 'error');
+      }
     }
+    e.target.value = '';
   };
 
   const handleSave = () => {
@@ -86,6 +97,7 @@ export default function WarrantiesSettings() {
       showSeriesTable: false,
       seriesTable: [],
       heatoutTable: false,
+      liabilityTable: [],
       signImage: '',
       sealImage: '',
     };
@@ -133,6 +145,24 @@ export default function WarrantiesSettings() {
   const removeSeriesRow = (index) => {
     const updatedRows = (current.seriesTable || []).filter((_, i) => i !== index);
     setCurrent({ ...current, seriesTable: updatedRows });
+  };
+
+  // Liability table operations
+  const updateLiabilityRow = (index, field, value) => {
+    const rows = [...(current.liabilityTable || [])];
+    rows[index] = { ...rows[index], [field]: value };
+    setCurrent({ ...current, liabilityTable: rows });
+  };
+
+  const addLiabilityRow = () => {
+    const rows = [...(current.liabilityTable || [])];
+    rows.push({ years: '0-10 years', pct: '100%' });
+    setCurrent({ ...current, liabilityTable: rows });
+  };
+
+  const removeLiabilityRow = (index) => {
+    const rows = (current.liabilityTable || []).filter((_, i) => i !== index);
+    setCurrent({ ...current, liabilityTable: rows });
   };
 
   return (
@@ -312,10 +342,10 @@ export default function WarrantiesSettings() {
                   <label style={{ 
                     height: '80px', border: '1.5px dashed var(--line)', borderRadius: 'var(--radius)', 
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    background: (current.logo && current.logo.startsWith('data:image/')) ? `url(${current.logo}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
+                    background: (current.logo && isImgSrc(current.logo)) ? `url(${mediaUrl(current.logo)}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
                     cursor: 'pointer', transition: 'all 0.2s', position: 'relative'
                   }} className="hover-lift">
-                    {(!current.logo || !current.logo.startsWith('data:image/')) && (
+                    {(!current.logo || !isImgSrc(current.logo)) && (
                       <>
                         <ImageIcon size={20} color="var(--ink-soft)" style={{ marginBottom: '4px' }}/>
                         <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-mid)' }}>Upload Logo Image</div>
@@ -324,7 +354,7 @@ export default function WarrantiesSettings() {
                     <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleImageUpload(e, (base64) => setCurrent({...current, logo: base64}))} />
                   </label>
                   
-                  {(current.logo && current.logo.startsWith('data:image/')) ? (
+                  {(current.logo && isImgSrc(current.logo)) ? (
                     <button 
                       onClick={() => setCurrent({...current, logo: ''})}
                       style={{ fontSize: '11px', fontWeight: 600, color: 'var(--red)', cursor: 'pointer', background: 'transparent', border: 'none', padding: 0, textAlign: 'left', alignSelf: 'flex-start' }}
@@ -554,6 +584,70 @@ export default function WarrantiesSettings() {
               </div>
             </div>
 
+            {/* LIABILITY TABLE EDITOR */}
+            <div className="warranty-series-section" style={{ marginBottom: '32px' }}>
+              <div className="warranty-document-section-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '10px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink)' }}>
+                  8. Graduated Liability Table
+                </label>
+                <button
+                  onClick={addLiabilityRow}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                >
+                  <Plus size={12} /> Add Row
+                </button>
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--ink-soft)', margin: '0 0 10px' }}>
+                Shown only when "Graduated Liability Table" checkbox is enabled above.
+              </p>
+              <div className="warranty-series-scroll">
+                <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #E5E1D8' }}>
+                  <thead>
+                    <tr style={{ background: '#F4EFE6' }}>
+                      <th style={{ border: '1px solid #E5E1D8', padding: '8px 12px', textAlign: 'left', fontSize: '10px', fontWeight: 800 }}>Years of Use</th>
+                      <th style={{ border: '1px solid #E5E1D8', padding: '8px 12px', textAlign: 'center', fontSize: '10px', fontWeight: 800, width: '180px' }}>Liability %</th>
+                      <th style={{ border: '1px solid #E5E1D8', padding: '8px 12px', textAlign: 'center', fontSize: '10px', fontWeight: 800, width: '60px' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(current.liabilityTable || []).map((row, idx) => (
+                      <tr key={idx} style={{ background: '#FFFFFF' }}>
+                        <td style={{ border: '1px solid #E5E1D8', padding: '4px 8px' }}>
+                          <input
+                            value={row.years}
+                            onChange={e => updateLiabilityRow(idx, 'years', e.target.value)}
+                            style={{ width: '100%', border: 'none', background: 'transparent', padding: '4px', fontSize: '11.5px', fontWeight: 600, outline: 'none' }}
+                          />
+                        </td>
+                        <td style={{ border: '1px solid #E5E1D8', padding: '4px 8px', textAlign: 'center' }}>
+                          <input
+                            value={row.pct}
+                            onChange={e => updateLiabilityRow(idx, 'pct', e.target.value)}
+                            style={{ width: '100%', border: 'none', background: 'transparent', padding: '4px', fontSize: '11.5px', fontWeight: 700, color: '#C2410C', textAlign: 'center', outline: 'none' }}
+                          />
+                        </td>
+                        <td style={{ border: '1px solid #E5E1D8', padding: '4px 8px', textAlign: 'center' }}>
+                          <button
+                            onClick={() => removeLiabilityRow(idx)}
+                            style={{ color: 'var(--red)', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {(current.liabilityTable || []).length === 0 && (
+                      <tr>
+                        <td colSpan="3" style={{ border: '1px solid #E5E1D8', padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
+                          No rows yet. Click 'Add Row' to configure the liability schedule.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* AUTHORIZED SIGNATORY & SEAL UPLOAD FOOTER */}
             <div className="warranty-document-footer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: 'auto', paddingTop: '28px', borderTop: '2px solid #C2410C' }}>
               
@@ -565,7 +659,7 @@ export default function WarrantiesSettings() {
                 <label style={{ 
                   height: '80px', border: '1.5px dashed var(--line)', borderRadius: 'var(--radius)', 
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  background: current.signImage ? `url(${current.signImage}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
+                  background: current.signImage ? `url(${mediaUrl(current.signImage)}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
                   cursor: 'pointer', transition: 'all 0.2s', position: 'relative'
                 }} className="hover-lift">
                   {!current.signImage && (
@@ -589,7 +683,7 @@ export default function WarrantiesSettings() {
                 <label style={{ 
                   width: '100px', height: '100px', border: '1.5px dashed var(--line)', borderRadius: '50%', 
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  background: current.sealImage ? `url(${current.sealImage}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
+                  background: current.sealImage ? `url(${mediaUrl(current.sealImage)}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
                   cursor: 'pointer', transition: 'all 0.2s', position: 'relative'
                 }} className="hover-lift">
                   {!current.sealImage && (

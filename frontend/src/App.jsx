@@ -13,6 +13,7 @@ import History from './components/History';
 import QuotationDocument from './components/QuotationDocument';
 import WarrantyDocument from './components/WarrantyDocument';
 import BackupSettings from './components/BackupSettings';
+import UpdaterBanner from './components/UpdaterBanner';
 import { useAppContext, AppProvider } from './AppContext';
 
 // On Android (Capacitor) the WebView process is killed when the app goes to
@@ -173,10 +174,12 @@ function AppContent() {
   }
 
   return (
-    <div className="app-shell" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
+    <div className="app-shell" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <UpdaterBanner />
+      <div className="app-body" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
 
-      <main className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
+        <main className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
         {currentView !== 'settings' && (
           <Topbar
             title={pageTitle}
@@ -204,7 +207,8 @@ function AppContent() {
         </div>
       </main>
 
-      {currentView !== 'quotation_desk' && currentView !== 'checkout' && <CartDrawer />}
+        {currentView !== 'quotation_desk' && currentView !== 'checkout' && <CartDrawer />}
+      </div>
     </div>
   );
 }

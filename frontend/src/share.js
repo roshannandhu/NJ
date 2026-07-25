@@ -6,7 +6,7 @@
 // native Windows Share flyout (ShareHelper.exe) with them attached. If the
 // backend can't share (non-Windows dev), the files download instead.
 
-import { API_BASE } from './api';
+import { API_BASE, SHARE_API_BASE } from './api';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 
@@ -120,8 +120,10 @@ async function _captureCanvas(el) {
   try {
     // Sharper capture: up to 3× on hi-dpi displays, clamped so a tall multi-page
     // quotation can't exceed safe browser canvas limits (≈16k px / side).
+    // Reduced max scale on mobile to prevent Out-Of-Memory crashes during blob stringification.
     const wpx = el.scrollWidth, hpx = el.scrollHeight;
-    const scale = Math.max(1.5, Math.min(3, (window.devicePixelRatio || 1) * 2, 8192 / wpx, 12000 / hpx));
+    const maxScale = isCapacitor() ? 0.75 : (isMobileDevice() ? 1.15 : 2);
+    const scale = Math.max(1, Math.min(maxScale, (window.devicePixelRatio || 1) * 2, 8192 / wpx, 12000 / hpx));
     const canvas = await window.html2canvas(el, {
       scale,
       useCORS: true,
@@ -140,27 +142,35 @@ async function _captureCanvas(el) {
   }
 }
 
+function _releaseCanvas(canvas) {
+  if (!canvas) return;
+  canvas.width = 1;
+  canvas.height = 1;
+}
+
 // Place one captured canvas onto the pdf, starting on the CURRENT page: fills one
 // A4 page when it's a page (or within ~5%), else flows across full-size pages.
 function _placeCanvas(pdf, canvas) {
   const pw = pdf.internal.pageSize.getWidth();   // 210mm
   const ph = pdf.internal.pageSize.getHeight();  // 297mm
-  const imgData = canvas.toDataURL('image/png');
+  const useJpeg = isMobileDevice();
+  const imgData = useJpeg ? canvas.toDataURL('image/jpeg', 0.82) : canvas.toDataURL('image/png');
+  const imgType = useJpeg ? 'JPEG' : 'PNG';
   const imgH = (canvas.height * pw) / canvas.width; // full-width height in mm
 
   if (imgH <= ph * 1.05) {
     const s = Math.min(1, ph / imgH);
     const w = pw * s, h = imgH * s;
-    pdf.addImage(imgData, 'PNG', (pw - w) / 2, 0, w, h);
+    pdf.addImage(imgData, imgType, (pw - w) / 2, 0, w, h);
   } else {
     let heightLeft = imgH;
     let position = 0;
-    pdf.addImage(imgData, 'PNG', 0, position, pw, imgH);
+    pdf.addImage(imgData, imgType, 0, position, pw, imgH);
     heightLeft -= ph;
     while (heightLeft > 0) {
       position -= ph;
       pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, pw, imgH);
+      pdf.addImage(imgData, imgType, 0, position, pw, imgH);
       heightLeft -= ph;
     }
   }
@@ -170,7 +180,11 @@ export async function elementToPdf(el) {
   const canvas = await _captureCanvas(el);
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF('p', 'mm', 'a4');
-  _placeCanvas(pdf, canvas);
+  try {
+    _placeCanvas(pdf, canvas);
+  } finally {
+    _releaseCanvas(canvas);
+  }
   return pdf;
 }
 
@@ -185,7 +199,12 @@ export async function elementsToPdf(els) {
   for (let i = 0; i < list.length; i++) {
     if (i > 0) pdf.addPage();
     const canvas = await _captureCanvas(list[i]);
-    _placeCanvas(pdf, canvas);
+    try {
+      _placeCanvas(pdf, canvas);
+    } finally {
+      _releaseCanvas(canvas);
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
   return pdf;
 }
@@ -211,10 +230,14 @@ function blobToBase64(blob) {
   });
 }
 
+function isLocalDesktopShell() {
+  return typeof window !== 'undefined' && /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(window.location.origin);
+}
+
 // True when running inside a Capacitor Android/iOS WebView.
 // True when running inside a Capacitor Android/iOS WebView.
 function isCapacitor() {
-  return typeof window !== 'undefined' && !!window.Capacitor;
+  return typeof window !== 'undefined' && !!window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform();
 }
 
 // True on any mobile browser or WebView (Android, iOS, Capacitor).
@@ -231,6 +254,46 @@ async function _webShare(files, title) {
   if (navigator.canShare && !navigator.canShare({ files })) return false;
   await navigator.share({ files, title: title || 'NJ India — Document' });
   return true;
+}
+
+async function _writeCapacitorShareFile(file) {
+  const base64Data = await blobToBase64(file);
+  const base64String = String(base64Data).split(',')[1];
+  const saved = await Filesystem.writeFile({
+    path: safe(file.name) || 'document.pdf',
+    data: base64String,
+    directory: Directory.Cache,
+    recursive: true,
+  });
+  return saved.uri;
+}
+
+async function _writePdfToCapacitorShareFile(pdf, filename) {
+  const blob = pdf.output('blob');
+  const file = new File([blob], filename, { type: 'application/pdf' });
+  return _writeCapacitorShareFile(file);
+}
+
+async function _shareCapacitorUris(uris, title) {
+  await Share.share({
+    title: title || 'NJ India - Document',
+    files: uris,
+    dialogTitle: 'Share Documents',
+  });
+  return 'shared';
+}
+
+async function _savePdfThroughBackend(pdf, filename) {
+  if (!isLocalDesktopShell()) return false;
+  try {
+    const form = new FormData();
+    form.append('file', new File([pdf.output('blob')], filename, { type: 'application/pdf' }), filename);
+    const res = await fetch(`${SHARE_API_BASE || API_BASE}/api/save-pdf`, { method: 'POST', body: form });
+    return res.ok;
+  } catch (e) {
+    console.error('[NJ Share] backend save-pdf error:', e);
+    return false;
+  }
 }
 
 // "Always ask where to save" defaults ON — only an explicit '0' turns it off.
@@ -282,23 +345,8 @@ export async function finishPdfSave(pdf, filename, dest) {
   // Capacitor requires writing to Filesystem before sharing/saving properly.
   if (isCapacitor()) {
     try {
-      const blob = pdf.output('blob');
-      const base64Data = await blobToBase64(blob);
-      const base64String = base64Data.split(',')[1];
-      
-      const savedFile = await Filesystem.writeFile({
-        path: filename,
-        data: base64String,
-        directory: Directory.Documents
-      });
-      
-      // Share it to allow saving to device or sending
-      await Share.share({
-        title: filename,
-        url: savedFile.uri,
-        dialogTitle: 'Save or Share PDF'
-      });
-      return 'saved';
+      const uri = await _writePdfToCapacitorShareFile(pdf, filename);
+      return await _shareCapacitorUris([uri], filename);
     } catch (e) {
       console.error('[NJ Share] Capacitor finishPdfSave error:', e);
       return 'downloaded';
@@ -315,6 +363,7 @@ export async function finishPdfSave(pdf, filename, dest) {
       if (e.name === 'AbortError') return 'downloaded'; // user cancelled share
     }
   }
+  if (await _savePdfThroughBackend(pdf, filename)) return 'saved';
   pdf.save(filename);
   return 'downloaded';
 }
@@ -322,6 +371,24 @@ export async function finishPdfSave(pdf, filename, dest) {
 // Wrap an existing Blob (e.g. a backup .zip from the backend) as a File.
 export function blobToFile(blob, filename, type) {
   return new File([blob], filename, { type: type || blob.type || 'application/octet-stream' });
+}
+
+export async function shareElementPdf(el, filename, { title } = {}) {
+  if (isCapacitor()) {
+    const pdf = await elementToPdf(el);
+    const uri = await _writePdfToCapacitorShareFile(pdf, filename);
+    return _shareCapacitorUris([uri], title || filename);
+  }
+  return shareFiles([await elementToPdfFile(el, filename)], { title });
+}
+
+export async function shareElementsPdf(els, filename, { title } = {}) {
+  if (isCapacitor()) {
+    const pdf = await elementsToPdf(els);
+    const uri = await _writePdfToCapacitorShareFile(pdf, filename);
+    return _shareCapacitorUris([uri], title || filename);
+  }
+  return shareFiles([await elementsToPdfFile(els, filename)], { title });
 }
 
 export async function shareFiles(files, { title } = {}) {
@@ -343,14 +410,7 @@ export async function shareFiles(files, { title } = {}) {
     try {
       const uris = [];
       for (const f of files) {
-        const base64Data = await blobToBase64(f);
-        const base64String = base64Data.split(',')[1];
-        const saved = await Filesystem.writeFile({
-          path: f.name,
-          data: base64String,
-          directory: Directory.Documents
-        });
-        uris.push(saved.uri);
+        uris.push(await _writeCapacitorShareFile(f));
       }
       await Share.share({
         title: title || 'NJ India - Document',
@@ -387,7 +447,7 @@ export async function shareFiles(files, { title } = {}) {
     let retries = 2;
     while (true) {
       try {
-        res = await fetch(`${API_BASE}/api/share-pdfs`, { method: 'POST', body: form });
+        res = await fetch(`${SHARE_API_BASE || API_BASE}/api/share-pdfs`, { method: 'POST', body: form });
         break;
       } catch (err) {
         if (retries > 0) {

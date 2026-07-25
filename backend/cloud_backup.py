@@ -347,9 +347,18 @@ class GoogleDrive(_Provider):
         return r.json().get("email", "")
 
     def ensure_folder(self) -> str:
+        # If the user configured a specific Drive folder ID, use it directly —
+        # no search or folder creation needed.
+        folder_id = self.config().get("folder_id", "").strip()
+        if folder_id:
+            return folder_id
+
         h = self._headers()
-        q = ("mimeType='application/vnd.google-apps.folder' and trashed=false "
-             f"and name='{_BACKUP_FOLDER}'")
+        # Search for "NJ India Backups" at root level, or inside a parent if set.
+        parent_id = self.config().get("parent_folder_id", "").strip()
+        parent_clause = f" and '{parent_id}' in parents" if parent_id else ""
+        q = (f"mimeType='application/vnd.google-apps.folder' and trashed=false "
+             f"and name='{_BACKUP_FOLDER}'{parent_clause}")
         r = httpx.get("https://www.googleapis.com/drive/v3/files",
                       params={"q": q, "fields": "files(id,name)", "spaces": "drive"},
                       headers=h, timeout=30)
@@ -357,11 +366,12 @@ class GoogleDrive(_Provider):
         files = r.json().get("files", [])
         if files:
             return files[0]["id"]
+        body = {"name": _BACKUP_FOLDER, "mimeType": "application/vnd.google-apps.folder"}
+        if parent_id:
+            body["parents"] = [parent_id]
         r = httpx.post("https://www.googleapis.com/drive/v3/files",
                        headers={**h, "Content-Type": "application/json"},
-                       json={"name": _BACKUP_FOLDER,
-                             "mimeType": "application/vnd.google-apps.folder"},
-                       timeout=30)
+                       json=body, timeout=30)
         r.raise_for_status()
         return r.json()["id"]
 
@@ -531,13 +541,18 @@ def get_status(name: str) -> dict:
     }
 
 
-def save_config(name: str, client_id: str, client_secret: str = "") -> None:
+def save_config(name: str, client_id: str, client_secret: str = "",
+                folder_id: str = "") -> None:
     p = _provider(name)
     with _io_lock:
         cfg = _load_config()
         entry = {"client_id": (client_id or "").strip()}
         if p.needs_secret:
             entry["client_secret"] = (client_secret or "").strip()
+        if folder_id.strip():
+            entry["folder_id"] = folder_id.strip()
+        elif "folder_id" in cfg.get(name, {}):
+            entry["folder_id"] = cfg[name]["folder_id"]  # preserve existing
         cfg[name] = entry
         _save_config_dict(cfg)
 
@@ -552,6 +567,15 @@ def disconnect(name: str) -> None:
 
 def is_connected(name: str) -> bool:
     return _provider(name).is_connected()
+
+
+def set_token(name: str, token: dict) -> None:
+    """Accept pre-obtained OAuth tokens (e.g. from the desktop gdrive_auth.py helper)."""
+    _provider(name)  # validate name
+    with _io_lock:
+        allt = _load_tokens()
+        allt[name] = token
+        _save_tokens(allt)
 
 
 def upload_set(name: str, files, keep: int = 30) -> tuple[bool, str]:

@@ -2506,6 +2506,10 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
 
 /* Cohesive phone finish: floating navigation and warmer, layered page surfaces. */
 @media (max-width: 760px) {
+  .app-body {
+    flex-direction: column !important;
+  }
+  
   .app-main {
     background:
       radial-gradient(circle at 100% 0, rgba(194, 65, 12, 0.08), transparent 250px),

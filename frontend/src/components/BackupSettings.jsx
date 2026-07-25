@@ -319,7 +319,7 @@ export default function BackupSettings() {
     if (!cfg.client_id) { showToast('Paste the Client ID first', 'error'); return; }
     setCloudBusy(b => ({ ...b, [name]: true }));
     try {
-      const st = await saveCloudConfig(name, cfg.client_id.trim(), (cfg.client_secret || '').trim());
+      const st = await saveCloudConfig(name, cfg.client_id.trim(), (cfg.client_secret || '').trim(), (cfg.folder_id || '').trim());
       setCloud(c => ({ ...c, [name]: st }));
       showToast(`${label} setup saved`);
     } catch { showToast('Could not save setup', 'error'); }
@@ -577,12 +577,19 @@ export default function BackupSettings() {
                           ) : (
                             <>
                               {!cs.configured && (
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                                  <input value={(cloudCfg[name]?.client_id) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_id: e.target.value } }))} placeholder="Client ID" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
-                                  {DEST[name].secret !== false && cs.needs_secret && (
-                                    <input value={(cloudCfg[name]?.client_secret) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_secret: e.target.value } }))} placeholder="Client secret" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <input value={(cloudCfg[name]?.client_id) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_id: e.target.value } }))} placeholder="Client ID" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
+                                    {DEST[name].secret !== false && cs.needs_secret && (
+                                      <input value={(cloudCfg[name]?.client_secret) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], client_secret: e.target.value } }))} placeholder="Client secret" style={{ ...inpStyle, flex: 1, minWidth: 220 }} />
+                                    )}
+                                  </div>
+                                  {name === 'gdrive' && (
+                                    <input value={(cloudCfg[name]?.folder_id) || ''} onChange={e => setCloudCfg(c => ({ ...c, [name]: { ...c[name], folder_id: e.target.value } }))} placeholder="Folder ID (optional — paste from Google Drive URL)" style={{ ...inpStyle, width: '100%' }} />
                                   )}
-                                  <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} disabled={cloudBusy[name]} onClick={() => handleSaveCloudConfig(name)}>Save setup</button>
+                                  <div>
+                                    <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} disabled={cloudBusy[name]} onClick={() => handleSaveCloudConfig(name)}>Save setup</button>
+                                  </div>
                                 </div>
                               )}
                               {cs.configured && (
@@ -851,7 +858,7 @@ export default function BackupSettings() {
                   {fmtB(health.db_bytes)}
                 </div>
                 <div style={{ height: 4, background: 'var(--line)', borderRadius: 2, marginBottom: 12 }}>
-                  <div style={{ width: `${Math.min(100, Math.round(health.db_bytes / health.red_bytes * 100))}%`, height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
+                  <div style={{ width: `${Math.min(100, Math.round((health.db_bytes * 100) / health.red_bytes))}%`, height: '100%', background: 'var(--accent)', borderRadius: 2 }} />
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--ink-mid)', display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -860,7 +867,38 @@ export default function BackupSettings() {
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Warranties</span> <span style={{ fontWeight: 600 }}>{health.counts.warranty_certificates}</span>
                   </div>
+                  {health.data_disk_total_bytes > 0 && (() => {
+                    const free = health.data_disk_free_bytes ?? 0;
+                    const total = health.data_disk_total_bytes;
+                    const usedPct = Math.round(((total - free) / total) * 100);
+                    const barColor = usedPct >= 90 ? 'var(--red)' : usedPct >= 75 ? 'var(--gold)' : 'var(--accent)';
+                    return (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span>Server Disk</span>
+                          <span style={{ fontWeight: 600, color: usedPct >= 90 ? 'var(--red)' : 'inherit' }}>
+                            {fmtB(free)} free
+                          </span>
+                        </div>
+                        <div style={{ height: 4, background: 'var(--line)', borderRadius: 2 }}>
+                          <div style={{ width: `${usedPct}%`, height: '100%', background: barColor, borderRadius: 2 }} />
+                        </div>
+                        <div style={{ textAlign: 'right', marginTop: 2, color: usedPct >= 90 ? 'var(--red)' : 'var(--ink-soft)' }}>
+                          {usedPct}% used of {fmtB(total)}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
+                {health.warnings?.length > 0 && (
+                  <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {health.warnings.map((w, i) => (
+                      <div key={i} style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(239,68,68,0.08)', borderRadius: 4, padding: '4px 8px' }}>
+                        ⚠ {w}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -84,7 +84,8 @@ export const DEFAULT_DATA = {
         { series: 'PIE Classic', duration: '10 years' },
         { series: 'PIE Comfort', duration: '15 years' },
         { series: 'PIE Lux', duration: '25 years' }
-      ]
+      ],
+      liabilityTable: []
     },
     {
       id: 'nj_laminated',
@@ -127,7 +128,8 @@ export const DEFAULT_DATA = {
       seriesTable: [
         { series: 'NJ Premium 35', duration: '35 years' },
         { series: 'NJ Standard', duration: '20 years' }
-      ]
+      ],
+      liabilityTable: []
     },
     {
       id: 'ceramic',
@@ -155,7 +157,8 @@ export const DEFAULT_DATA = {
       seriesTable: [
         { series: 'Mediterranean', duration: '15 years' },
         { series: 'Flat Premium', duration: '20 years' }
-      ]
+      ],
+      liabilityTable: []
     },
     {
       id: 'stone_coated',
@@ -195,7 +198,8 @@ export const DEFAULT_DATA = {
         }
       ],
       showSeriesTable: false,
-      seriesTable: []
+      seriesTable: [],
+      liabilityTable: []
     },
     {
       id: 'heatout',
@@ -221,7 +225,15 @@ export const DEFAULT_DATA = {
       ],
       showSeriesTable: false,
       seriesTable: [],
-      heatoutTable: true
+      heatoutTable: true,
+      liabilityTable: [
+        { years: '0-10 years', pct: '100%' },
+        { years: '10-12 years', pct: '50%' },
+        { years: '12-18 years', pct: '40%' },
+        { years: '18-20 years', pct: '30%' },
+        { years: '20-21 years', pct: '20%' },
+        { years: '21-25 years', pct: '10%' }
+      ]
     }
   ],
   quotations: [],

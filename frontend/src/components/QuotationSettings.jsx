@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAppContext } from '../AppContext';
-import { mediaUrl } from '../api';
+import { uploadImage, mediaUrl } from '../api';
 import {
   DollarSign, FileText, Sliders,
   CheckCircle, Tag, Layers,
@@ -177,7 +177,7 @@ function BankCard({ bank, index, total, onChange, onRemove, onMove, onImage, onS
           style={{
             width: '72px', height: '72px', borderRadius: 'var(--radius)', cursor: 'pointer',
             border: '1.5px dashed var(--line)', boxSizing: 'border-box',
-            background: bank[field] ? `url(${bank[field]}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
+            background: bank[field] ? `url(${mediaUrl(bank[field])}) center/contain no-repeat #FFFFFF` : '#FFFFFF',
             display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-soft)',
           }}
         >
@@ -373,12 +373,17 @@ export default function QuotationSettings() {
 
   const [saved, setSaved] = useState(false);
 
-  const handleImageUpload = (e) => {
+  const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setSettings(s => ({ ...s, quotationLogo: reader.result }));
-    reader.readAsDataURL(file);
+    try {
+      showToast('Uploading image...');
+      const up = await uploadImage(file);
+      setSettings(s => ({ ...s, quotationLogo: up.url }));
+      showToast('Image added');
+    } catch (err) {
+      showToast('Upload failed', 'error');
+    }
     e.target.value = '';
   };
 
@@ -426,12 +431,17 @@ export default function QuotationSettings() {
     [next[i], next[j]] = [next[j], next[i]];
     return next;
   });
-  const handleBankImageUpload = (id, field, e) => {
+  const handleBankImageUpload = async (id, field, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => updateBank(id, field, reader.result);
-    reader.readAsDataURL(file);
+    try {
+      showToast('Uploading image...');
+      const up = await uploadImage(file);
+      updateBank(id, field, up.url);
+      showToast('Image added');
+    } catch (err) {
+      showToast('Upload failed', 'error');
+    }
     e.target.value = '';
   };
 
@@ -585,7 +595,7 @@ export default function QuotationSettings() {
                   border: '1.5px dashed var(--line)',
                   borderRadius: 'var(--radius)',
                   background: settings.quotationLogo
-                    ? `url(${settings.quotationLogo}) center/contain no-repeat #FFFFFF`
+                    ? `url(${mediaUrl(settings.quotationLogo)}) center/contain no-repeat #FFFFFF`
                     : '#FFFFFF',
                   display: 'flex',
                   flexDirection: 'column',

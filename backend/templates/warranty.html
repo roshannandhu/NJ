@@ -36,7 +36,7 @@
 </head>
 <body>
 
-{% if template.logo and template.logo.startswith('data:image/') %}
+{% if template.logo and (template.logo.startswith('data:image/') or template.logo.startswith('http') or template.logo.startswith('/')) %}
 <img class="warranty-logo-img" src="{{ template.logo }}" alt="Logo">
 {% else %}
 <p class="warranty-logo center">{{ template.logo }}</p>

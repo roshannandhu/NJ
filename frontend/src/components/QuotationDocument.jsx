@@ -1,9 +1,10 @@
-import React from 'react';
+﻿import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus, Maximize2, Minimize2 } from 'lucide-react';
 import { mediaUrl, corsMediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
-import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareElementPdf, shareElementsPdf, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
+import { DEFAULT_DATA } from '../data';
 import { paginateQuotation } from '../quotationPagination';
 import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
@@ -13,7 +14,7 @@ import WarrantyCertificate from './WarrantyCertificate';
 // Preset design colors offered on the quotation page (first is the original plum).
 const THEME_PRESETS = ['#8a1856', '#1e3a8a', '#14532d', '#c2410c', '#1f2937'];
 
-// ── Inline-Editable Cell (click text on the quotation to edit in place) ──────
+// â”€â”€ Inline-Editable Cell (click text on the quotation to edit in place) â”€â”€â”€â”€â”€â”€
 function EditableCell({ value, onSave, multiline = false, numeric = false, style = {}, renderValue, placeholder = 'click to edit' }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
@@ -23,8 +24,8 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   const stopEditing  = () => { setEditing(false); document.body.removeAttribute('data-quotation-editing'); };
   const commit = () => { stopEditing(); if (String(draft) !== String(value ?? '')) onSave(numeric ? (parseFloat(draft) || 0) : draft); };
 
-  // A plain click opens edit mode, but dragging to highlight text — or clicking
-  // while a selection is active — must NOT, or the <span> is swapped for an
+  // A plain click opens edit mode, but dragging to highlight text â€” or clicking
+  // while a selection is active â€” must NOT, or the <span> is swapped for an
   // <input> mid-selection and the value can never be copied. This guard keeps
   // single-click-to-edit while letting users select & Ctrl+C any displayed text.
   const onMouseDown = (e) => { downPos.current = { x: e.clientX, y: e.clientY }; };
@@ -57,28 +58,28 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   const isEmpty = value == null || value === '';
   const display = renderValue ? renderValue(value) : (isEmpty ? <span style={{ color: '#bbb', fontStyle: 'italic' }}>{placeholder}</span> : value);
   return (
-    <span onMouseDown={onMouseDown} onClick={handleClick} title="Click to edit · drag to select & copy"
+    <span onMouseDown={onMouseDown} onClick={handleClick} title="Click to edit Â· drag to select & copy"
       className="q-editable" style={{ cursor: 'text', userSelect: 'text', WebkitUserSelect: 'text', ...style }}>
       {display}
     </span>
   );
 }
 
-// ── Fixed-size, multi-page quotation layout ──────────────────────────────────
-// Every quotation element renders at a FIXED size — fonts, row heights, spacing
-// and logos never scale. When the content outgrows one A4 page (794×1123px) it
+// â”€â”€ Fixed-size, multi-page quotation layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Every quotation element renders at a FIXED size â€” fonts, row heights, spacing
+// and logos never scale. When the content outgrows one A4 page (794Ã—1123px) it
 // flows onto additional pages with clean breaks (no row or section is ever
 // cut): a layout effect measures each content block at its fixed size and a
 // pure paginator (quotationPagination.js) assigns the FLOWING blocks (spec
 // table, item rows, totals) to pages. Every page repeats the same fixed chrome
-// — header band, customer block, Terms & Conditions, validity row and a slim
-// "Page X of Y" footer — and because that chrome renders from the one shared
+// â€” header band, customer block, Terms & Conditions, validity row and a slim
+// "Page X of Y" footer â€” and because that chrome renders from the one shared
 // document state, an edit made on ANY page reflects on every page.
 //
 // QFIT survives from the old single-page fit engine: with `--q-fit` never set,
 // every QFIT(n) resolves to plain `n`px (the var's default is 1).
 const QFIT = (n) => `calc(${n}px * var(--q-fit, 1))`;
-// Fixed header band sizes (never scale) — the loosest legacy tier's values.
+// Fixed header band sizes (never scale) â€” the loosest legacy tier's values.
 const HDR = { h: '90px', font: '42px', h1: '22px', info: '11px', lh: 1.65, divMb: '12px' };
 // Fixed page padding (defines the A4 margins; excluded from the scaled body).
 const PAGE_PAD = '40px 50px';
@@ -101,7 +102,7 @@ const QD = {
   termsMb: QFIT(5),
   custMb:  QFIT(20),
 };
-// A4 page height in px at 96dpi (794×1123 = 210×297mm).
+// A4 page height in px at 96dpi (794Ã—1123 = 210Ã—297mm).
 const A4 = 1123;
 
 function QuotationDocumentInner() {
@@ -144,14 +145,14 @@ function QuotationDocumentInner() {
   const [draftColor, setDraftColor] = React.useState(null);
   const colorCommitTimer = React.useRef(null);
 
-  // ── In-place quotation editing (CHANGE 3) — warranty-style inline editing ──
+  // â”€â”€ In-place quotation editing (CHANGE 3) â€” warranty-style inline editing â”€â”€
   // The quotation document itself is directly editable: click any field to edit
   // it on the sheet (see EditableCell). Each commit recomputes totals, updates
   // the active quotation + registry, and upserts to the backend. Edits affect
-  // ONLY this quotation — master products/settings are never touched.
+  // ONLY this quotation â€” master products/settings are never touched.
   const doc = generatedDoc;
 
-  // ── Add-on Order derived values ──
+  // â”€â”€ Add-on Order derived values â”€â”€
   // Add-on batches live in doc.addons (see ../addons.js); the original `items`
   // array is never touched by the add-on flow. docAllItems is the whole order
   // for consumers that must see every product (brand, spec table, warranties).
@@ -176,7 +177,7 @@ function QuotationDocumentInner() {
     const taxAmount = Math.round(taxableAmount * taxRate) / 100;
     const grandTotal = taxableAmount + taxAmount;
 
-    // ── Add-on Order totals ──
+    // â”€â”€ Add-on Order totals â”€â”€
     // The original section's math above never changes (it reads only the
     // untouched original inputs, so its result is frozen in effect). Add-ons
     // carry NO tax and NO discount: addonTotal is a plain sum, and the stored
@@ -194,7 +195,7 @@ function QuotationDocumentInner() {
           advanceReceived: adv, balanceDue: Math.round((updatedGrand - adv) * 100) / 100,
         };
       }
-      // every add-on item removed → revert to the plain (legacy) shape
+      // every add-on item removed â†’ revert to the plain (legacy) shape
       d = { ...d, addons: [] };
     }
 
@@ -209,7 +210,7 @@ function QuotationDocumentInner() {
   // changing its id/template (so certificate numbers never churn). Customer and
   // line items are re-synced; the product the warranty points at is preserved
   // (selectedCartId) when that line still exists, otherwise re-derived. Any
-  // field the user can't reach from the quotation (sellerName, batchNo, …) is
+  // field the user can't reach from the quotation (sellerName, batchNo, â€¦) is
   // left untouched.
   const syncCertToQuotation = (cert, updatedDoc) => {
     const items = allItemsOf(updatedDoc); // originals + add-on items
@@ -294,7 +295,7 @@ function QuotationDocumentInner() {
   // single "Actual Price" column drives the total; otherwise edit each independently.
   const setItemUnitPrice = (cartId, v) => commitDoc({ items: generatedDoc.items.map(it => it.cartId === cartId ? { ...it, price: v, actualPrice: v } : it) });
 
-  // ── Add-on row editing (requirement: add-ons stay editable/removable) ──
+  // â”€â”€ Add-on row editing (requirement: add-ons stay editable/removable) â”€â”€
   // Rows are addressed by (batchId, cartId) so edits land in the right batch;
   // recomputeTotals drops batches whose last item was removed.
   const updateAddonItemField = (batchId, cartId, field, value) => commitDoc({
@@ -316,7 +317,7 @@ function QuotationDocumentInner() {
     setCustomer({ name: '', phone: '', email: '', address: '' });
     setActiveQuotation(null);
     setActiveWarranty(null);
-    setActiveQuotationId?.(null); // end the draft session → next generate mints a fresh id
+    setActiveQuotationId?.(null); // end the draft session â†’ next generate mints a fresh id
     if (setActiveTab) setActiveTab('quotation');
     setCurrentView('quotation_desk');
   };
@@ -345,7 +346,7 @@ function QuotationDocumentInner() {
       const els = collectQuotationPdfEls();
       const pdf = await elementsToPdf(els);
       const r = await finishPdfSave(pdf, qName, dest);
-      showToast(r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded!", "success");
+      showToast(r === 'shared' ? "Choose where to save or share the quotation PDF." : r === 'saved' ? "Quotation PDF saved!" : "Quotation PDF downloaded!", "success");
     } catch (error) {
       console.error("PDF download failed:", error);
       showToast("PDF generation failed.", "error");
@@ -388,7 +389,7 @@ function QuotationDocumentInner() {
   });
 
 
-  // ── Pagination state ──
+  // â”€â”€ Pagination state â”€â”€
   // `pages` = array of pages, each an ordered list of typed segments (see
   // quotationPagination.js). `null` means "measuring pass": render EVERYTHING on
   // one (overflowing, clipped) page so the layout effect below can measure each
@@ -397,7 +398,7 @@ function QuotationDocumentInner() {
   const [qPages, setQPages] = React.useState(null);
   // Bumped once fonts / images finish loading, to re-measure final heights.
   const [layoutTick, setLayoutTick] = React.useState(0);
-  // Re-render budget per content state — stops any measure/assign oscillation
+  // Re-render budget per content state â€” stops any measure/assign oscillation
   // (sub-pixel wrap jitter) from cascading renders.
   const qPagIterRef = React.useRef(0);
 
@@ -408,12 +409,12 @@ function QuotationDocumentInner() {
     setQPages(null);
   }, [generatedDoc?.id]);
 
-  // Re-arm the budget on any content edit or font/image tick — WITHOUT dropping
+  // Re-arm the budget on any content edit or font/image tick â€” WITHOUT dropping
   // back to the single measuring page (no flicker; blocks are re-measured in
   // place across the already-rendered pages). Also re-arm when the active tab
   // changes: if the document was opened on a warranty tab (e.g. via a warranty's
   // "Back" button, which sets activeTab to the warranty number), the quotation
-  // branch never mounted, so its measure pass could not run — switching to the
+  // branch never mounted, so its measure pass could not run â€” switching to the
   // quotation tab must get a fresh budget to paginate from scratch.
   React.useLayoutEffect(() => {
     qPagIterRef.current = 0;
@@ -426,7 +427,7 @@ function QuotationDocumentInner() {
   // so the second pass measures identical values and converges.
   //
   // Fixed per-page chrome (header band, customer block, Terms & Conditions,
-  // validity row, page footer) repeats on EVERY page — its height is subtracted
+  // validity row, page footer) repeats on EVERY page â€” its height is subtracted
   // from the budget; only spec/item rows + totals flow between pages.
   React.useLayoutEffect(() => {
     if (document.body.getAttribute('data-quotation-editing') === 'true') return;
@@ -462,7 +463,7 @@ function QuotationDocumentInner() {
       + (block.validity || 0)
       + (pageFootEl ? pageFootEl.offsetHeight : 0);
     const availH = A4 - 80 - chromeH - 6;
-    if (availH < 100) return; // chrome alone fills the page — keep last assignment
+    if (availH < 100) return; // chrome alone fills the page â€” keep last assignment
 
     const next = paginateQuotation({
       availH,
@@ -479,7 +480,7 @@ function QuotationDocumentInner() {
         addRow: block.addRow || 0,
         payTotals: block.payTotals || 0,
         // When Delivery/Notes are both empty the rows are screen-only edit
-        // affordances (excluded from the PDF) — cost 0 so they can never force
+        // affordances (excluded from the PDF) â€” cost 0 so they can never force
         // an extra page that would export nearly empty.
         deliveryNotes: (doc.delivery || doc.notes) ? (block.deliveryNotes || 0) : 0,
       },
@@ -492,7 +493,7 @@ function QuotationDocumentInner() {
     // `activeTab` is a dependency: the quotation pages (and `qPagesWrapRef`) only
     // mount on the quotation tab, so this pass can only measure once that tab is
     // active. Without it, arriving on a warranty tab and then switching to the
-    // quotation tab leaves `qPages` at its initial measuring value → the page
+    // quotation tab leaves `qPages` at its initial measuring value â†’ the page
     // renders clipped ("not showing fully").
   }, [qPages, generatedDoc, layoutTick, activeTab]);
 
@@ -504,7 +505,7 @@ function QuotationDocumentInner() {
   }, []);
 
   // Re-measure once the pages' images (thumbnails, brand logo, bank QR) finish
-  // loading — the first measure often runs before they have size.
+  // loading â€” the first measure often runs before they have size.
   React.useEffect(() => {
     const root = qPagesWrapRef.current;
     if (!root) return;
@@ -527,36 +528,45 @@ function QuotationDocumentInner() {
     const root = qPagesWrapRef.current;
     if (!root) return;
     const els = Array.from(root.querySelectorAll('.q-sheet-page'));
-    els.forEach(el => {
-      el.style.transform = 'none';
-      el.style.transformOrigin = 'top center';
-      el.style.marginBottom = '0';
-    });
-    if (phoneEditMode || document.body.getAttribute('data-quotation-editing') === 'true') return;
-    // Use the scroll container's width — it's always correctly sized to the
+    const resetPreviewScale = () => {
+      els.forEach(el => {
+        if (el.dataset.qPreviewScale !== '1') {
+          el.style.transform = 'none';
+          el.style.transformOrigin = 'top center';
+          el.style.marginBottom = '0';
+          el.dataset.qPreviewScale = '1';
+        }
+      });
+    };
+    if (phoneEditMode || document.body.getAttribute('data-quotation-editing') === 'true') {
+      resetPreviewScale();
+      return;
+    }
+    // Use the scroll container's width â€” it's always correctly sized to the
     // actual viewport (sidebar excluded). Parent div widths are unreliable here
     // because nested flex/align-items:center contexts can stretch to content width.
     const scroller = root.closest('.main-content-scroll-container');
     const availW = scroller ? scroller.clientWidth : (root.parentElement?.clientWidth ?? root.offsetWidth);
     const s = Math.min(1, availW / 794);
-    if (s < 1) {
-      els.forEach(el => {
-        const naturalH = el.scrollHeight;
-        el.style.transform = `scale(${s})`;
-        el.style.transformOrigin = 'top center';
-        el.style.marginBottom = `${(naturalH * s - naturalH)}px`;
-      });
-    }
+    const scaleKey = String(Math.round(s * 10000) / 10000);
+    els.forEach(el => {
+      if (el.dataset.qPreviewScale === scaleKey) return;
+      const naturalH = el.scrollHeight;
+      el.style.transform = s < 1 ? `scale(${s})` : 'none';
+      el.style.transformOrigin = 'top center';
+      el.style.marginBottom = s < 1 ? `${(naturalH * s - naturalH)}px` : '0';
+      el.dataset.qPreviewScale = scaleKey;
+    });
   }, [generatedDoc, qPages, phoneEditMode]);
 
-  // ── Per-class product image: click-to-upload + Ctrl+V paste ────────────────
+  // â”€â”€ Per-class product image: click-to-upload + Ctrl+V paste â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // `imgTargetKey` is the class image box the user last clicked; Ctrl+V drops a
   // clipboard image onto it. Mirrors the catalogue's upload/paste pattern.
   const [imgTargetKey, setImgTargetKey] = React.useState(null);
   const uploadClassImage = async (e, key) => {
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
-    try { showToast('Uploading image…'); const up = await uploadImage(file); updateClassImage(key, up.url); showToast('Image added'); }
+    try { showToast('Uploading imageâ€¦'); const up = await uploadImage(file); updateClassImage(key, up.url); showToast('Image added'); }
     catch { showToast('Image upload failed. Start the backend and try again.', 'error'); }
   };
   React.useEffect(() => {
@@ -568,7 +578,7 @@ function QuotationDocumentInner() {
       if (!item) return;
       const file = item.getAsFile(); if (!file) return;
       e.preventDefault();
-      try { showToast('Uploading pasted image…'); const up = await uploadImage(file); updateClassImage(imgTargetKey, up.url); showToast('Image added'); }
+      try { showToast('Uploading pasted imageâ€¦'); const up = await uploadImage(file); updateClassImage(imgTargetKey, up.url); showToast('Image added'); }
       catch { showToast('Paste image upload failed', 'error'); }
     };
     window.addEventListener('paste', onPaste);
@@ -584,13 +594,13 @@ function QuotationDocumentInner() {
   const activeTabId = activeTab || 'quotation';
   const activeCert = bundledWarranties.find(w => (w.warrantyNo || w.id) === activeTabId);
 
-  // ── Create Warranty (explicit, from this quotation) ───────────────────────
+  // â”€â”€ Create Warranty (explicit, from this quotation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Warranties are only ever created from a saved quotation. This builds one
   // certificate per applicable warranty template, skipping any that already
   // exist (deterministic ids) so a user's edits to an existing cert are never
   // overwritten. The quotation is already persisted, so each cert is linked.
   const [isCreatingWarranty, setIsCreatingWarranty] = React.useState(false);
-  // Warranty templates consider the WHOLE order — add-on items can introduce
+  // Warranty templates consider the WHOLE order â€” add-on items can introduce
   // new warranty-linked classes (deterministic ids keep existing certs safe).
   const applicableCerts = buildWarrantyCertsForQuotation(
     docHasAddons ? { ...generatedDoc, items: docAllItems } : generatedDoc, data, settings);
@@ -604,7 +614,7 @@ function QuotationDocumentInner() {
       return;
     }
     if (missingCerts.length === 0) {
-      // Everything already exists — just open the first one.
+      // Everything already exists â€” just open the first one.
       setActiveTab(bundledWarranties[0].warrantyNo || bundledWarranties[0].id);
       showToast('Warranty already created', 'info');
       return;
@@ -629,7 +639,7 @@ function QuotationDocumentInner() {
     }
   };
 
-  // ── Share ───────────────────────────────────────────────────────────────
+  // â”€â”€ Share â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const custName = generatedDoc.customer?.name || 'Customer';
   const _wait = (ms) => new Promise(r => setTimeout(r, ms));
   const shareItemStyle = { display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--line-soft)', fontSize: '14px', fontWeight: 500, color: 'var(--ink)', cursor: 'pointer' };
@@ -637,14 +647,13 @@ function QuotationDocumentInner() {
   const shareCurrent = async () => {
     setShareOpen(false); setIsSharing(true);
     try {
-      let file;
+      let r;
       if (activeTabId === 'quotation') {
-        file = await elementsToPdfFile(collectQuotationPdfEls(), quotationFileName(generatedDoc, custName));
+        r = await shareElementsPdf(collectQuotationPdfEls(), quotationFileName(generatedDoc, custName), { title: `NJ India - ${custName}` });
       } else {
-        file = await elementToPdfFile(document.getElementById('warrantyDoc'), warrantyFileName(activeCert || { id: activeTabId }, custName));
+        r = await shareElementPdf(document.getElementById('warrantyDoc'), warrantyFileName(activeCert || { id: activeTabId }, custName), { title: `NJ India - ${custName}` });
       }
-      const r = await shareFiles([file], { title: `NJ India — ${custName}`, text: 'Document from NJ India' });
-      showToast(r === 'downloaded' ? 'Saved — attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
+      showToast(r === 'downloaded' ? 'Saved â€” attach it in WhatsApp/Email' : r === 'cancelled' ? 'Share cancelled' : 'Shared');
     } catch { showToast('Share failed', 'error'); }
     finally { setIsSharing(false); }
   };
@@ -664,8 +673,8 @@ function QuotationDocumentInner() {
         } catch { /* skip a warranty that fails to render; keep the rest */ }
       }
       setActiveTab(prev); await _wait(50);
-      const r = await shareFiles(files, { title: `NJ India — ${custName}`, text: 'Quotation & warranties' });
-      showToast(r === 'downloaded' ? `Saved ${files.length} files — attach them in WhatsApp/Email` : r === 'cancelled' ? 'Share cancelled' : `Shared ${files.length} files`);
+      const r = await shareFiles(files, { title: `NJ India â€” ${custName}`, text: 'Quotation & warranties' });
+      showToast(r === 'downloaded' ? `Saved ${files.length} files â€” attach them in WhatsApp/Email` : r === 'cancelled' ? 'Share cancelled' : `Shared ${files.length} files`);
     } catch { setActiveTab(prev); showToast('Share failed', 'error'); }
     finally { setIsSharing(false); }
   };
@@ -691,7 +700,7 @@ function QuotationDocumentInner() {
       // Identical to the standalone warranty Download and to Share.
       const pdf = await elementToPdf(element);
       const r = await finishPdfSave(pdf, wName, dest);
-      showToast(r === 'saved' ? "Warranty PDF saved!" : "Warranty PDF downloaded successfully!", "success");
+      showToast(r === 'shared' ? "Choose where to save or share the warranty PDF." : r === 'saved' ? "Warranty PDF saved!" : "Warranty PDF downloaded successfully!", "success");
     } catch (error) {
       console.error("PDF download failed:", error);
       showToast("PDF generation failed. Using browser print as fallback.", "error");
@@ -706,7 +715,7 @@ function QuotationDocumentInner() {
     new Set(docAllItems.map(i => i.className))
   ).filter(name => name !== 'Custom' && !name.toLowerCase().includes('tool'));
 
-  // Class-key resolver (maps class name → settings key)
+  // Class-key resolver (maps class name â†’ settings key)
   const resolveClassKey = (className) => {
     const n = className.toLowerCase();
     if (n.includes('laminated') || n.includes('asphalt'))       return 'laminated';
@@ -730,7 +739,7 @@ function QuotationDocumentInner() {
     Array.from(document.querySelectorAll('.q-sheet-page'));
 
   // Resolve the Parent Brand for a class on the quotation. Prefers the per-item
-  // brand snapshot (historical accuracy: rename-proof), then the live class→brand
+  // brand snapshot (historical accuracy: rename-proof), then the live classâ†’brand
   // link. Logo comes from the current brand record. Null when no brand info.
   const getBrandForClass = (className) => {
     const item = docAllItems.find(i => i.className === className && (i.brandId || i.brandName));
@@ -743,7 +752,7 @@ function QuotationDocumentInner() {
   };
 
   // Brand watermark across a set of line items: a single brand renders its faint
-  // logo; two or more brands render the combined "Brand1 × Brand2" text. Shared
+  // logo; two or more brands render the combined "Brand1 Ã— Brand2" text. Shared
   // with the warranty view via ../brands (watermarkBrandForItems).
 
   // Returns guarantee text for a class only when the toggle is on AND text is set.
@@ -753,8 +762,8 @@ function QuotationDocumentInner() {
     return (settings.classGuarantee?.[key] || '').trim();
   };
 
-  // Table 1: Class Description cell. Priority: per-quotation override →
-  // settings.classSpecs (string form) → legacy object form → hard fallback.
+  // Table 1: Class Description cell. Priority: per-quotation override â†’
+  // settings.classSpecs (string form) â†’ legacy object form â†’ hard fallback.
   const getClassSpecRow = (className) => {
     const kwKey = resolveClassKey(className);
     const idKey = data.classes?.find(c => c.name === className)?.id;
@@ -795,8 +804,8 @@ function QuotationDocumentInner() {
       );
     }
 
-    // Hard fallback definitions — product specs only, no warranty/guarantee text
-    // (warranty duration is controlled via Settings → Product Guarantee Text toggle)
+    // Hard fallback definitions â€” product specs only, no warranty/guarantee text
+    // (warranty duration is controlled via Settings â†’ Product Guarantee Text toggle)
     const n = className.toLowerCase();
     if (n.includes('laminated') || n.includes('asphalt')) return (
       <>
@@ -811,8 +820,8 @@ function QuotationDocumentInner() {
       <>
         <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ STONE COATED METAL TILES</div>
         <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.7' }}>
-          One Bundle : 72 sq/ft — 12 Tiles<br />
-          Ridge : 1.3 RFT — 1 tile
+          One Bundle : 72 sq/ft â€” 12 Tiles<br />
+          Ridge : 1.3 RFT â€” 1 tile
         </div>
       </>
     );
@@ -871,7 +880,7 @@ function QuotationDocumentInner() {
       "Payment 50% advance, 50% before dispatch of materials.",
       "Transportation will be at your cost. Item should be unloaded by your workers.",
       "This quote is valid only for 20 days.",
-      "NJ metal tiles — one piece is 6 sq/ft, one bundle is 12 pieces and 72 sq/ft. Ridge 6.6 rft, valley 6.6 rft. Allow 15–20% extra for overlapping patterns.",
+      "NJ metal tiles â€” one piece is 6 sq/ft, one bundle is 12 pieces and 72 sq/ft. Ridge 6.6 rft, valley 6.6 rft. Allow 15â€“20% extra for overlapping patterns.",
       "Prices are inclusive of GST.",
     ];
     if (hasShingles) return [
@@ -890,18 +899,18 @@ function QuotationDocumentInner() {
   };
 
   const TB   = { border: '1.5px solid #1A1A1A' };
-  // Theme color: per-quotation pick → remembered default → original plum.
+  // Theme color: per-quotation pick â†’ remembered default â†’ original plum.
   const PLUM = doc.themeColor || settings.quotationThemeColor || '#8a1856';
-  // Watermark visibility: per-document override → global Settings default → on.
+  // Watermark visibility: per-document override â†’ global Settings default â†’ on.
   // `??` (not `||`) so an explicit per-doc false beats a global true.
   const wmEnabled = doc.watermarkEnabled ?? settings.watermarkEnabled ?? true;
   // Advance Received row only shows when turned on. Default-on for quotations
   // that already carry an advance (set at checkout or before this toggle existed).
   const advanceOn = doc.advanceEnabled ?? ((doc.advanceReceived || 0) > 0);
-  const curr = settings.currencySymbol || '₹';
+  const curr = settings.currencySymbol || 'â‚¹';
 
-  // ── Offer-price helpers (backward compatible) ────────────────────────────
-  // Old quotations have items with only `price` (no actualPrice) → no offer,
+  // â”€â”€ Offer-price helpers (backward compatible) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Old quotations have items with only `price` (no actualPrice) â†’ no offer,
   // so the document renders exactly as it always did.
   const hasOffer = (item) => item.actualPrice != null && item.actualPrice > 0 && item.price < item.actualPrice;
   const rowActualUnit = (item) => (hasOffer(item) ? item.actualPrice : item.price);
@@ -911,7 +920,7 @@ function QuotationDocumentInner() {
   const docSavings = doc.productSavings
     ?? Math.max(0, docActualSubtotal - doc.subtotal);
 
-  // Terms source: per-quotation `terms` array (CHANGE 2/3) → legacy per-class merge.
+  // Terms source: per-quotation `terms` array (CHANGE 2/3) â†’ legacy per-class merge.
   // Quotations created after this feature always carry a `terms` array (even if edited
   // empty); only older quotations without the key fall back to the per-class merge.
   const quotationTerms = Array.isArray(doc.terms)
@@ -1090,10 +1099,10 @@ function QuotationDocumentInner() {
           font-family: 'Times New Roman', Times, Georgia, serif;
         }
 
-        /* ── Opening ── */
+        /* â”€â”€ Opening â”€â”€ */
         .warranty-doc .wd-opening { font-size: 11.5pt; line-height: 1.5; margin-bottom: 12px; text-align: justify; }
         .warranty-doc .wd-opening em { font-style: italic; display: block; margin-bottom: 6px; font-size: 12pt; }
-        /* ── Sections ── */
+        /* â”€â”€ Sections â”€â”€ */
         .warranty-doc .wd-section { margin-bottom: 8px; page-break-inside: avoid; }
         .warranty-doc .wd-section-head { font-size: 10.5pt; font-weight: 700; letter-spacing: 0.06em; color: #111; margin: 0 0 4px; padding-bottom: 2px; border-bottom: 1.5px solid #aaa; font-family: 'Times New Roman', Times, Georgia, serif; }
         .warranty-doc .wd-num { display: inline-flex; width: 17px; height: 17px; align-items: center; justify-content: center; background: #111; color: #fff; border-radius: 3px; font-size: 8pt; font-weight: 900; flex-shrink: 0; font-family: 'Times New Roman', Times, Georgia, serif; letter-spacing: 0; }
@@ -1101,11 +1110,11 @@ function QuotationDocumentInner() {
         .warranty-doc .wd-body p { margin: 0 0 4px; text-align: justify; }
         .warranty-doc .wd-body ul { margin: 4px 0 0; padding-left: 18px; }
         .warranty-doc .wd-body li { margin-bottom: 3px; font-size: 10.5pt; text-align: justify; line-height: 1.35; }
-        /* ── Duration callout ── */
+        /* â”€â”€ Duration callout â”€â”€ */
         .warranty-doc .wd-duration { border: 1.5px solid #8b1a1a; border-left: 5px solid #8b1a1a; padding: 5px 14px; margin: 6px 0 8px; background: #fef9f9; }
         .warranty-doc .wd-duration-label { font-size: 8.5pt; letter-spacing: 0.08em; color: #8b1a1a; font-weight: 700; display: block; margin-bottom: 2px; font-family: 'Times New Roman', Times, Georgia, serif; }
         .warranty-doc .wd-duration-value { font-size: 13pt; font-weight: 700; color: #8b1a1a; font-family: 'Playfair Display', Georgia, serif; }
-        /* ── Series / Liability table ── */
+        /* â”€â”€ Series / Liability table â”€â”€ */
         .warranty-doc .wd-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9.5pt; }
         .warranty-doc .wd-table th { background: #111; color: #fff; padding: 5px 8px; text-align: left; font-size: 9pt; letter-spacing: 0.04em; font-family: 'Times New Roman', Times, Georgia, serif; border: 1px solid #111; }
         .warranty-doc .wd-table td { padding: 5px 8px; border: 1px solid #ddd; vertical-align: middle; }
@@ -1115,7 +1124,7 @@ function QuotationDocumentInner() {
         .warranty-doc .wd-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
         .warranty-doc .wd-iso-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
         .warranty-doc .wd-iso-badge { border: 1.5px solid #111; border-radius: 4px; padding: 3px 8px; font-size: 8pt; font-weight: 700; letter-spacing: 0.06em; font-family: 'Times New Roman', Times, Georgia, serif; color: #111; background: #f8f8f8; }
-        /* ── Certificate details (fill-in style) ── */
+        /* â”€â”€ Certificate details (fill-in style) â”€â”€ */
         .warranty-doc .wd-cert-block { margin-top: 8px; padding-top: 8px; border-top: 2px solid #111; }
         .warranty-doc .wd-cert-title { font-size: 11pt; font-weight: 700; letter-spacing: 0.06em; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #aaa; font-family: 'Times New Roman', Times, Georgia, serif; color: #111; }
         .warranty-doc .wd-cert-row { display: flex; align-items: baseline; padding: 4px 0; border-bottom: 1px dotted #ccc; font-size: 11.5pt; gap: 10px; }
@@ -1175,7 +1184,7 @@ function QuotationDocumentInner() {
             background: #ffffff !important;
           }
           /* Quotation pages are FIXED A4 sheets: print one per page, breaking
-             cleanly between pages — matching Download/Share exactly. The zoom
+             cleanly between pages â€” matching Download/Share exactly. The zoom
              fits the 794px sheet into the printable width inside the @page
              margins (Chromium honours zoom in print; this app runs in WebView2). */
           .q-pages { gap: 0 !important; margin: 0 !important; }
@@ -1216,7 +1225,7 @@ function QuotationDocumentInner() {
         }
       `}} />
 
-      {/* ── TOP: Document Hub Tab Switching System ── */}
+      {/* â”€â”€ TOP: Document Hub Tab Switching System â”€â”€ */}
       <div className="document-tab-bar" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px' }}>
         {documentTabs.map(tab => {
           const isActive = activeTabId === tab.id;
@@ -1247,17 +1256,17 @@ function QuotationDocumentInner() {
         })}
       </div>
 
-      {/* ── Document Hub Page Layout dispatcher ── */}
+      {/* â”€â”€ Document Hub Page Layout dispatcher â”€â”€ */}
       <div className="document-hub-layout" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px' }}>
         
         {/* Certificate hint removed - Document is read-only in this view */}
 
-        {/* ── Document Preview & Actions column ── */}
+        {/* â”€â”€ Document Preview & Actions column â”€â”€ */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%' }}>
           
           {/* Dispatcher Actions Bar */}
           {activeTabId === 'quotation' ? (
-            /* ── Actions Bar for Quotation Tab ── */
+            /* â”€â”€ Actions Bar for Quotation Tab â”€â”€ */
             <>
             <div className="actions-bar document-actions" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
               <button onClick={() => loadQuotationForEdit(generatedDoc)} className="hover-lift doc-action"
@@ -1266,7 +1275,7 @@ function QuotationDocumentInner() {
               </button>
               {!generatedDoc.warrantyOnly && (
                 <button onClick={() => startAddonOrder?.(generatedDoc)} className="hover-lift doc-action"
-                  title="Add-on Order: the customer bought more later? Add the new products to this same quotation — the original items and amounts stay unchanged."
+                  title="Add-on Order: the customer bought more later? Add the new products to this same quotation â€” the original items and amounts stay unchanged."
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#FDF6EC', color: '#b45309', border: '1px solid #b45309', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
                   <PackagePlus size={18} /> Add More
                 </button>
@@ -1284,7 +1293,7 @@ function QuotationDocumentInner() {
               <div className="doc-share" style={{ position: 'relative' }}>
                 <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift doc-action is-share"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer', opacity: isSharing ? 0.7 : 1 }}>
-                  <Share2 size={18} /> {isSharing ? 'Preparing…' : 'Share'}
+                  <Share2 size={18} /> {isSharing ? 'Preparingâ€¦' : 'Share'}
                 </button>
                 {shareOpen && (<>
                   <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />
@@ -1295,7 +1304,7 @@ function QuotationDocumentInner() {
                 </>)}
               </div>
 
-              {/* ── Create / View Warranty ── */}
+              {/* â”€â”€ Create / View Warranty â”€â”€ */}
               {bundledWarranties.length > 0 ? (
                 <>
                   <div className="doc-warranty-status" style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '0 14px', color: '#15803d', fontWeight: 700, fontSize: '14px', whiteSpace: 'nowrap' }}
@@ -1309,14 +1318,14 @@ function QuotationDocumentInner() {
                   {missingCerts.length > 0 && (
                     <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift doc-action"
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
-                      <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Remaining'}
+                      <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creatingâ€¦' : 'Create Remaining'}
                     </button>
                   )}
                 </>
               ) : applicableCerts.length > 0 ? (
                 <button onClick={handleCreateWarranty} disabled={isCreatingWarranty} className="hover-lift doc-action"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#15803d', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: isCreatingWarranty ? 'not-allowed' : 'pointer', opacity: isCreatingWarranty ? 0.7 : 1 }}>
-                  <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creating…' : 'Create Warranty'}
+                  <ShieldCheck size={18} /> {isCreatingWarranty ? 'Creatingâ€¦' : 'Create Warranty'}
                 </button>
               ) : null}
 
@@ -1328,7 +1337,7 @@ function QuotationDocumentInner() {
 
             {/* Inline-edit hint (hidden in print/PDF) */}
             <div className="q-edit-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', padding: '10px 14px', background: 'rgba(138,24,86,0.05)', border: '1px solid rgba(138,24,86,0.18)', borderRadius: '8px', fontSize: '12px', color: '#8a1856', fontWeight: 600, width: '100%', maxWidth: '860px' }}>
-              <Edit3 size={13} /> <span><strong>Tap any field to edit</strong> — the document expands automatically on phone. Or use <strong>Edit Quotation</strong> above to edit in the Quotation Desk.</span>
+              <Edit3 size={13} /> <span><strong>Tap any field to edit</strong> â€” the document expands automatically on phone. Or use <strong>Edit Quotation</strong> above to edit in the Quotation Desk.</span>
             </div>
             <button
               className={`q-phone-edit-btn${phoneEditMode ? ' is-active' : ''}`}
@@ -1337,8 +1346,8 @@ function QuotationDocumentInner() {
               {phoneEditMode ? <><Minimize2 size={14}/> Collapse Preview</> : <><Maximize2 size={14}/> Expand to Edit Fields</>}
             </button>
 
-            {/* ── Document options: watermark toggle + design color (screen-only;
-                   sits outside #quotationSheet so it never reaches the PDF) ── */}
+            {/* â”€â”€ Document options: watermark toggle + design color (screen-only;
+                   sits outside #quotationSheet so it never reaches the PDF) â”€â”€ */}
             <div className="actions-bar" style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '10px 14px', background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: '8px', width: '100%', maxWidth: '860px', flexWrap: 'wrap' }}>
               <button onClick={() => commitDoc({ watermarkEnabled: !wmEnabled })} className="hover-lift"
                 title="Show or hide the faint brand-name watermark on this quotation"
@@ -1375,7 +1384,7 @@ function QuotationDocumentInner() {
             </div>
             </>
           ) : (
-            /* ── Actions Bar for Warranty Tab ── */
+            /* â”€â”€ Actions Bar for Warranty Tab â”€â”€ */
             <div className="actions-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '794px' }}>
               <button onClick={() => setActiveTab('quotation')} className="hover-lift"
                 style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer' }}>
@@ -1401,7 +1410,7 @@ function QuotationDocumentInner() {
               <div style={{ position: 'relative' }}>
                 <button onClick={() => setShareOpen(o => !o)} disabled={isSharing} className="hover-lift"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 'var(--radius-full)', fontWeight: 600, cursor: 'pointer', opacity: isSharing ? 0.7 : 1 }}>
-                  <Share2 size={18} /> {isSharing ? 'Preparing…' : 'Share'}
+                  <Share2 size={18} /> {isSharing ? 'Preparingâ€¦' : 'Share'}
                 </button>
                 {shareOpen && (<>
                   <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />
@@ -1429,24 +1438,24 @@ function QuotationDocumentInner() {
             </div>
           )}
 
-          {/* ── Document Dispatcher Render Preview Block ── */}
+          {/* â”€â”€ Document Dispatcher Render Preview Block â”€â”€ */}
           {activeTabId === 'quotation' ? (
             <>
-            {/* ── VIEW A: PRINTABLE QUOTATION SHEET (inline editable) ── */}
+            {/* â”€â”€ VIEW A: PRINTABLE QUOTATION SHEET (inline editable) â”€â”€ */}
             {(() => {
-              // All sizes are FIXED — QFIT resolves to plain px because `--q-fit`
+              // All sizes are FIXED â€” QFIT resolves to plain px because `--q-fit`
               // is never set on the quotation. The body is split into typed
               // segments; the paginator assigns them to as many A4 pages as
               // needed (see the measure-and-assign effect + quotationPagination).
               const D = QD;
               const showSpec = settings.showClassSpecBox !== false && tileClasses.length > 0;
 
-              // ── Fixed header band — repeated on every page ──
+              // â”€â”€ Fixed header band â€” repeated on every page â”€â”€
               // All branding comes from the quotation's PARENT BRAND `profile`
               // (see companyProfileForBrand). The hardcoded NJ strings survive
               // only on the no-brand/global-fallback path; a non-NJ brand shows
               // ONLY its own filled-in fields. Contact lines render
-              // conditionally — the paginator measures the band live, so a
+              // conditionally â€” the paginator measures the band live, so a
               // shorter/taller header is handled automatically.
               const brandLogoSrc = docBrand?.logo ? mediaUrl(docBrand.logo)
                 : (njBranded && settings.quotationLogo) ? settings.quotationLogo : '';
@@ -1497,7 +1506,7 @@ function QuotationDocumentInner() {
                     {profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')}
                   </h1>
                   <div style={{ fontSize: HDR.info, lineHeight: HDR.lh, color: '#555' }}>
-                    {(profile.address || (profile.isGlobalFallback ? 'KNH Building, Neelithod Bridge, Parakkal\nRamanattukara PO, Kozhikode — 673633' : ''))
+                    {(profile.address || (profile.isGlobalFallback ? 'KNH Building, Neelithod Bridge, Parakkal\nRamanattukara PO, Kozhikode â€” 673633' : ''))
                       .split('\n').filter(Boolean).map((l, i) => <span key={i}>{l}<br /></span>)}
                     {(headerContact.length > 0 || profile.isGlobalFallback) && (
                       <span>
@@ -1518,7 +1527,7 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── Customer + Date (atomic block) ──
+              // â”€â”€ Customer + Date (atomic block) â”€â”€
               const renderCust = () => (
               <div data-q-block="cust" style={{ display: 'flow-root', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px', fontSize: D.tcFs }}>
@@ -1537,7 +1546,7 @@ function QuotationDocumentInner() {
                 <div style={{ textAlign: 'right', fontSize: D.tcFs, fontWeight: '700' }}>
                   <div>Date: <EditableCell value={doc.date} onSave={v => updateField('date', v)} placeholder="date" /></div>
                   <div style={{ marginTop: '2px', color: '#555' }}>Manager: <EditableCell value={doc.managerName} onSave={v => updateField('managerName', v)} placeholder="manager" /></div>
-                  {/* Auto-generated order identifier (read-only) — identifies this quotation/customer. */}
+                  {/* Auto-generated order identifier (read-only) â€” identifies this quotation/customer. */}
                   <div style={{ marginTop: '2px', color: '#555' }}>Quotation No: {doc.id}</div>
                 </div>
               </div>
@@ -1547,8 +1556,8 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── TABLE 1 — PRODUCT DETAILS WITH IMAGE (class rows [from, to);
-              //    the header repeats on every page a chunk lands on) ──
+              // â”€â”€ TABLE 1 â€” PRODUCT DETAILS WITH IMAGE (class rows [from, to);
+              //    the header repeats on every page a chunk lands on) â”€â”€
               const renderSpec = (from, to) => (
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb }}>
                   <thead data-q-thead="spec">
@@ -1569,7 +1578,7 @@ function QuotationDocumentInner() {
                       const brandColor = itemClass ? itemClass.color : PLUM;
                       const imgKey = classDescKey(className);
                       // Product image, in priority: a per-quotation image the user added
-                      // here → an item in this quotation that carries one. We intentionally
+                      // here â†’ an item in this quotation that carries one. We intentionally
                       // do NOT fall back to the class's catalogue logo (that was rendering
                       // the small NJ mark); a missing image shows the placeholder instead.
                       const itemImg = doc.items.find(it => it.className === className && it.image)?.image;
@@ -1626,7 +1635,7 @@ function QuotationDocumentInner() {
                           <td style={{ ...TB, padding: '6px', width: '35%', verticalAlign: 'middle', background: '#FAFAFA', textAlign: 'center' }}>
                             <div
                               onClick={() => setImgTargetKey(imgKey)}
-                              title="Click, then Ctrl+V to paste — or use Add"
+                              title="Click, then Ctrl+V to paste â€” or use Add"
                               style={{ position: 'relative', width: '100%', height: D.specH, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: '6px', border: '1px solid #E5E7EB', cursor: 'pointer' }}>
                               {imgSrc ? (
                                 <img src={imgSrc} alt={className} crossOrigin="anonymous"
@@ -1647,7 +1656,7 @@ function QuotationDocumentInner() {
                                 <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => uploadClassImage(e, imgKey)} />
                               </label>
 
-                              {/* Remove (edit-only) — clears the per-quotation image */}
+                              {/* Remove (edit-only) â€” clears the per-quotation image */}
                               {doc.classImages?.[imgKey] && (
                                 <button className="q-edit-only" data-html2canvas-ignore="true"
                                   onClick={e => { e.stopPropagation(); updateClassImage(imgKey, ''); }}
@@ -1673,8 +1682,8 @@ function QuotationDocumentInner() {
                 </table>
               );
 
-              // ── TABLE 2 — ITEMISED ESTIMATE (item rows [from, to); the header
-              //    repeats on every page a chunk lands on) ──
+              // â”€â”€ TABLE 2 â€” ITEMISED ESTIMATE (item rows [from, to); the header
+              //    repeats on every page a chunk lands on) â”€â”€
               const renderItems = (from, to) => {
                 // Fixed thumbnail size (QFIT resolves to plain px now).
                 const thumb = 46;
@@ -1693,7 +1702,7 @@ function QuotationDocumentInner() {
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: D.tblMb, tableLayout: 'fixed' }}>
                 {/* Explicit column widths + table-layout:fixed keep every row's
                     height identical no matter which page's table instance hosts
-                    it — required for stable pagination measurements. */}
+                    it â€” required for stable pagination measurements. */}
                 <colgroup>
                   {cols.map(col => <col key={col.key} style={col.w === 'auto' ? undefined : { width: col.w }} />)}
                 </colgroup>
@@ -1743,28 +1752,28 @@ function QuotationDocumentInner() {
                           <EditableCell value={item.name} onSave={v => updateItemField(item.cartId, 'name', v)} placeholder="item name" style={{ display: 'block', width: '100%' }} />
                         </div>
                         <div style={{ fontSize: D.subFont, color: '#777', fontWeight: '500', marginTop: '1px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` · ${item.color}` : ''}</span>
+                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` Â· ${item.color}` : ''}</span>
                           <button className="q-edit-only" data-html2canvas-ignore="true" onClick={() => removeItemRow(item.cartId)} title="Remove this line"
-                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0 }}>✕ remove</button>
+                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0 }}>âœ• remove</button>
                         </div>
                       </td>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '700', fontSize: D.rowFont, color: '#1A1A1A' }}>
                         <EditableCell value={item.qty} numeric onSave={v => updateItemField(item.cartId, 'qty', Math.max(0, v))} style={{ width: '48px', textAlign: 'center' }} />
                         &nbsp;<span style={{ fontSize: D.subFont, fontWeight: '500', color: '#666' }}>{item.unit}</span>
                       </td>
-                      {/* ACTUAL PRICE — struck through when this row has an offer */}
+                      {/* ACTUAL PRICE â€” struck through when this row has an offer */}
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: offer ? '500' : '600', fontSize: D.rowFont, color: offer ? '#999' : '#333', fontFamily: 'var(--font-mono)', textDecoration: offer ? 'line-through' : 'none' }}>
                         {curr}<EditableCell value={actualUnit} numeric
                           onSave={v => (docAnyOffer ? updateItemField(item.cartId, 'actualPrice', v) : setItemUnitPrice(item.cartId, v))}
                           renderValue={() => actualUnit.toLocaleString('en-IN')}
                           style={{ width: '70px', textAlign: 'right', textDecoration: 'inherit' }} />
                       </td>
-                      {/* OFFER PRICE — only when the column exists */}
+                      {/* OFFER PRICE â€” only when the column exists */}
                       {docAnyOffer && (
                         <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
                           {offer
                             ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })} style={{ width: '70px', textAlign: 'right' }} /></>
-                            : <EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
+                            : <EditableCell value={item.price} numeric onSave={v => updateItemField(item.cartId, 'price', v)} renderValue={() => 'â€”'} style={{ color: '#CCC' }} />}
                         </td>
                       )}
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: '#1A1A1A', fontFamily: 'var(--font-mono)' }}>
@@ -1778,11 +1787,11 @@ function QuotationDocumentInner() {
                 );
               };
 
-              // ── TABLE 3 — ADD-ON PRODUCTS (rows [from, to); same fixed-layout
+              // â”€â”€ TABLE 3 â€” ADD-ON PRODUCTS (rows [from, to); same fixed-layout
               //    discipline as the items table so pagination measurements stay
               //    stable). Rendered only when add-on batches exist; rows carry an
-              //    "Added Later · date" badge and SI NO continues from the
-              //    original table. Edits address (batchId, cartId). ──
+              //    "Added Later Â· date" badge and SI NO continues from the
+              //    original table. Edits address (batchId, cartId). â”€â”€
               const renderAddonItems = (from, to) => {
                 const thumb = 46;
                 const AMBER = '#b45309';
@@ -1800,7 +1809,7 @@ function QuotationDocumentInner() {
                 <colgroup>
                   {cols.map(col => <col key={col.key} style={col.w === 'auto' ? undefined : { width: col.w }} />)}
                 </colgroup>
-                {/* Single banner row only — the column grid matches the items
+                {/* Single banner row only â€” the column grid matches the items
                     table directly above, so repeating its column labels would
                     just eat page height. */}
                 <thead data-q-thead="addons">
@@ -1810,7 +1819,7 @@ function QuotationDocumentInner() {
                       padding: `${QFIT(11)} ${QFIT(10)}`, textAlign: 'left', fontWeight: '800',
                       fontSize: D.subFont, letterSpacing: '0.08em', textTransform: 'uppercase',
                     }}>
-                      Add-on Products — Added Later
+                      Add-on Products â€” Added Later
                     </th>
                   </tr>
                 </thead>
@@ -1847,16 +1856,16 @@ function QuotationDocumentInner() {
                           <EditableCell value={item.name} onSave={v => updateAddonItemField(item._batchId, item.cartId, 'name', v)} placeholder="item name" style={{ display: 'block', width: '100%' }} />
                         </div>
                         {/* One compact sub-line (matches the items table's row
-                            height): class · color, then the Added-Later date in
+                            height): class Â· color, then the Added-Later date in
                             amber. Full date+time stays in the tooltip + data. */}
                         <div style={{ fontSize: D.subFont, color: '#777', fontWeight: '500', marginTop: '1px' }}>
-                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` · ${item.color}` : ''}</span>
-                          <span title={item._addedAt ? `Added Later · ${formatAddedAt(item._addedAt)}` : 'Added Later'}
+                          <span>{item.className}{item.color && item.color !== 'N/A' && item.color !== 'Standard' ? ` Â· ${item.color}` : ''}</span>
+                          <span title={item._addedAt ? `Added Later Â· ${formatAddedAt(item._addedAt)}` : 'Added Later'}
                             style={{ color: AMBER, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                            {' '}· Added {item._addedAt ? new Date(item._addedAt).toLocaleDateString('en-GB') : 'Later'}
+                            {' '}Â· Added {item._addedAt ? new Date(item._addedAt).toLocaleDateString('en-GB') : 'Later'}
                           </span>
                           <button className="q-edit-only" data-html2canvas-ignore="true" onClick={() => removeAddonItemRow(item._batchId, item.cartId)} title="Remove this add-on line"
-                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0, marginLeft: '6px' }}>✕ remove</button>
+                            style={{ background: 'transparent', border: 'none', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: D.subFont, padding: 0, marginLeft: '6px' }}>âœ• remove</button>
                         </div>
                       </td>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '700', fontSize: D.rowFont, color: '#1A1A1A' }}>
@@ -1873,7 +1882,7 @@ function QuotationDocumentInner() {
                         <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: offer ? '#16a34a' : '#CCC', fontFamily: 'var(--font-mono)' }}>
                           {offer
                             ? <>{curr}<EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => item.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })} style={{ width: '70px', textAlign: 'right' }} /></>
-                            : <EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => '—'} style={{ color: '#CCC' }} />}
+                            : <EditableCell value={item.price} numeric onSave={v => updateAddonItemField(item._batchId, item.cartId, 'price', v)} renderValue={() => 'â€”'} style={{ color: '#CCC' }} />}
                         </td>
                       )}
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'right', fontWeight: '800', fontSize: D.rowFont, color: '#1A1A1A', fontFamily: 'var(--font-mono)' }}>
@@ -1887,7 +1896,7 @@ function QuotationDocumentInner() {
                 );
               };
 
-              // ── Add line item (edit affordance, hidden in print/PDF) ──
+              // â”€â”€ Add line item (edit affordance, hidden in print/PDF) â”€â”€
               const renderAddRow = () => (
               <div className="q-edit-only" data-q-block="addRow" data-html2canvas-ignore="true" style={{ display: 'flow-root' }}>
                 <div style={{ marginTop: `calc(-1 * ${D.tblMb})`, marginBottom: D.tblMb }}>
@@ -1899,12 +1908,12 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── PAYMENT (left, plain text) + TOTALS (right) — atomic, never split ──
+              // â”€â”€ PAYMENT (left, plain text) + TOTALS (right) â€” atomic, never split â”€â”€
               const renderPayTotals = () => (
               <div data-q-block="payTotals" style={{ display: 'flow-root' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: QFIT(28), marginBottom: D.tblMb }}>
 
-                {/* Payment block (left) — plain text, no box. Structured bank → legacy → picker. */}
+                {/* Payment block (left) â€” plain text, no box. Structured bank â†’ legacy â†’ picker. */}
                 <div style={{ flex: '1 1 auto', minWidth: 0, paddingRight: '8px' }}>
                   {(() => {
                     const bankPicker = (settings.banks || []).length > 0 && (
@@ -1912,7 +1921,7 @@ function QuotationDocumentInner() {
                         onChange={e => { const b = (settings.banks || []).find(x => x.id === e.target.value) || null; commitDoc({ bank: b ? { ...b } : null, bankId: e.target.value || '' }); }}
                         style={{ marginTop: '6px', fontSize: '11px', padding: '4px 6px', border: '1px solid var(--line)', borderRadius: '4px', background: '#fff', color: '#444', cursor: 'pointer' }}>
                         <option value="">No bank selected</option>
-                        {switchableBanks.map(b => <option key={b.id} value={b.id}>{b.bankName || 'Bank'}{b.accountNumber ? ` · ${b.accountNumber}` : ''}</option>)}
+                        {switchableBanks.map(b => <option key={b.id} value={b.id}>{b.bankName || 'Bank'}{b.accountNumber ? ` Â· ${b.accountNumber}` : ''}</option>)}
                       </select>
                     );
                     if (docBank) {
@@ -1937,7 +1946,7 @@ function QuotationDocumentInner() {
                                 </span>
                               </div>
                             )}
-                            {/* Label/value grid — values align in one clean column */}
+                            {/* Label/value grid â€” values align in one clean column */}
                             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: '10px', rowGap: '1px', fontSize: D.tcFs, lineHeight: D.tcLineH }}>
                               {rows.map(([fkey, label, value]) => (
                                 <React.Fragment key={fkey}>
@@ -1973,7 +1982,7 @@ function QuotationDocumentInner() {
                 {/* Totals block (right) */}
                 <div style={{ minWidth: QFIT(280), flexShrink: 0, border: `1.5px solid #1A1A1A`, borderRadius: '4px', overflow: 'hidden' }}>
 
-                  {/* Actual Total + You Save — only when product offers exist */}
+                  {/* Actual Total + You Save â€” only when product offers exist */}
                   {docAnyOffer && docSavings > 0 && (
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
@@ -2009,7 +2018,7 @@ function QuotationDocumentInner() {
                     </div>
                   )}
 
-                  {/* Add-on breakdown — Original vs Add-on, only when add-ons exist */}
+                  {/* Add-on breakdown â€” Original vs Add-on, only when add-ons exist */}
                   {docHasAddons && (
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(9)} ${QFIT(14)}`, background: '#F9F9F9', borderBottom: '1px solid #E5E7EB' }}>
@@ -2036,7 +2045,7 @@ function QuotationDocumentInner() {
                     <span style={{ fontSize: QFIT(16), fontWeight: '900', color: '#FFFFFF', fontFamily: 'var(--font-mono)', marginLeft: '24px' }}>{curr}{doc.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
 
-                  {/* Advance Received — only when turned on (Advance pill above).
+                  {/* Advance Received â€” only when turned on (Advance pill above).
                       When on but still 0, the row is edit-only (visible on screen,
                       excluded from PDF/print) so the amount can be typed inline; once
                       > 0 it prints. Same edit-only gating as Delivery/Notes. */}
@@ -2058,7 +2067,7 @@ function QuotationDocumentInner() {
                   </div>
                   )}
 
-                  {/* Balance Due — the figure the customer still owes; only when on and an advance exists */}
+                  {/* Balance Due â€” the figure the customer still owes; only when on and an advance exists */}
                   {advanceOn && (doc.advanceReceived || 0) > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${QFIT(12)} ${QFIT(14)}`, background: PLUM }}>
                       <span style={{ fontSize: D.rowFont, fontWeight: '900', color: '#FFFFFF', letterSpacing: '0.06em', textTransform: 'uppercase' }}>BALANCE DUE</span>
@@ -2071,7 +2080,7 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── Delivery / Notes (optional, per-quotation) — atomic ──
+              // â”€â”€ Delivery / Notes (optional, per-quotation) â€” atomic â”€â”€
               // Filled rows print; empty rows are edit-only (excluded from PDF).
               const renderDeliveryNotes = () => (
               <div data-q-block="deliveryNotes" style={{ display: 'flow-root' }}>
@@ -2088,10 +2097,10 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── Terms and Conditions — FIXED on every page (2-column, full
+              // â”€â”€ Terms and Conditions â€” FIXED on every page (2-column, full
               //    list). Every page renders the SAME shared terms via the same
               //    EditableCell, so editing the terms on any page updates all
-              //    pages at once. ──
+              //    pages at once. â”€â”€
               const renderTerms = () => {
                 const terms = quotationTerms;
                 const mid = Math.ceil(terms.length / 2);
@@ -2132,7 +2141,7 @@ function QuotationDocumentInner() {
                 );
               };
 
-              // ── Validity / footer note row (atomic; last content block) ──
+              // â”€â”€ Validity / footer note row (atomic; last content block) â”€â”€
               const renderValidity = () => (
               <div data-q-block="validity" style={{ display: 'flow-root', flexShrink: 0 }}>
               <div style={{
@@ -2144,9 +2153,9 @@ function QuotationDocumentInner() {
               </div>
               );
 
-              // ── Segment dispatcher + page assembly. Only these segments FLOW
-              //    between pages — header band, customer block, terms, validity
-              //    and page footer are fixed chrome rendered on every page. ──
+              // â”€â”€ Segment dispatcher + page assembly. Only these segments FLOW
+              //    between pages â€” header band, customer block, terms, validity
+              //    and page footer are fixed chrome rendered on every page. â”€â”€
               const renderSegment = (seg, idx) => {
                 switch (seg.type) {
                   case 'spec':          return showSpec ? <React.Fragment key={idx}>{renderSpec(seg.from, seg.to)}</React.Fragment> : null;
@@ -2189,28 +2198,28 @@ function QuotationDocumentInner() {
                   border: '1px solid #E5E7EB', position: 'relative', flexShrink: 0,
                 }}>
 
-                {/* ── Brand watermark (faint, behind content; on every page) ── */}
+                {/* â”€â”€ Brand watermark (faint, behind content; on every page) â”€â”€ */}
                 {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(docAllItems, data)} fallbackText="" />}
 
-                {/* ── HEADER BAND (fixed, every page) ── */}
+                {/* â”€â”€ HEADER BAND (fixed, every page) â”€â”€ */}
                 {headerBand()}
 
-                {/* ── CUSTOMER + DATE (fixed, every page — shared state, so an
-                       edit on any page reflects on all pages) ── */}
+                {/* â”€â”€ CUSTOMER + DATE (fixed, every page â€” shared state, so an
+                       edit on any page reflects on all pages) â”€â”€ */}
                 {renderCust()}
 
-                {/* ── BODY — this page's flowing segments, at fixed sizes ── */}
+                {/* â”€â”€ BODY â€” this page's flowing segments, at fixed sizes â”€â”€ */}
                 <div className="q-body" style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
                   {segs.map(renderSegment)}
                 </div>
 
-                {/* ── TERMS & CONDITIONS + VALIDITY (fixed, every page) ── */}
+                {/* â”€â”€ TERMS & CONDITIONS + VALIDITY (fixed, every page) â”€â”€ */}
                 {renderTerms()}
                 {renderValidity()}
 
-                {/* ── PAGE FOOTER (every page) ── */}
+                {/* â”€â”€ PAGE FOOTER (every page) â”€â”€ */}
                 <div className="q-page-footer" style={{ flexShrink: 0, borderTop: '1px solid #E5E7EB', paddingTop: '6px', fontSize: '10px', fontWeight: 600, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')} — Quotation {doc.id}</span>
+                  <span>{profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')} â€” Quotation {doc.id}</span>
                   <span>Page {pi + 1} of {pageList.length}</span>
                 </div>
               </div>
@@ -2222,7 +2231,7 @@ function QuotationDocumentInner() {
 
             </>
           ) : (() => {
-            /* ── VIEW B: WARRANTY CERTIFICATE (numbered sections matching physical PDF) ── */
+            /* â”€â”€ VIEW B: WARRANTY CERTIFICATE (numbered sections matching physical PDF) â”€â”€ */
             // Resolve template from current config so structural fields (the
             // warranty-period series table, heatout table) are never missing on
             // older saved certificates. Content (sections) prefers the saved cert.
@@ -2242,7 +2251,10 @@ function QuotationDocumentInner() {
             // tables, duration) so template edits always reflect here; fall back to
             // the frozen snapshot only when the template was deleted. (Same rule as
             // WarrantyDocument.) Per-customer data stays in activeCert.certData.
-            const tmpl = _matched ? { ..._matched } : { ..._stored };
+            const _defTpl = DEFAULT_DATA.warranties.find(w => w.id === (_matched?.id || _tid)) || {};
+            const tmpl = _matched
+              ? { ..._defTpl, ..._matched, seriesTable: _matched.seriesTable?.length ? _matched.seriesTable : _defTpl.seriesTable || [], liabilityTable: _matched.liabilityTable?.length ? _matched.liabilityTable : _defTpl.liabilityTable || [] }
+              : { ..._stored };
             if (!tmpl.id) tmpl.id = _tid || _stored.id;
             const cd = activeCert.certData || {};
 

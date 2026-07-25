@@ -93,6 +93,7 @@ export function AppProvider({ children }) {
 
   const [data, setData] = useState(DEFAULT_DATA);
   const [backendOffline, setBackendOffline] = useState(false);
+  const [backendRetrying, setBackendRetrying] = useState(false);
   const [backupStatus, setBackupStatus] = useState(null);
   const [reminderDismissed, setReminderDismissed] = useState(false);
 
@@ -198,22 +199,31 @@ export function AppProvider({ children }) {
         // of a 3-second toast, so seed data is never mistaken for real data or
         // saved over the real data.
         setBackendOffline(true);
-        showToast("Backend offline — your data is NOT loaded", "error");
       }
     };
     _loadData.current = loadData;
     loadData();
   }, []);
 
-  // Auto-reconnect: retry when network comes back online or the user returns
-  // to the app (tab/app becomes visible) after a connection drop.
+  // Auto-reconnect: retry on network events, tab focus, AND every 10s.
+  // The interval means the app silently heals within 10s of EC2 recovering
+  // without the user needing to switch tabs or reload.
   useEffect(() => {
-    if (!backendOffline) return;
-    const retry = () => _loadData.current?.();
-    const onVisible = () => { if (!document.hidden) _loadData.current?.(); };
+    if (!backendOffline) { setBackendRetrying(false); return; }
+    let cancelled = false;
+    const retry = async () => {
+      if (cancelled) return;
+      setBackendRetrying(true);
+      await _loadData.current?.();
+      if (!cancelled) setBackendRetrying(false);
+    };
+    const onVisible = () => { if (!document.hidden) retry(); };
     window.addEventListener('online', retry);
     document.addEventListener('visibilitychange', onVisible);
+    const poll = setInterval(retry, 10_000);
     return () => {
+      cancelled = true;
+      clearInterval(poll);
       window.removeEventListener('online', retry);
       document.removeEventListener('visibilitychange', onVisible);
     };
@@ -397,18 +407,27 @@ export function AppProvider({ children }) {
       {children}
 
       {/* Backend-offline blocking banner — data is NOT loaded */}
-      {backendOffline && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000,
-          background: 'var(--red)', color: '#fff', padding: '14px 24px',
-          textAlign: 'center', fontWeight: 600, fontSize: '14px',
-          boxShadow: 'var(--shadow-lg)', lineHeight: 1.5,
-        }}>
-          ⚠ Backend offline — your saved data is NOT loaded. You are seeing blank
-          defaults. Do NOT add or edit anything, or you may overwrite your real
-          data. Start the app with <b>start.bat</b>, then reload this page.
-        </div>
-      )}
+      {backendOffline && (() => {
+        const isDesktop = /^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(window.location.origin);
+        return (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000,
+            background: backendRetrying ? '#92400e' : 'var(--red)',
+            color: '#fff', padding: '14px 24px',
+            textAlign: 'center', fontWeight: 600, fontSize: '14px',
+            boxShadow: 'var(--shadow-lg)', lineHeight: 1.5,
+            transition: 'background 0.3s',
+          }}>
+            {backendRetrying ? (
+              <>⟳ Reconnecting to server — do not edit anything, your data will load automatically.</>
+            ) : isDesktop ? (
+              <>⚠ Server offline — your saved data is NOT loaded. Do NOT edit anything. Start the app with <b>start.bat</b>, then reload this page.</>
+            ) : (
+              <>⚠ Server offline — your saved data is NOT loaded. Do NOT edit anything. Retrying automatically every 10 seconds.</>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 7-day no-backup reminder */}
       {showReminder && (

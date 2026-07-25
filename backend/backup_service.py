@@ -60,7 +60,9 @@ RECOVERY_LOG_CAP = 200
 # Health thresholds (bytes) for the DB-size meter.
 HEALTH_AMBER_BYTES = 50 * 1024 * 1024     # 50 MB
 HEALTH_RED_BYTES = 200 * 1024 * 1024      # 200 MB
-LOW_FREE_SPACE_BYTES = 500 * 1024 * 1024  # warn if a target has < 500 MB free
+LOW_FREE_SPACE_BYTES = 500 * 1024 * 1024   # warn if a target has < 500 MB free
+BACKUP_MIN_FREE_BYTES = 1500 * 1024 * 1024  # skip local backup if < 1.5 GB free on that volume
+DATA_DISK_WARN_BYTES = 2 * 1024 * 1024 * 1024  # warn in health if data disk < 2 GB free
 
 _backup_lock = threading.Lock()   # serialises whole backup operations
 _state_lock = threading.Lock()    # serialises read-modify-write of BackupState
@@ -657,9 +659,24 @@ def make_backup(reason="manual", force_catalog=False):
                     manifest["targets"][name] = "ok" if cok else f"error ({cmsg})"
                     any_target = any_target or cok
                     continue
+                # On EC2 (NJ_DISABLE_LOCAL_BACKUP=1) local-disk backup is pointless
+                # — the backup would sit on the same disk as the data it protects.
+                # The Windows desktop app handles local + Google Drive backup instead.
+                import os as _os
+                if name == "local" and _os.environ.get("NJ_DISABLE_LOCAL_BACKUP"):
+                    manifest["targets"][name] = "skipped (EC2 mode — backup handled by Windows client)"
+                    continue
                 ok, msg = _target_dir_ok(cfg.get("path", ""))
                 if not ok:
                     manifest["targets"][name] = f"unavailable ({msg})"
+                    continue
+                free = _free_bytes(cfg["path"])
+                if free is not None and free < BACKUP_MIN_FREE_BYTES:
+                    manifest["targets"][name] = (
+                        f"skipped — only {free // (1024*1024)} MB free on this volume "
+                        f"(need {BACKUP_MIN_FREE_BYTES // (1024*1024)} MB). "
+                        "Free disk space or change the backup destination."
+                    )
                     continue
                 try:
                     dest = Path(cfg["path"])
@@ -1667,6 +1684,19 @@ def compute_health():
         level = "green"
 
     warnings = []
+
+    # Check the data disk (where the live DB lives) — this is the critical one.
+    data_free = _free_bytes(DATA_DIR)
+    try:
+        data_total = shutil.disk_usage(str(DATA_DIR)).total
+    except Exception:
+        data_total = None
+    if data_free is not None and data_free < DATA_DISK_WARN_BYTES:
+        warnings.append(
+            f"Data disk critically low: only {data_free // (1024*1024)} MB free — "
+            "free space immediately or the server will crash."
+        )
+
     state = get_state()
     for name, cfg in state["targets"].items():
         if not cfg.get("enabled") or not cfg.get("path"):
@@ -1689,6 +1719,8 @@ def compute_health():
         "level": level,
         "amber_bytes": HEALTH_AMBER_BYTES,
         "red_bytes": HEALTH_RED_BYTES,
+        "data_disk_free_bytes": data_free,
+        "data_disk_total_bytes": data_total,
         "warnings": warnings,
     }
 

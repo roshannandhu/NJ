@@ -490,7 +490,15 @@ def cloud_status(provider: str):
 def cloud_config(provider: str, body: dict = Body(...)):
     """Save the developer-console Client ID (+ secret for Google) the user pastes in."""
     _check_provider(provider)
-    cloud_backup.save_config(provider, body.get("client_id", ""), body.get("client_secret", ""))
+    cloud_backup.save_config(provider, body.get("client_id", ""), body.get("client_secret", ""), body.get("folder_id", ""))
+    return cloud_backup.get_status(provider)
+
+
+@router.post("/api/backup/cloud/{provider}/set-token")
+def cloud_set_token(provider: str, body: dict = Body(...)):
+    """Accept pre-obtained OAuth tokens from the desktop gdrive_auth.py helper."""
+    _check_provider(provider)
+    cloud_backup.set_token(provider, body)
     return cloud_backup.get_status(provider)
 
 

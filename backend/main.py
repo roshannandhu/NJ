@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from database import Base, engine, DATA_DIR, ensure_columns
+import sqlite3
+from database import Base, engine, DATA_DIR, ensure_columns, DB_PATH
 import models
 import backup_service
 from routers import backup, config, quotations, uploads, warranties, warranty_docx, share
@@ -18,6 +19,14 @@ ensure_columns()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Merge any WAL that couldn't flush while the disk was full (no-op if clean).
+    try:
+        con = sqlite3.connect(str(DB_PATH))
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.close()
+    except Exception:
+        pass
+
     # On launch: snapshot the DB before the day's edits, then run the daily
     # auto-backup scheduler, the debounced event-backup worker, and the
     # verification/auto-recovery loop. All are best-effort daemons that never
@@ -54,6 +63,10 @@ async def add_cors_to_uploads(request, call_next):
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+UPDATES_DIR = DATA_DIR / "updates"
+UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/updates", StaticFiles(directory=str(UPDATES_DIR)), name="updates")
 
 app.include_router(config.router)
 app.include_router(quotations.router)

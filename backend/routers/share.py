@@ -57,6 +57,28 @@ def _safe_name(filename: str) -> str:
     return cleaned
 
 
+def _downloads_dir() -> Path:
+    home = Path.home()
+    for candidate in (home / "Downloads", home / "downloads", home / "Documents"):
+        if candidate.exists():
+            return candidate
+    return home
+
+
+def _unique_dest(folder: Path, filename: str) -> Path:
+    base = _safe_name(filename)
+    dest = folder / base
+    if not dest.exists():
+        return dest
+    stem = dest.stem
+    suffix = dest.suffix
+    for i in range(1, 1000):
+        candidate = folder / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return folder / f"{stem}_{uuid.uuid4().hex[:6]}{suffix}"
+
+
 def _prune_old_shares(keep: int = 6) -> None:
     """Delete all but the most recent `keep` share folders (best-effort)."""
     try:
@@ -186,15 +208,20 @@ async def share_pdfs(
     saved: List[Path] = []
     payload_log = []
     for uf in files:
-        data = await uf.read()
-        if not data:
-            log.warning("Empty file received: %s", uf.filename)
-            continue
         dest = share_dir / _safe_name(uf.filename)
-        dest.write_bytes(data)
+        with open(dest, "wb") as buffer:
+            await uf.seek(0)
+            while True:
+                chunk = await uf.read(1024 * 1024)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+
         saved.append(dest)
         exists = dest.exists()
         size = dest.stat().st_size if exists else 0
+        if size == 0:
+            log.warning("Empty file received: %s", uf.filename)
         log.info("Share file written: path=%s exists=%s size=%d", dest, exists, size)
         payload_log.append({"path": str(dest), "exists": exists, "size": size})
 
@@ -222,3 +249,37 @@ async def share_pdfs(
             else f"Files saved to {share_dir} — open them to share manually"
         ),
     })
+
+
+@router.post("/api/save-pdf")
+async def save_pdf(file: UploadFile = File(...)):
+    """Save one generated PDF to the user's Downloads folder.
+
+    This is the reliable desktop fallback when WebView2 blocks or hides a
+    JavaScript blob download and the File System Access picker is unavailable.
+    """
+    if not file:
+        raise HTTPException(400, "No file provided")
+
+    folder = _downloads_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    dest = _unique_dest(folder, file.filename or "document.pdf")
+
+    with open(dest, "wb") as buffer:
+        await file.seek(0)
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            buffer.write(chunk)
+
+    size = dest.stat().st_size if dest.exists() else 0
+    if size == 0:
+        try:
+            dest.unlink()
+        except Exception:
+            pass
+        raise HTTPException(400, "PDF was empty")
+
+    log.info("PDF saved: path=%s size=%d", dest, size)
+    return JSONResponse({"ok": True, "path": str(dest), "size": size})
