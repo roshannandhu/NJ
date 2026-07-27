@@ -36,6 +36,14 @@ backend/[0-9]*.[0-9]*.[0-9]*.[0-9]*/
 backend/cloud_config.json
 backend/cloud_tokens.json
 
+# Sensitive credentials and keys (never commit)
+*.pem
+*.pfx
+*.keystore
+client_secret_*.json
+ec2_config.json
+gdrive_auth_local.py
+
 # Scratch / packaged artifacts
 scratch_docx*
 /NJ India - Portable.zip

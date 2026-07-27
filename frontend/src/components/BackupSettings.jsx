@@ -51,7 +51,7 @@ const restoreMsg = (r) => {
 
 // Cloud destinations (gdrive/onedrive) log in via OAuth — see CLOUD below.
 const DEST = {
-  local:    { label: 'Local Disk', Icon: HardDrive },
+  local:    { label: 'Local Device', Icon: HardDrive },
   usb:      { label: 'USB / External', Icon: Usb },
   // Dropbox is a plain *synced folder* destination (point at the local Dropbox
   // folder so the desktop client uploads it) — not an OAuth account like the two
@@ -572,7 +572,9 @@ export default function BackupSettings() {
                           {cs.connected ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                               <span style={{ fontSize: 13, color: '#10B981', fontWeight: 600 }}>✓ Connected{cs.email ? ` as ${cs.email}` : ''}</span>
-                              <button style={btnStyle} disabled={cloudBusy[name]} onClick={() => handleCloudDisconnect(name)}>Disconnect</button>
+                              {name !== 'gdrive' && (
+                                <button style={btnStyle} disabled={cloudBusy[name]} onClick={() => handleCloudDisconnect(name)}>Disconnect</button>
+                              )}
                             </div>
                           ) : (
                             <>
@@ -631,21 +633,20 @@ export default function BackupSettings() {
                       {isExpanded && !isCloud && (
                         <div className="backup-destination-detail" style={{ padding: '12px 12px 16px 40px', background: 'var(--bg)', borderBottom: i < DEST_NAMES.length - 1 ? '1px solid var(--line)' : 'none' }}>
                           <div className="backup-destination-controls" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            {name === 'dropbox' ? (
-                              <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="Dropbox folder" style={{ ...inpStyle, flex: 1 }} />
-                            ) : (
-                              // Local Disk / USB: pick the folder with the OS dialog instead of typing it.
-                              <div style={{ ...inpStyle, flex: 1, display: 'flex', alignItems: 'center', fontFamily: 'monospace', color: t.path ? 'var(--ink)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'default' }}
-                                title={t.path || ''}>
-                                {t.path || (name === 'local' ? 'No folder chosen' : 'No USB folder chosen')}
+                            {name === 'local' ? (
+                              <div style={{ flex: 1 }}>
+                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. C:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'monospace' }} />
+                                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>Enter a folder path on your Windows PC. The app will save backups here automatically every day.</div>
                               </div>
+                            ) : name === 'usb' ? (
+                              <div style={{ flex: 1 }}>
+                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. E:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'monospace' }} />
+                                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>Enter the USB drive folder path on your Windows PC.</div>
+                              </div>
+                            ) : (
+                              <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="Dropbox folder" style={{ ...inpStyle, flex: 1 }} />
                             )}
-                            {name !== 'dropbox' && (
-                              <button style={btnStyle} onClick={() => openFolderBrowser(name)}>
-                                <FolderOpen size={14}/> Choose Folder
-                              </button>
-                            )}
-                            {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect</button>}
+                            {name === 'usb' && <button style={btnStyle} disabled={busy} onClick={handleDetectUsb}><Search size={14}/> Detect USB</button>}
                             {name === 'dropbox' && <button style={btnStyle} disabled={busy} onClick={handleDetectDropbox}><Search size={14}/> Detect</button>}
                             <button style={{ ...btnStyle, width: 100 }} disabled={testing[name]} onClick={() => handleTest(name, t.path)}><Wifi size={14}/> Test</button>
                             <button style={{ ...btnStyle, background: 'var(--accent)', color: 'white', border: 'none' }} onClick={() => handleSave(false)}>Save</button>

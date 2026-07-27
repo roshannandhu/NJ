@@ -291,8 +291,6 @@ class _Provider:
         }
         if self.needs_secret and c.get("client_secret"):
             data["client_secret"] = c["client_secret"]
-        if self.scope:
-            data["scope"] = self.scope
         r = httpx.post(self.token_endpoint, data=data, timeout=30)
         r.raise_for_status()
         fresh = r.json()
@@ -326,9 +324,19 @@ class _Provider:
         return True, "ok"
 
     def _rotate(self, keep: int) -> None:
-        sets = self.list_sets()  # newest-first by stem (timestamped names sort lexically)
-        for s in sorted(sets, key=lambda x: x["stem"], reverse=True)[max(keep, 1):]:
-            self.delete_set(s)
+        sets = sorted(self.list_sets(), key=lambda x: x["stem"], reverse=True)
+        recent = sets[:max(keep, 1)]
+        older  = sets[max(keep, 1):]
+        # Keep the newest backup of each calendar month from older sets
+        monthly: dict[str, dict] = {}
+        for s in older:
+            month = s["stem"][10:16]  # nj_backup_YYYYMMDD_HHMM → YYYYMM
+            if month not in monthly:
+                monthly[month] = s
+        keep_stems = {s["stem"] for s in recent} | {s["stem"] for s in monthly.values()}
+        for s in sets:
+            if s["stem"] not in keep_stems:
+                self.delete_set(s)
 
 
 # ── Google Drive ────────────────────────────────────────────────────────────────

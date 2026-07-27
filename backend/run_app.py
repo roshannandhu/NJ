@@ -216,6 +216,14 @@ if __name__ == "__main__":
                     except Exception:
                         pass
 
+            def _fetch_settings():
+                try:
+                    with urllib.request.urlopen(f"{REMOTE_URL}/api/backup/settings", timeout=10) as r:
+                        import json as _json
+                        return _json.loads(r.read())
+                except Exception:
+                    return {}
+
             def _run_backup():
                 try:
                     import datetime
@@ -225,18 +233,33 @@ if __name__ == "__main__":
                         data = resp.read()
                     name = f"nj_backup_{datetime.datetime.now():%Y%m%d_%H%M}.zip"
 
-                    # 1 — local AppData folder (always)
-                    local_dir = Path(os.environ["NJ_DATA_DIR"]) / "local_backups"
-                    _save_zip(data, local_dir, name)
-                    log(f"local_backup: saved {name} ({len(data)//1024} KB) → {local_dir}")
+                    settings = _fetch_settings()
+                    targets  = settings.get("targets", {})
 
-                    # 2 — Google Drive Desktop folder (if installed)
+                    # 1 — user-configured Local Device path (from Backup Settings)
+                    local_cfg  = targets.get("local", {})
+                    local_path = local_cfg.get("path", "").strip()
+                    if local_cfg.get("enabled") and local_path:
+                        _save_zip(data, Path(local_path), name)
+                        log(f"local_backup: saved {name} → {local_path}")
+                    else:
+                        # fallback: always keep a copy in AppData
+                        local_dir = Path(os.environ["NJ_DATA_DIR"]) / "local_backups"
+                        _save_zip(data, local_dir, name)
+                        log(f"local_backup: saved {name} → {local_dir}")
+
+                    # 2 — user-configured USB path (from Backup Settings)
+                    usb_cfg  = targets.get("usb", {})
+                    usb_path = usb_cfg.get("path", "").strip()
+                    if usb_cfg.get("enabled") and usb_path:
+                        _save_zip(data, Path(usb_path), name)
+                        log(f"local_backup: saved {name} → {usb_path}")
+
+                    # 3 — Google Drive Desktop folder (if installed)
                     gd = _gdrive_nj_dir()
                     if gd:
                         _save_zip(data, gd, name)
-                        log(f"local_backup: copied to Google Drive → {gd}")
-                    else:
-                        log("local_backup: Google Drive Desktop not found — skipped cloud copy")
+                        log(f"local_backup: copied to Google Drive Desktop → {gd}")
                 except Exception as e:
                     log(f"local_backup: failed — {e}")
 

@@ -18,9 +18,9 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import os
-CLIENT_ID     = os.environ.get("GDRIVE_CLIENT_ID", "YOUR_CLIENT_ID_HERE")
-CLIENT_SECRET = os.environ.get("GDRIVE_CLIENT_SECRET", "YOUR_CLIENT_SECRET_HERE")
-FOLDER_ID     = os.environ.get("GDRIVE_FOLDER_ID", "YOUR_FOLDER_ID_HERE")
+CLIENT_ID     = os.environ.get("GDRIVE_CLIENT_ID", "")      # paste from your client_secret JSON
+CLIENT_SECRET = os.environ.get("GDRIVE_CLIENT_SECRET", "")  # paste from your client_secret JSON
+FOLDER_ID     = os.environ.get("GDRIVE_FOLDER_ID", "")      # your Google Drive folder ID
 EC2_URL       = "http://18.61.159.169:8000"
 SCOPE         = "https://www.googleapis.com/auth/drive.file"
 
@@ -126,15 +126,26 @@ def main():
         print(f"Token error: {token}")
         return
 
-    print("Saving credentials to EC2 server...")
+    print("Step 1: Saving config to EC2...")
+    try:
+        r1 = _put(f"{EC2_URL}/api/backup/cloud/gdrive/config", {
+            "client_id":     CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "folder_id":     FOLDER_ID,
+        })
+        print(f"  Config saved: {r1}")
+    except Exception as e:
+        print(f"  ERROR saving config: {e}")
+        return
 
-    _put(f"{EC2_URL}/api/backup/cloud/gdrive/config", {
-        "client_id":     CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "folder_id":     FOLDER_ID,
-    })
-
-    _post(f"{EC2_URL}/api/backup/cloud/gdrive/set-token", token)
+    print("Step 2: Sending tokens to EC2...")
+    print(f"  Token keys received: {list(token.keys())}")
+    try:
+        r2 = _post(f"{EC2_URL}/api/backup/cloud/gdrive/set-token", token)
+        print(f"  Token saved: {r2}")
+    except Exception as e:
+        print(f"  ERROR saving token: {e}")
+        return
 
     print()
     print("✓ Google Drive connected successfully!")
