@@ -5,6 +5,7 @@ import { createWarranty } from '../api';
 import { DEFAULT_DATA } from '../data';
 import { elementToPdf, elementToPdfFile, shareElementPdf, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
+import { isLegacyBrandClass } from '../brands';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Standalone warranty view. The certificate body itself is the shared
@@ -40,13 +41,21 @@ export default function WarrantyDocument() {
   const tplId = (typeof doc.template === 'string') ? doc.template : storedTpl.id;
   let matched = data.warranties?.find(w => w.id === tplId);
   if (!matched) {
-    const n = (((doc.items && doc.items.length > 0) ? doc.items[0].className : '') || '').toLowerCase();
-    let fallbackId = 'nj_laminated';
-    if (n.includes('stone') || n.includes('metal')) fallbackId = 'stone_coated';
-    else if (n.includes('heat') || n.includes('ceiling')) fallbackId = 'heatout';
-    else if (n.includes('ceramic') || n.includes('clay')) fallbackId = 'ceramic';
-    else if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) fallbackId = 'docke';
-    matched = data.warranties?.find(w => w.id === fallbackId);
+    // The class's OWN linked template first. The keyword guess below can only
+    // land on NJ's templates, so it would issue an NJ certificate to a
+    // Highlander customer — it is limited to NJ's own classes.
+    const cn = ((doc.items && doc.items[0]?.className) || '');
+    const cls = data.classes?.find(c => c.name === cn);
+    matched = data.warranties?.find(w => w.id === cls?.warrantyId);
+    if (!matched && isLegacyBrandClass(cn, doc.items, data)) {
+      const n = cn.toLowerCase();
+      let fallbackId = 'nj_laminated';
+      if (n.includes('stone') || n.includes('metal')) fallbackId = 'stone_coated';
+      else if (n.includes('heat') || n.includes('ceiling')) fallbackId = 'heatout';
+      else if (n.includes('ceramic') || n.includes('clay')) fallbackId = 'ceramic';
+      else if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) fallbackId = 'docke';
+      matched = data.warranties?.find(w => w.id === fallbackId);
+    }
   }
   // Certificates always MIRROR the live template — logo, seal, signature,
   // opening, terms/sections, tables and duration all come from the current

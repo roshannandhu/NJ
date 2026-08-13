@@ -76,6 +76,25 @@ export function resolveQuotationBrand(items, data) {
   return live || { id: top.id, name: top.name };
 }
 
+// Whether a class may inherit the LEGACY single-brand text: the keyword-keyed
+// `classSpecs` / `classTerms` buckets ("stone_coated", "laminated", …), the
+// hardcoded product blurbs, and the keyword-guessed warranty template. All of
+// that was authored when the catalogue had one brand, so it carries NJ product
+// names, NJ warranty periods and NJ certificates. Only classes of that original
+// (first) brand may fall back to it — otherwise a HIGHLANDER class named
+// "STONECOATED" prints "NJ STONE COATED METAL TILES / 50 years Warranty" and is
+// issued an NJ warranty certificate, because the keyword guess only ever sees
+// the class NAME and can't tell the two brands apart.
+// Brand resolves from the item's add-time snapshot first (rename/delete proof),
+// then the live class link; unbranded or unknown classes count as legacy.
+export function isLegacyBrandClass(className, items, data) {
+  const item = (items || []).find(i => i.className === className && i.brandId);
+  const cls = data?.classes?.find(c => c.name === className);
+  const brandId = item?.brandId ?? cls?.brandId;
+  const legacyBrandId = (data?.brands || [])[0]?.id || 'nj';
+  return !brandId || brandId === legacyBrandId;
+}
+
 // Document-number prefixes for a brand. `brand.docPrefix` (Settings → Parent
 // Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…).
 // A non-NJ brand WITHOUT a configured prefix derives one from its name (word
