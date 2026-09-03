@@ -34,7 +34,8 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppPublisherURL}
-VersionInfoVersion=1.1.0.0
+; Derived from AppVersion so the exe FileVersion can never drift behind a release.
+VersionInfoVersion={#AppVersion}.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} Setup
 DefaultDirName={localappdata}\NJ India

@@ -56,6 +56,12 @@ del /q "%BUILD%\app\nj_backup_*" 2>nul
 for /d /r "%BUILD%\app" %%d in (__pycache__) do if exist "%%d" rmdir /s /q "%%d"
 
 REM Built frontend served by the backend (main.py prefers app\dist)
+REM Wipe the staged dist FIRST: the backend copy above may carry a stale
+REM backend\dist\ from an older build, and xcopy MERGES rather than
+REM replaces, so last release's hashed chunks would ship alongside this
+REM one's - dead weight, and stale app code one bad index.html away from
+REM actually being served.
+if exist "%BUILD%\app\dist" rmdir /s /q "%BUILD%\app\dist"
 xcopy /e /i /y "%ROOT%frontend\dist\*" "%BUILD%\app\dist\" >nul || goto :err
 
 REM Production launcher

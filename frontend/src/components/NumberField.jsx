@@ -1,7 +1,6 @@
 import React from 'react';
 import { sanitizeDecimal } from '../numeric';
 
-
 /**
  * Desktop-friendly numeric input.
  *
