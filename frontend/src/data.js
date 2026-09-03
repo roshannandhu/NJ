@@ -234,6 +234,75 @@ export const DEFAULT_DATA = {
         { years: '20-21 years', pct: '20%' },
         { years: '21-25 years', pct: '10%' }
       ]
+    },
+    {
+      id: "highlander_interior_ceiling",
+      title: "Highlanders — Interior Ceilings",
+      logo: "HIGHLANDERS",
+      duration: "15 Years",
+      opening: "Congratulation on your purchase of Highlander interior ceilings. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards.\nWe strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.",
+      sections: [
+        {
+          title: "Limitation of Warrantor's Liability",
+          content: "The Warrantor shall not be liable for physical defects or damage to the Product resulting from external factors that occurred after the Product was delivered to the Purchaser (the Warrantor recommends insuring the Product, subject to this Warranty, against the effects of external factors), particularly related to:",
+          isBullets: false,
+        },
+        {
+          title: "",
+          content: "Use of the Product contrary to its intended purpose or improper storage and transport prior to installation.\nInstallation contrary to the Product installation and use manual.\nUse of accessories not provided for in the Product installation and use manual.\nImpact of foreign bodies that exceed the level specified in the Document mentioned in § 1(1).\nFire, earthquake, flooding, lightning, strong wind, hail, abnormally high or low air temperatures, or other occurrences that may be classified as force majeure.\nFaults, defects, or other damage to the building or material where the Product is installed, caused in particular by movement, deformation, fractures, or subsidence of walls, materials, or foundations of the building.\nThe Warrantor shall only be liable for defects resulting from reasons attributable to the Product. The Warrantor shall not be liable for discoloration that exceeds the range of allowable discolorations specified in the Product installation and use manual, or for other discoloration caused, most likely by air pollution (including by metal oxides or particles), mold, or exposure to harmful chemicals. Warranty not available for installation mistake.\nThis Warranty shall not apply to any Product covered by the Purchaser with any other improvised coating (e.g., paint, varnish, or plaster) or otherwise modified/changed. In the event the Product or any element thereof is replaced under this Warranty, where the Product installed by the Purchaser is no longer manufactured or has been modified by the Warrantor, the Warrantor may apply elements that are the closest equivalents (in terms of type) to the Product originally installed.",
+          isBullets: true,
+        },
+        {
+          title: "Obligations of the Warranty Holder",
+          content: "The Warranty Holder should notify the Warrantor of any detected physical defects of the Product immediately after detecting a defect that forms the basis for a claim under the Warranty.",
+          isBullets: false,
+        },
+        {
+          title: "",
+          content: "Any claims made under the Warranty shall be lodged with the Warrantor through the seller from whom the Product was purchased.\nA claim made under the Warranty should include: a description of the defect, the address of the Product installation site, the claimant's contact details (full name, address, phone number, email address - if applicable), and photographs proving the defect.\nA claim made under the Warranty may be considered if it is submitted together with this document bearing the stamp and signature of the seller (distributor) of the Product, including the name of the seller, as well as the place and date when the Product was sold.\nThe Warrantor shall provide, by email or in writing, information on the manner of considering the claim no later than 14 days from the date when the Warrantor received the claim (if the information is provided in writing, the period shall be counted from the date of the postmark). The Warrantor stipulates that the consideration of the claim may require inspection of the Product on-site, which implies the Purchaser's obligation to make available the immovable property where the Product covered by this Warranty is installed. In such an event, the Warrantor shall contact the Purchaser promptly in order to set the date of inspection, and the above-mentioned period of 14 days shall be counted from the date when the inspection is completed. The inspection shall be performed by an authorized representative of the Warrantor. The Purchaser shall provide the Warrantor with all information and documents necessary for the proper preparation and performance of the inspection. And only suitable for interior.\nWhere the Purchaser's claim is deemed justified, the Warrantor shall perform its obligations specified in §1 hereof within 60 days from the date when the Purchaser was provided with the information on the manner of considering the claim, specified in sub-clause 5. At the same time, the Warrantor stipulates that, due to the specific nature of the manufacturing process, the aforementioned period of 60 days may be extended by the time necessary to produce and deliver the elements needed to replace the Product.\nAll parts and elements of the Product replaced hereunder shall become the Warrantor's property upon the day they are replaced with other parts and elements.",
+          isBullets: true,
+        },
+      ],
+      showSeriesTable: false,
+      seriesTable: [],
+      heatoutTable: false,
+      liabilityTable: [],
+      customTables: [
+        {
+          id: "hl_depreciation",
+          title: "",
+          intro: "This warranty shall be valid for the period specified in this document, counted from the date when the purchaser purchased the product stated in the warranty certificate or another document which makes the purchase provable, with the stipulation that the Warrantor's liability shall be proportional to the period when the product was in use, in accordance with the following rules:",
+          columns: [
+            "Year",
+            "Depreciation %",
+            "Remaining Value %",
+          ],
+          rows: [
+            [
+              "1",
+              "6.67%",
+              "93.33%",
+            ],
+            [
+              "5",
+              "33.35%",
+              "66.65%",
+            ],
+            [
+              "10",
+              "66.7%",
+              "33.3%",
+            ],
+            [
+              "15",
+              "100%",
+              "0%",
+            ],
+          ],
+        },
+      ],
+      signImage: "",
+      sealImage: "",
     }
   ],
   quotations: [],

@@ -21,7 +21,7 @@ export default function ProductCatalog() {
   const handleQtyChange = (vId, qty) => {
     setSelections(prev => ({
       ...prev,
-      [vId]: { ...prev[vId], qty: Math.max(1, parseInt(qty) || 1) }
+      [vId]: { ...prev[vId], qty: Math.max(1, parseFloat(qty) || 1) }
     }));
   };
 

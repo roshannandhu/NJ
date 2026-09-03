@@ -132,7 +132,7 @@ export default function LiveQuotation() {
                   <p>{item.color !== 'Standard' ? `${item.color} / ` : ''}{cur}{money(item.price)} per {item.unit}</p>
                   <div className="lq-stepper">
                     <button type="button" aria-label={`Decrease ${item.name} quantity`} onClick={() => updateCartQty(item.cartId, item.qty - 1)}><Minus size={14} /></button>
-                    <NumberField value={item.qty} min={1} fallback={1} onCommit={n => updateCartQty(item.cartId, n)} aria-label={`${item.name} quotation quantity`} />
+                    <NumberField value={item.qty} min={1} step="any" allowFloat fallback={1} onCommit={n => updateCartQty(item.cartId, n)} aria-label={`${item.name} quotation quantity`} />
                     <button type="button" aria-label={`Increase ${item.name} quantity`} onClick={() => updateCartQty(item.cartId, item.qty + 1)}><Plus size={14} /></button>
                     <span>{item.unit}</span>
                   </div>

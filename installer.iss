@@ -10,7 +10,7 @@
 ; ===========================================================================
 
 #define AppName "NJ India System"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.1"
 #define AppPublisher "NJ India Trading"
 #define AppPublisherURL "https://njindia.in"
 
@@ -34,7 +34,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppPublisherURL}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} Setup
 DefaultDirName={localappdata}\NJ India

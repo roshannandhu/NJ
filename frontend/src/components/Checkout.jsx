@@ -470,7 +470,9 @@ export default function Checkout() {
   };
 
   const handleQtyChange = (cartId, newQty) => {
-    setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, qty: Math.max(1, parseInt(newQty) || 1) } : item));
+    // parseFloat, not parseInt: quantities are measured in sqft/RFT and are
+    // routinely fractional (7.5 sqft). parseInt silently truncated them.
+    setCart(prev => prev.map(item => item.cartId === cartId ? { ...item, qty: Math.max(1, parseFloat(newQty) || 1) } : item));
   };
 
   const handleUnitChange = (cartId, newUnit) => {

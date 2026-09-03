@@ -182,6 +182,50 @@ def _cert_row(doc, label, value="", underline_val=True, size=10):
     return para
 
 
+def _custom_tables(doc, template):
+    """Render the template's free-form ``customTables`` (any number of tables,
+    any column/row shape) so the Word export matches the on-screen certificate.
+
+    Each entry: {title, intro, columns: [str], rows: [[str]]}. Ragged rows are
+    padded/trimmed to the column count, exactly as the renderer does, so a
+    partially-filled grid can never raise here.
+    """
+    tables = template.get("customTables") if isinstance(template, dict) else None
+    if not isinstance(tables, list):
+        return
+    for spec in tables:
+        if not isinstance(spec, dict):
+            continue
+        columns = [str(c) for c in (spec.get("columns") or [])]
+        raw_rows = [r for r in (spec.get("rows") or []) if isinstance(r, list)]
+        width = len(columns)
+        rows = [[str(r[i]) if i < len(r) and r[i] is not None else "" for i in range(width)]
+                for r in raw_rows]
+        if width == 0 and not rows:
+            continue
+
+        _blank_line(doc, 6)
+        if spec.get("title"):
+            _heading(doc, str(spec["title"]), size=10, bold=True, space_before=8, space_after=2)
+        if spec.get("intro"):
+            _body(doc, str(spec["intro"]), size=9, align=3, space_after=4)
+        if width == 0:
+            continue
+
+        tbl = doc.add_table(rows=1 + len(rows), cols=width)
+        tbl.style = "Table Grid"
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+        header = tbl.rows[0]
+        header.height = Pt(18)
+        for ci, name in enumerate(columns):
+            align = WD_ALIGN_PARAGRAPH.LEFT if ci == 0 else WD_ALIGN_PARAGRAPH.CENTER
+            _cell_text(header.cells[ci], name, bold=True, size=10, align=align)
+            _shade_cell(header.cells[ci], "BFBFBF")
+        for ri, row in enumerate(rows):
+            for ci, cell in enumerate(row):
+                align = WD_ALIGN_PARAGRAPH.LEFT if ci == 0 else WD_ALIGN_PARAGRAPH.CENTER
+                _cell_text(tbl.rows[ri + 1].cells[ci], cell, size=10, align=align)
+
 def _warranty_period_table(doc, rows=None, n_blank=4):
     """Blank or filled warranty period table (2-col: Series | Duration)."""
     _heading(doc, "Warranty Period", size=10, bold=True, space_before=8, space_after=2)
@@ -410,6 +454,9 @@ def _gen_dynamic_warranty(doc, cert_data, customer, template, cert):
         series_table = template.get("seriesTable", [])
         rows = [(s.get("series", ""), s.get("duration", "")) for s in series_table]
         _warranty_period_table(doc, rows=rows if rows else None, n_blank=4)
+
+    # Free-form tables authored in the Warranty Builder
+    _custom_tables(doc, template)
 
     # Common Certificate details
     _blank_line(doc, 8)

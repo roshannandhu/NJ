@@ -21,6 +21,10 @@ export default function WarrantiesSettings() {
         sections: warranty.sections?.length ? warranty.sections : fallback.sections || [],
         seriesTable: warranty.seriesTable?.length ? warranty.seriesTable : fallback.seriesTable || [],
         liabilityTable: warranty.liabilityTable?.length ? warranty.liabilityTable : fallback.liabilityTable || [],
+        // Free-form tables. Tested with isArray (not .length) so deleting every
+        // table STICKS — the seed default is only used for a template that has
+        // never carried the key at all.
+        customTables: Array.isArray(warranty.customTables) ? warranty.customTables : (fallback.customTables || []),
       };
     });
   }, [data.warranties]);
@@ -98,6 +102,7 @@ export default function WarrantiesSettings() {
       seriesTable: [],
       heatoutTable: false,
       liabilityTable: [],
+      customTables: [],
       signImage: '',
       sealImage: '',
     };
@@ -164,6 +169,65 @@ export default function WarrantiesSettings() {
     const rows = (current.liabilityTable || []).filter((_, i) => i !== index);
     setCurrent({ ...current, liabilityTable: rows });
   };
+
+  // ── Free-form ("custom") tables ───────────────────────────────────────────
+  // Any number of tables, each with its own heading, optional intro paragraph
+  // and an arbitrary column × row grid. Rows are stored as plain string arrays
+  // kept the same width as `columns`, so adding/removing a column rewrites
+  // every row in step and the grid can never go ragged.
+  const customTables = current.customTables || [];
+
+  const writeTables = (tables) => setCurrent({ ...current, customTables: tables });
+  const patchTable = (ti, patch) =>
+    writeTables(customTables.map((t, i) => (i === ti ? { ...t, ...patch } : t)));
+
+  const addCustomTable = () => writeTables([...customTables, {
+    id: `tbl_${Date.now()}`,
+    title: 'New Table',
+    intro: '',
+    columns: ['Column 1', 'Column 2'],
+    rows: [['', '']],
+  }]);
+
+  const removeCustomTable = (ti) => {
+    const t = customTables[ti];
+    if (!window.confirm(`Delete the table "${t?.title || 'Untitled'}"? This cannot be undone.`)) return;
+    writeTables(customTables.filter((_, i) => i !== ti));
+  };
+
+  const updateColumnName = (ti, ci, value) =>
+    patchTable(ti, { columns: customTables[ti].columns.map((c, i) => (i === ci ? value : c)) });
+
+  const addColumn = (ti) => {
+    const t = customTables[ti];
+    patchTable(ti, {
+      columns: [...t.columns, `Column ${t.columns.length + 1}`],
+      rows: (t.rows || []).map(r => [...r, '']),          // widen every row in step
+    });
+  };
+
+  const removeColumn = (ti, ci) => {
+    const t = customTables[ti];
+    if (t.columns.length <= 1) { showToast('A table needs at least one column', 'error'); return; }
+    patchTable(ti, {
+      columns: t.columns.filter((_, i) => i !== ci),
+      rows: (t.rows || []).map(r => r.filter((_, i) => i !== ci)),
+    });
+  };
+
+  const addTableRow = (ti) => {
+    const t = customTables[ti];
+    patchTable(ti, { rows: [...(t.rows || []), t.columns.map(() => '')] });
+  };
+
+  const removeTableRow = (ti, ri) =>
+    patchTable(ti, { rows: (customTables[ti].rows || []).filter((_, i) => i !== ri) });
+
+  const updateCell = (ti, ri, ci, value) =>
+    patchTable(ti, {
+      rows: (customTables[ti].rows || []).map((r, i) =>
+        (i === ri ? r.map((c, j) => (j === ci ? value : c)) : r)),
+    });
 
   return (
     <div className="warranty-settings" data-mobile-panel={mobilePanel} style={{ display: 'flex', gap: '24px', padding: '20px 24px', overflow: 'hidden', background: 'var(--bg)', flexDirection: 'row' }}>
@@ -646,6 +710,133 @@ export default function WarrantiesSettings() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* CUSTOM TABLES EDITOR — any number of tables, any shape */}
+            <div className="warranty-series-section" style={{ marginBottom: '32px' }}>
+              <div className="warranty-document-section-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '10px', fontWeight: '800', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink)' }}>
+                  9. Custom Tables
+                </label>
+                <button
+                  onClick={addCustomTable}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                >
+                  <Plus size={12} /> Add Table
+                </button>
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--ink-soft)', margin: '0 0 12px' }}>
+                Build any table this certificate needs — add or remove columns and rows freely. Each table
+                prints on the certificate at the same font size as the rest of the document and is included
+                in the auto-fit, so it never pushes the certificate onto a second page.
+              </p>
+
+              {customTables.length === 0 && (
+                <div style={{ border: '1px dashed #E5E1D8', borderRadius: '8px', padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
+                  No custom tables. Click &lsquo;Add Table&rsquo; to build one.
+                </div>
+              )}
+
+              {customTables.map((t, ti) => (
+                <div key={t.id || ti} style={{ border: '1px solid #E5E1D8', borderRadius: '8px', padding: '14px', marginBottom: '16px', background: '#FFFFFF' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                    <input
+                      value={t.title || ''}
+                      onChange={e => patchTable(ti, { title: e.target.value })}
+                      placeholder="Table heading (optional)"
+                      style={{ flex: 1, border: '1px solid #E5E1D8', borderRadius: '6px', padding: '7px 9px', fontSize: '12px', fontWeight: 700, outline: 'none' }}
+                    />
+                    <button
+                      onClick={() => addColumn(ti)}
+                      title="Add a column"
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', background: 'transparent', border: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      <Plus size={12} /> Column
+                    </button>
+                    <button
+                      onClick={() => addTableRow(ti)}
+                      title="Add a row"
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--accent)', cursor: 'pointer', background: 'transparent', border: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      <Plus size={12} /> Row
+                    </button>
+                    <button
+                      onClick={() => removeCustomTable(ti)}
+                      title="Delete this table"
+                      style={{ color: 'var(--red)', cursor: 'pointer', background: 'transparent', border: 'none', display: 'flex', alignItems: 'center' }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  <textarea
+                    value={t.intro || ''}
+                    onChange={e => patchTable(ti, { intro: e.target.value })}
+                    placeholder="Intro paragraph printed above the table (optional)"
+                    style={{ width: '100%', minHeight: '52px', padding: '8px 9px', border: '1px dashed var(--line)', borderRadius: '6px', fontSize: '11.5px', fontFamily: 'inherit', lineHeight: 1.5, resize: 'vertical', outline: 'none', marginBottom: '10px', boxSizing: 'border-box' }}
+                  />
+
+                  <div className="warranty-series-scroll">
+                    <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #E5E1D8' }}>
+                      <thead>
+                        <tr style={{ background: '#F4EFE6' }}>
+                          {(t.columns || []).map((c, ci) => (
+                            <th key={ci} style={{ border: '1px solid #E5E1D8', padding: '4px 6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                <input
+                                  value={c}
+                                  onChange={e => updateColumnName(ti, ci, e.target.value)}
+                                  placeholder={`Column ${ci + 1}`}
+                                  style={{ width: '100%', minWidth: '70px', border: 'none', background: 'transparent', padding: '4px', fontSize: '10.5px', fontWeight: 800, outline: 'none' }}
+                                />
+                                <button
+                                  onClick={() => removeColumn(ti, ci)}
+                                  title="Remove this column"
+                                  style={{ color: 'var(--ink-soft)', cursor: 'pointer', background: 'transparent', border: 'none', lineHeight: 1, padding: '0 2px', fontSize: '13px' }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </th>
+                          ))}
+                          <th style={{ border: '1px solid #E5E1D8', padding: '8px 6px', width: '46px', fontSize: '10px', fontWeight: 800 }}>—</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(t.rows || []).map((row, ri) => (
+                          <tr key={ri}>
+                            {row.map((cell, ci) => (
+                              <td key={ci} style={{ border: '1px solid #E5E1D8', padding: '4px 8px' }}>
+                                <input
+                                  value={cell}
+                                  onChange={e => updateCell(ti, ri, ci, e.target.value)}
+                                  style={{ width: '100%', minWidth: '70px', border: 'none', background: 'transparent', padding: '4px', fontSize: '11.5px', fontWeight: ci === 0 ? 600 : 700, color: ci === 0 ? 'inherit' : '#C2410C', outline: 'none' }}
+                                />
+                              </td>
+                            ))}
+                            <td style={{ border: '1px solid #E5E1D8', padding: '4px 8px', textAlign: 'center' }}>
+                              <button
+                                onClick={() => removeTableRow(ti, ri)}
+                                title="Remove this row"
+                                style={{ color: 'var(--red)', cursor: 'pointer', background: 'transparent', border: 'none' }}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {(t.rows || []).length === 0 && (
+                          <tr>
+                            <td colSpan={(t.columns || []).length + 1} style={{ border: '1px solid #E5E1D8', padding: '14px', textAlign: 'center', fontSize: '12px', color: 'var(--ink-soft)', fontStyle: 'italic' }}>
+                              No rows yet. Click &lsquo;Row&rsquo; above to add one.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* AUTHORIZED SIGNATORY & SEAL UPLOAD FOOTER */}

@@ -278,7 +278,7 @@ export default function QuotationDesk() {
           <div className="qd2-card-actions">
             <div className="qd2-stepper">
               <button type="button" onClick={() => setSelection(item.id, { qty: Math.max(1, qty - 1) })} aria-label="Decrease quantity"><Minus size={14} /></button>
-              <NumberField value={qty} min={1} fallback={1} onCommit={n => setSelection(item.id, { qty: n })} aria-label={`${item.name} quantity`} />
+              <NumberField value={qty} min={1} step="any" allowFloat fallback={1} onCommit={n => setSelection(item.id, { qty: n })} aria-label={`${item.name} quantity`} />
               <button type="button" onClick={() => setSelection(item.id, { qty: qty + 1 })} aria-label="Increase quantity"><Plus size={14} /></button>
             </div>
             <button type="button" className={`qd2-add${addedItems[item.id] ? ' is-added' : ''}`} onClick={() => addItem(item)}>

@@ -7,6 +7,11 @@ import { getConfig, listQuotations, listWarranties, saveConfig, getBackupStatus 
 
 const AppContext = createContext();
 
+// Default warranty templates that may be seeded into an EXISTING catalogue.
+// Append an id here when a new template is added to DEFAULT_DATA.warranties;
+// everything else in DEFAULT_DATA is only ever used for a fresh install.
+const SEEDABLE_WARRANTY_IDS = ['highlander_interior_ceiling'];
+
 const normalizeCartSpelling = (record) => {
   if (!record || typeof record !== 'object') return record;
 
@@ -161,6 +166,35 @@ export function AppProvider({ children }) {
           });
         }
 
+        // ── New default warranty templates (idempotent, one-time each) ─────
+        // The backend seeds app_config only when it is FIRST created, so a
+        // template added to DEFAULT_DATA later never reaches an existing
+        // install. Seed the templates named in SEEDABLE_WARRANTY_IDS exactly
+        // once and record them in settings.seededWarranties, so one the user
+        // deletes afterwards is not resurrected on the next launch. Only the
+        // explicitly listed ids are ever added — an older default the user
+        // removed on purpose stays removed.
+        let warrantySeeded = false;
+        if (cfg) {
+          const seeded = Array.isArray(cfg.settings?.seededWarranties) ? cfg.settings.seededWarranties : [];
+          const present = new Set((cfg.warranties || []).map(w => w.id));
+          const toAdd = SEEDABLE_WARRANTY_IDS
+            .filter(id => !seeded.includes(id) && !present.has(id))
+            .map(id => DEFAULT_DATA.warranties.find(w => w.id === id))
+            .filter(Boolean);
+          if (toAdd.length) {
+            cfg = {
+              ...cfg,
+              warranties: [...(cfg.warranties || []), ...toAdd.map(w => ({ ...w }))],
+              settings: {
+                ...(cfg.settings || {}),
+                seededWarranties: [...seeded, ...toAdd.map(w => w.id)],
+              },
+            };
+            warrantySeeded = true;
+          }
+        }
+
         // ── Parent Brand migration (idempotent, automatic) ──────────────────
         // Existing catalogs have no brand layer. Ensure a default "NJ" brand
         // exists and every class is assigned to a brand. Persist only if we
@@ -182,8 +216,9 @@ export function AppProvider({ children }) {
 
         setData(prev => ({ ...prev, ...cfg, quotations, warranty_certificates }));
         setBackendOffline(false);
-        if (brandMigrated && cfg) {
-          // Save the migrated catalog back so the brand layer is durable.
+        if ((brandMigrated || warrantySeeded) && cfg) {
+          // Save the migrated catalog back so the brand layer and any newly
+          // seeded warranty template are durable.
           saveConfig({
             company: cfg.company, settings: cfg.settings, brands: cfg.brands,
             classes: cfg.classes, varieties: cfg.varieties, warranties: cfg.warranties,

@@ -106,7 +106,7 @@ export default function VarietyDetail() {
           <div className="variety-detail-actions" style={{ display: 'flex', alignItems: 'center', gap: '20px', marginTop: '40px' }}>
             <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
               <button onClick={() => setQty(Math.max(1, qty - 1))} style={{ padding: '12px 16px', background: 'var(--surface)', borderRight: '1px solid var(--line)' }}><Minus size={16}/></button>
-              <NumberField min={1} fallback={1} value={qty} onCommit={setQty} style={{ width: '80px', border: 'none', textAlign: 'center', fontSize: '16px', fontWeight: 500, background: 'transparent' }} />
+              <NumberField min={1} step="any" allowFloat fallback={1} value={qty} onCommit={setQty} style={{ width: '80px', border: 'none', textAlign: 'center', fontSize: '16px', fontWeight: 500, background: 'transparent' }} />
               <button onClick={() => setQty(qty + 1)} style={{ padding: '12px 16px', background: 'var(--surface)', borderLeft: '1px solid var(--line)' }}><Plus size={16}/></button>
             </div>
             

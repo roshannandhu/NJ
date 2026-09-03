@@ -47,6 +47,12 @@ if exist "%BUILD%\app\.venv"       rmdir /s /q "%BUILD%\app\.venv"
 if exist "%BUILD%\app\uploads"     rmdir /s /q "%BUILD%\app\uploads"
 if exist "%BUILD%\app\backups"     rmdir /s /q "%BUILD%\app\backups"
 if exist "%BUILD%\app\nj_india.db" del /q "%BUILD%\app\nj_india.db"
+REM Stray backup-target folders created by the old relative-path bug (e.g.
+REM backend\192.168.1.11\) hold a FULL copy of the live database + JSON export.
+REM They are not app files: shipping them bloats the installer by tens of MB and
+REM puts real customer quotations on every PC the installer is sent to.
+for /d %%d in ("%BUILD%\app\*") do echo %%~nxd| findstr /r "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$" >nul && rmdir /s /q "%%d"
+del /q "%BUILD%\app\nj_backup_*" 2>nul
 for /d /r "%BUILD%\app" %%d in (__pycache__) do if exist "%%d" rmdir /s /q "%%d"
 
 REM Built frontend served by the backend (main.py prefers app\dist)
@@ -130,12 +136,12 @@ if defined SIGN_CERT_PATH (
   REM Locate signtool.exe
   set "SIGNTOOL="
   for %%I in (signtool.exe) do if not defined SIGNTOOL if exist "%%~$PATH:I" set "SIGNTOOL=%%~$PATH:I"
-  for /r "%ProgramFiles(x86)%\Windows Kits\10\bin" %%I in (signtool.exe) do if not defined SIGNTOOL set "SIGNTOOL=%%I"
-  for /r "%ProgramFiles%\Windows Kits\10\bin"      %%I in (signtool.exe) do if not defined SIGNTOOL set "SIGNTOOL=%%I"
+  for /r "%ProgramFiles(x86)%\Windows Kits\10\bin" %%I in (signtool.exe) do if not defined SIGNTOOL if exist "%%I" set "SIGNTOOL=%%I"
+  for /r "%ProgramFiles%\Windows Kits\10\bin"      %%I in (signtool.exe) do if not defined SIGNTOOL if exist "%%I" set "SIGNTOOL=%%I"
 
   if defined SIGNTOOL (
     echo Signing with: %SIGN_CERT_PATH%
-    "%SIGNTOOL%" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
+    "!SIGNTOOL!" sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
       /f "%SIGN_CERT_PATH%" /p "%SIGN_CERT_PASSWORD%" ^
       "%BUILD%\Output\NJ India Setup.exe"
     if errorlevel 1 (
@@ -145,7 +151,7 @@ if defined SIGN_CERT_PATH (
     )
   ) else (
     echo NOTE: signtool.exe not found. Using PowerShell to sign with self-signed cert.
-    powershell -NoProfile -Command "$cert=Get-PfxCertificate -FilePath '%SIGN_CERT_PATH%' -Password (ConvertTo-SecureString '%SIGN_CERT_PASSWORD%' -AsPlainText -Force); $r=Set-AuthenticodeSignature -FilePath '%BUILD%\Output\NJ India Setup.exe' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256; Write-Host 'Sign:' $r.Status $r.StatusMessage"
+    powershell -NoProfile -Command "$cert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('%SIGN_CERT_PATH%','%SIGN_CERT_PASSWORD%'); $r=Set-AuthenticodeSignature -FilePath '%BUILD%\Output\NJ India Setup.exe' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256; Write-Host 'Sign:' $r.Status $r.StatusMessage"
   )
 ) else (
   echo NOTE: No certificate found. Installer is UNSIGNED.

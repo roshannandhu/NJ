@@ -9,6 +9,7 @@ import { paginateQuotation } from '../quotationPagination';
 import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
 import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass } from '../brands';
+import { sanitizeDecimal } from '../numeric';
 import WarrantyCertificate from './WarrantyCertificate';
 
 // Preset design colors offered on the quotation page (first is the original plum).
@@ -50,8 +51,15 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
           onChange={e => { setDraft(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${e.target.scrollHeight}px`; }}
           onBlur={commit}
           onKeyDown={e => { if (e.key === 'Escape') { setDraft(value ?? ''); stopEditing(); } }} />
-      : <input autoFocus type={numeric ? 'number' : 'text'} value={draft} style={s}
-          onChange={e => setDraft(e.target.value)} onBlur={commit}
+      // Numeric cells are `type="text"` + inputMode="decimal", NOT type="number":
+      // a CONTROLLED number input cannot hold a half-typed decimal. The moment
+      // the user presses "." the element's value is "7.", which is not a valid
+      // floating-point number, so the browser sanitises `e.target.value` to ""
+      // and the digits already typed are wiped. Quantities (7.5 sqft) and prices
+      // (1250.50) were therefore impossible to enter on the document itself.
+      // inputMode="decimal" also gives Android a keypad WITH a decimal key.
+      : <input autoFocus type="text" inputMode={numeric ? 'decimal' : undefined} value={draft} style={s}
+          onChange={e => setDraft(numeric ? sanitizeDecimal(e.target.value) : e.target.value)} onBlur={commit}
           onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value ?? ''); stopEditing(); } }} />;
   }
 

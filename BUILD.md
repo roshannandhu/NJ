@@ -15,20 +15,7 @@ EC2 backend: `http://18.61.159.169:8000`
 ### Every release — rebuild APK
 
 ```bash
-cd frontend
 
-# 1. Rebuild frontend with EC2 URL baked in
-npm run build
-
-# 2. Push new build into the Android project
-npx cap sync
-
-# 3. Open Android Studio (then Build → Build APK)
-npx cap open android
-```
-
-In Android Studio:
-> **Build → Build Bundle(s) / APK(s) → Build APK(s)**
 
 APK output:
 ```

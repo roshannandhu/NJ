@@ -89,6 +89,29 @@ function buildBlocks(openingText, sections) {
   return blocks;
 }
 
+// ── Free-form tables ────────────────────────────────────────────────────────
+// A warranty template may carry any number of `customTables`, each with its own
+// heading, optional intro paragraph, and an arbitrary column/row grid:
+//   { id, title, intro, columns: string[], rows: string[][] }
+// This coerces whatever is stored (older/partial rows, ragged grids) into a
+// rectangular grid so the renderer never has to guard per cell. Tables with no
+// columns AND no rows are dropped, so an empty one never prints a stray border.
+export function normalizeCustomTables(tables) {
+  if (!Array.isArray(tables)) return [];
+  return tables.reduce((out, t) => {
+    if (!t || typeof t !== 'object') return out;
+    const columns = (Array.isArray(t.columns) ? t.columns : []).map(c => (c == null ? '' : String(c)));
+    const width = columns.length;
+    const rows = (Array.isArray(t.rows) ? t.rows : [])
+      .map(r => (Array.isArray(r) ? r : [r]))
+      // Pad/trim every row to the column count so a ragged grid still lines up.
+      .map(r => Array.from({ length: width }, (_, i) => (r[i] == null ? '' : String(r[i]))));
+    if (width === 0 && rows.length === 0) return out;
+    out.push({ id: t.id || `tbl_${out.length}`, title: t.title || '', intro: t.intro || '', columns, rows });
+    return out;
+  }, []);
+}
+
 function TermBlock({ b, first }) {
   if (b.kind === 'opening') return <div className="wc-term-opening"><em>Dear Customer,</em> {b.text}</div>;
   if (b.kind === 'head') return <div className={`wc-term-head${first ? ' wc-term-head-first' : ''}`}>{b.text}</div>;
@@ -256,9 +279,16 @@ export default function WarrantyCertificate({
   const blocks = React.useMemo(() => buildBlocks(openingText, sections), [openingText, sectionsJson]);
   const hasSeriesTable = !!(template.showSeriesTable && template.seriesTable && template.seriesTable.length > 0);
   const hasHeatoutTable = !!(template.heatoutTable && template.liabilityTable?.length > 0);
+  // Free-form tables authored in the Warranty Builder (any number of tables,
+  // any number of columns/rows). They render with the SAME .wc-table styling as
+  // the two built-in tables, so they inherit the one --wc-term-scale font size
+  // and are measured by the same fit engine — a long table shrinks the page to
+  // fit instead of spilling onto a second one.
+  const customTables = normalizeCustomTables(template.customTables);
+  const customTablesJson = JSON.stringify(customTables);
 
   const termsKey = `${openingText || ''}|${sectionsJson}`;
-  const tablesKey = `${JSON.stringify(template.seriesTable || [])}|${JSON.stringify(template.liabilityTable || [])}|${!!template.heatoutTable}|${!!template.showSeriesTable}`;
+  const tablesKey = `${JSON.stringify(template.seriesTable || [])}|${JSON.stringify(template.liabilityTable || [])}|${!!template.heatoutTable}|${!!template.showSeriesTable}|${customTablesJson}`;
   const detailsKey = JSON.stringify({ customer, certData, variant, period: certData.warrantyPeriod || template.duration });
 
   React.useEffect(() => {
@@ -464,8 +494,8 @@ export default function WarrantyCertificate({
         </div>
       )}
 
-      {/* ══ SERIES / LIABILITY TABLES (only when data) ══ */}
-      {(hasHeatoutTable || hasSeriesTable) && (
+      {/* ══ SERIES / LIABILITY / CUSTOM TABLES (only when data) ══ */}
+      {(hasHeatoutTable || hasSeriesTable || customTables.length > 0) && (
         <div className="wc-tables">
           {hasHeatoutTable && (
             <>
@@ -496,6 +526,32 @@ export default function WarrantyCertificate({
               </table>
             </>
           )}
+          {customTables.map((t) => (
+            <React.Fragment key={t.id}>
+              {t.title && <div className="wc-table-title">{t.title}</div>}
+              {t.intro && <div className="wc-table-intro">{t.intro}</div>}
+              <table className="wc-table">
+                {t.columns.length > 0 && (
+                  <thead><tr>
+                    {t.columns.map((c, ci) => (
+                      // Even column widths, and every column after the first is
+                      // centred — matching the built-in tables' look.
+                      <th key={ci} style={{ width: `${100 / t.columns.length}%`, textAlign: ci === 0 ? 'left' : 'center' }}>{c}</th>
+                    ))}
+                  </tr></thead>
+                )}
+                <tbody>
+                  {t.rows.map((row, ri) => (
+                    <tr key={ri}>
+                      {row.map((cell, ci) => (
+                        <td key={ci} style={{ textAlign: ci === 0 ? 'left' : 'center' }}>{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </React.Fragment>
+          ))}
         </div>
       )}
 
@@ -561,6 +617,7 @@ const WC_CSS = `
 
   .wc-tables { flex-shrink: 0; margin-top: 10px; }
   .wc-table-title { font-size: calc(9pt * var(--wc-term-scale, 1)); font-weight: 700; color: #000; margin: 0 0 4px; font-family: 'Times New Roman', Times, Georgia, serif; }
+  .wc-table-intro { font-size: calc(9pt * var(--wc-term-scale, 1)); line-height: 1.4; color: #000; text-align: justify; margin: 0 0 calc(5px * var(--wc-term-scale, 1)); }
   .wc-table { width: 100%; border-collapse: collapse; margin-top: 4px; margin-bottom: 8px; font-size: calc(9pt * var(--wc-term-scale, 1)); }
   .wc-table th { color: #000; padding: 4px 9px; text-align: left; font-size: calc(9pt * var(--wc-term-scale, 1)); letter-spacing: 0.04em; font-weight: 700; font-family: 'Times New Roman', Times, Georgia, serif; border: 1px solid #000; border-bottom: 1.5px solid #000; }
   .wc-table td { padding: 5px 9px; border: 1px solid #000; vertical-align: middle; }

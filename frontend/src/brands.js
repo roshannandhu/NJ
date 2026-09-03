@@ -121,15 +121,30 @@ export function docPrefixesForBrand(brand, settings) {
 //                         brand IS the company, so empty fields inherit).
 //   • any other brand   → ONLY that brand's own fields — never NJ data.
 export function companyProfileForBrand(brand, data) {
+  // The original company details (`data.company`) - what every document printed
+  // before per-brand profiles existed. Settings no longer edits them, so they
+  // stay as the fallback described above. Restoring this fallback also restores
+  // the NJ header: the seeded "nj" brand carries only a name, so without it an
+  // NJ quotation printed a bare "NJ" with no address and no contact row.
+  const company = data?.company || {};
   if (!brand) {
     return {
-      name: '', address: '', phone: '', email: '', gst: '', website: '', logo: '',
+      name: company.name || '', address: company.address || '', phone: company.phone || '',
+      email: company.email || '', gst: company.gst || '', website: company.website || '',
+      logo: '', isGlobalFallback: true,
     };
   }
+  // Only the NJ brand inherits; letting any other brand fall back is exactly
+  // what would print NJ's address and phone number on a Highlander quotation.
+  const fromCompany = brand.id === 'nj';
+  const pick = (field) => brand[field] || (fromCompany ? company[field] : '') || '';
   return {
-    name: brand.name || '',
-    address: brand.address || '', phone: brand.phone || '', email: brand.email || '',
-    gst: brand.gst || '', website: brand.website || '',
-    logo: brand.logo || '',
+    // For NJ the COMPANY name leads: `brand.name` is the short brand label
+    // ("NJ"), while the header must carry the legal entity. Other brands have
+    // no separate company-name field, so their brand name is the company name.
+    name: fromCompany ? (company.name || brand.name || '') : (brand.name || ''),
+    address: pick('address'), phone: pick('phone'), email: pick('email'),
+    gst: pick('gst'), website: pick('website'),
+    logo: brand.logo || '', isGlobalFallback: false,
   };
 }

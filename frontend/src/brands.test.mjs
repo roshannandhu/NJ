@@ -3,7 +3,7 @@
 // a HIGHLANDER class named "STONECOATED" must not inherit NJ's spec text,
 // NJ's 50-year warranty line, or NJ's warranty certificate template.
 import assert from 'node:assert';
-import { isLegacyBrandClass } from './brands.js';
+import { isLegacyBrandClass, companyProfileForBrand } from './brands.js';
 
 const data = {
   brands: [{ id: 'nj', name: 'NJ INDIA' }, { id: 'brand_hl', name: 'HIGHLANDER' }],
@@ -33,4 +33,32 @@ assert.equal(isLegacyBrandClass('NJ Stone Coated', reparented, data), false);
 assert.equal(isLegacyBrandClass('Something Else', [], data), true);
 assert.equal(isLegacyBrandClass('anything', [], { brands: [], classes: [] }), true);
 
-console.log('brands: legacy-brand gating OK');
+// ── Company profile: NJ's details must never print on another brand ──────────
+// Regression: an unrelated commit dropped the `data.company` fallback here, so
+// the seeded "nj" brand (which carries a name and nothing else) printed a bare
+// "NJ" header with no address and no contact row.
+const profileData = {
+  company: { name: 'NJ India Trading Pvt. Ltd.', address: 'KNH Building', phone: '+91 73566 08633', website: 'www.njindia.in' },
+  brands: [{ id: 'nj', name: 'NJ' }, { id: 'brand_hl', name: 'HIGHLANDER', phone: '+91 99999 00000' }],
+};
+
+// NJ inherits the company details, and the legal entity leads over the label.
+const njProfile = companyProfileForBrand(profileData.brands[0], profileData);
+assert.equal(njProfile.name, 'NJ India Trading Pvt. Ltd.');
+assert.equal(njProfile.address, 'KNH Building');
+assert.equal(njProfile.phone, '+91 73566 08633');
+
+// Highlander gets ONLY its own fields — no NJ name, address or phone.
+const hlProfile = companyProfileForBrand(profileData.brands[1], profileData);
+assert.equal(hlProfile.name, 'HIGHLANDER');
+assert.equal(hlProfile.address, '');
+assert.equal(hlProfile.phone, '+91 99999 00000');
+assert.ok(!JSON.stringify(hlProfile).includes('NJ'), 'no NJ data may reach a non-NJ brand');
+
+// No resolvable brand → the global fallback, flagged so the document knows.
+const noBrand = companyProfileForBrand(null, profileData);
+assert.equal(noBrand.isGlobalFallback, true);
+assert.equal(noBrand.name, 'NJ India Trading Pvt. Ltd.');
+assert.equal(companyProfileForBrand(profileData.brands[0], profileData).isGlobalFallback, false);
+
+console.log('brands: legacy-brand gating + company-profile isolation OK');
