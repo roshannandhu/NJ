@@ -188,12 +188,17 @@ function FittedImg({ src, fallbackSrc = null, maxW, maxH, alt = '', style = {} }
   return <img src={meta.url} alt={alt} width={w} height={h} style={{ width: w, height: h, display: 'block', ...style }} />;
 }
 
-// Company stamp / seal. Prefers the uploaded image (template.sealImage) and ALWAYS
-// falls back to the drawn NJ India stamp, fitted into the square SEAL_BOX so an
-// uploaded non-square seal keeps its true aspect (no oval) and the drawn fallback
-// stays a perfect circle.
-function Seal({ template }) {
-  return <FittedImg src={template.sealImage} fallbackSrc={DRAWN_SEAL_URL}
+// Company stamp / seal. Prefers the uploaded image (template.sealImage), fitted
+// into the square SEAL_BOX so an uploaded non-square seal keeps its true aspect
+// (no oval) and the drawn fallback stays a perfect circle.
+//
+// The drawn fallback is NJ's stamp - its artwork spells out NOUFAL & JABBAR
+// INTERNATIONAL LLP and NJ's address - so ONLY the NJ/no-brand path may use it.
+// It used to be unconditional, which stamped NJ's seal onto every other brand's
+// certificate. A brand that has not uploaded a seal now shows none.
+function Seal({ template, isLegacyBrand }) {
+  if (!template.sealImage && !isLegacyBrand) return null;
+  return <FittedImg src={template.sealImage} fallbackSrc={isLegacyBrand ? DRAWN_SEAL_URL : ''}
     maxW={SEAL_BOX} maxH={SEAL_BOX} alt="Company Seal" />;
 }
 
@@ -250,7 +255,7 @@ function CertificateDetails({ customer, certData: cd, template, fallbackDate, wa
       {isDocke && row('Batch Number', cd.batchNo)}
       {isCeramic && row('Batch Number (see on the packaging)', cd.batchNo)}
       {!isCeramic && row('Date', cd.purchaseDate || fallbackDate)}
-      {!isHeatout && row('Trading Organization', 'NOUFAL & JABBAR INTERNATIONAL LLP', true)}
+      {!isHeatout && certData.tradingOrg && row('Trading Organization', certData.tradingOrg, true)}
       {row("Seller's Name & Signature", cd.sellerName)}
       {isCeramic && row('Date', cd.purchaseDate || fallbackDate)}
     </div>
@@ -263,6 +268,10 @@ export default function WarrantyCertificate({
   customer = {}, certData = {}, fallbackDate = '', invoiceFallback = '',
   edit = null, domId = 'warrantyDoc',
   warrantyNo = '', orderNo = '',
+  // Whether this certificate belongs to the ORIGINAL brand. Defaults to false so
+  // a caller that forgets it can never leak NJ's seal onto another brand - the
+  // safe direction, since a missing seal is visible while a wrong one is not.
+  isLegacyBrand = false,
 }) {
   const [editingTerms, setEditingTerms] = React.useState(false);
   const [fontTick, setFontTick] = React.useState(0);
@@ -484,7 +493,7 @@ export default function WarrantyCertificate({
           </div>
           {/* Seal and Signature pinned to the bottom-right end of the terms (above the tables). */}
           <div className="wc-term-seal">
-            <Seal template={template} />
+            <Seal template={template} isLegacyBrand={isLegacyBrand} />
             <div className="wc-sig-block">
               <div className="wc-sig-area">
                 <FittedImg src={template.signImage} maxW={150} maxH={50} alt="Signature" />

@@ -5,7 +5,7 @@ import { createWarranty } from '../api';
 import { DEFAULT_DATA } from '../data';
 import { elementToPdf, elementToPdfFile, shareElementPdf, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
-import { isLegacyBrandClass } from '../brands';
+import { isLegacyBrandClass, resolveQuotationBrand, warrantyIdentityForBrand } from '../brands';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Standalone warranty view. The certificate body itself is the shared
@@ -72,6 +72,11 @@ export default function WarrantyDocument() {
   const customer = doc.customer || {};
   const certData = doc.certData || {};
   const parentQuote = data.quotations?.find(q => q.id === doc.quotationId) || null;
+  // Brand identity for this certificate, resolved LIVE from its own line items
+  // (same rule the template already follows) so renaming a brand updates every
+  // certificate and certificates SAVED BEFORE the brand gating existed stop
+  // showing NJ's trading organisation and seal.
+  const wIdentity = warrantyIdentityForBrand(resolveQuotationBrand(doc.items, data), data);
   const isStandalone = !parentQuote || parentQuote.warrantyOnly;
 
   // ── Persist every edit immediately (local + backend) ────────────────────────
@@ -237,11 +242,12 @@ export default function WarrantyDocument() {
         <div className={`wd-preview-frame${phoneEditMode ? ' is-phone-edit' : ''}`}>
           <div className="wd-preview-title"><ShieldCheck size={14} /><strong>A4 certificate preview</strong><span>Tap highlighted fields to edit</span></div>
           <WarrantyCertificate
+            isLegacyBrand={wIdentity.isLegacyBrand}
             template={template}
             openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
             variant="customer"
             customer={customer}
-            certData={certData}
+            certData={{ ...certData, tradingOrg: wIdentity.tradingOrg }}
             fallbackDate={doc.date}
             invoiceFallback={doc.quotationId || parentQuote?.id || ''}
             warrantyNo={doc.warrantyNo || doc.id}

@@ -561,6 +561,7 @@ export default function QuotationSettings() {
           <Field label="Quotation Validity (Days)" hint="Shown at the bottom of every printed document">
             <NumberField
               min={1} fallback={30}
+              allowFloat={false}   /* whole days only — the one integer field */
               value={settings.validityDays}
               onCommit={v => setSettings(s => ({ ...s, validityDays: v }))}
               style={inputStyle}

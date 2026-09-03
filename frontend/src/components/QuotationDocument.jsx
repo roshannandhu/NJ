@@ -8,7 +8,7 @@ import { DEFAULT_DATA } from '../data';
 import { paginateQuotation } from '../quotationPagination';
 import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
-import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass } from '../brands';
+import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass, warrantyIdentityForBrand } from '../brands';
 import { sanitizeDecimal } from '../numeric';
 import WarrantyCertificate from './WarrantyCertificate';
 
@@ -2296,14 +2296,20 @@ function QuotationDocumentInner() {
               : { ..._stored };
             if (!tmpl.id) tmpl.id = _tid || _stored.id;
             const cd = activeCert.certData || {};
+            // Resolved LIVE from the certificate's own items, same as the template
+            // above - a certificate must never inherit NJ's trading organisation
+            // or NJ's drawn seal just because it has no brand data of its own.
+            const certIdentity = warrantyIdentityForBrand(
+              resolveQuotationBrand(activeCert.items || [], data), data);
 
             return (
             <WarrantyCertificate
+              isLegacyBrand={certIdentity.isLegacyBrand}
               template={tmpl}
               openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
               variant="certificate"
               customer={activeCert.customer || {}}
-              certData={cd}
+              certData={{ ...cd, tradingOrg: certIdentity.tradingOrg }}
               fallbackDate={activeCert.date}
               warrantyNo={activeCert.warrantyNo || activeCert.id}
               orderNo={activeCert.quotationId || doc.id || ''}

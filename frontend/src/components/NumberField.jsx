@@ -28,7 +28,16 @@ import { sanitizeDecimal } from '../numeric';
  * also gives Android a keypad WITH a decimal key — `inputMode="numeric"` has
  * none) and filters the keystrokes itself. ArrowUp/ArrowDown stepping is
  * re-implemented so those fields keep behaving like number inputs.
- * Integer fields keep the native `type="number"`.
+ * Integer fields (`allowFloat={false}`) keep the native `type="number"`.
+ *
+ * `allowFloat` DEFAULTS TO TRUE because decimals are what these fields are for:
+ * of the call sites, only "Quotation Validity (Days)" is genuinely a whole
+ * number. When it was opt-in, the Checkout quantity field was simply missed and
+ * silently parseInt-truncated every fractional quantity the user typed (380.5
+ * sqft became 380) - a wrong number on a customer's quotation, with nothing on
+ * screen to indicate it. Defaulting the other way makes that omission harmless:
+ * a decimal accepted where an integer was expected is recoverable, a truncated
+ * one is lost.
  */
 export default function NumberField({
   value,
@@ -36,7 +45,7 @@ export default function NumberField({
   min = 0,
   max,
   step,
-  allowFloat = false,
+  allowFloat = true,   // decimals unless a caller explicitly opts out
   fallback,            // value to use if left empty/invalid on blur (defaults to min)
   style,
   className,

@@ -3,7 +3,7 @@
 // a HIGHLANDER class named "STONECOATED" must not inherit NJ's spec text,
 // NJ's 50-year warranty line, or NJ's warranty certificate template.
 import assert from 'node:assert';
-import { isLegacyBrandClass, companyProfileForBrand } from './brands.js';
+import { isLegacyBrandClass, companyProfileForBrand, warrantyIdentityForBrand } from './brands.js';
 
 const data = {
   brands: [{ id: 'nj', name: 'NJ INDIA' }, { id: 'brand_hl', name: 'HIGHLANDER' }],
@@ -61,4 +61,23 @@ assert.equal(noBrand.isGlobalFallback, true);
 assert.equal(noBrand.name, 'NJ India Trading Pvt. Ltd.');
 assert.equal(companyProfileForBrand(profileData.brands[0], profileData).isGlobalFallback, false);
 
-console.log('brands: legacy-brand gating + company-profile isolation OK');
+// ── Warranty certificates: NJ's entity and seal must not reach other brands ──
+// Regression: the "Trading Organization" row hardcoded NJ's legal entity and the
+// drawn fallback seal (whose artwork names that entity and NJ's address) was
+// used unconditionally, so a Highlander certificate carried both.
+const njW = warrantyIdentityForBrand(profileData.brands[0], profileData);
+assert.equal(njW.tradingOrg, 'NOUFAL & JABBAR INTERNATIONAL LLP');
+assert.equal(njW.isLegacyBrand, true);   // NJ may use the drawn seal
+
+const hlW = warrantyIdentityForBrand(profileData.brands[1], profileData);
+assert.equal(hlW.tradingOrg, 'HIGHLANDER');
+assert.equal(hlW.isLegacyBrand, false);  // gates the drawn NJ seal off
+assert.ok(!hlW.tradingOrg.includes('NOUFAL'), 'NJ entity must not reach another brand');
+
+// No resolvable brand keeps NJ's entity (single-brand catalogues still work).
+assert.equal(warrantyIdentityForBrand(null, profileData).isLegacyBrand, true);
+
+// An unnamed non-NJ brand prints NOTHING rather than falling back to NJ.
+assert.equal(warrantyIdentityForBrand({ id: 'x', name: '' }, profileData).tradingOrg, '');
+
+console.log('brands: legacy-brand gating + company-profile + warranty-identity isolation OK');

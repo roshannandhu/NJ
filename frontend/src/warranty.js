@@ -11,7 +11,7 @@
 // upserts by id, never duplicating, and callers filter out ids that already
 // exist so a user's edits to an existing certificate are never overwritten).
 
-import { resolveQuotationBrand, companyProfileForBrand, docPrefixesForBrand } from './brands';
+import { resolveQuotationBrand, companyProfileForBrand, docPrefixesForBrand, warrantyIdentityForBrand } from './brands';
 
 // Resolve the unique warranty templates linked to the product classes on a
 // quotation. Tool/accessory classes have no warrantyId, so they're naturally
@@ -60,6 +60,7 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
   const qBrand = resolveQuotationBrand(quotation.items, data);
   const profile = companyProfileForBrand(qBrand, data);
   const wPrefix = docPrefixesForBrand(qBrand, settings).warranty;
+  const wIdentity = warrantyIdentityForBrand(qBrand, data);
   const certIdFor = (tmpl) =>
     `${wPrefix}-${qSuffix}-${String(tmpl.id).replace(/[^a-zA-Z0-9]+/g, '').slice(0, 12)}`;
 
@@ -84,7 +85,10 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
       warrantyNo: wNo,
       template: tmpl,
       certData: {
-        sellerName: profile.name || data.company?.name || 'NOUFAL & JABBAR INTERNATIONAL LLP',
+        // Never fall through to NJ's entity for another brand: an unnamed brand
+        // prints nothing rather than NJ's name.
+        sellerName: profile.name || (wIdentity.isLegacyBrand ? (data.company?.name || 'NOUFAL & JABBAR INTERNATIONAL LLP') : ''),
+        tradingOrg: wIdentity.tradingOrg,
         batchNo: selectedItem?.batchNo || '',
         purchaseDate: today,
         siteAddress: (quotation.customer || {}).address || '',

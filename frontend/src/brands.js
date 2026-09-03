@@ -148,3 +148,25 @@ export function companyProfileForBrand(brand, data) {
     logo: brand.logo || '', isGlobalFallback: false,
   };
 }
+
+// The identity a WARRANTY CERTIFICATE prints for a quotation's parent brand.
+//
+// Certificates carried two pieces of NJ identity that no brand gating touched:
+// the "Trading Organization" row, hardcoded to NJ's legal entity, and the drawn
+// fallback seal, whose artwork spells out that same entity and NJ's address. A
+// Highlander certificate therefore named NOUFAL & JABBAR INTERNATIONAL LLP as
+// the trading organization and stamped NJ's seal on it.
+//
+// `tradingOrg` is the LEGAL ENTITY, which is deliberately not the trading name
+// on the quotation header ("NJ India Trading Pvt. Ltd."), so NJ keeps its own
+// string; any other brand names itself. `isLegacyBrand` gates the drawn seal —
+// a brand that has not uploaded one gets NO seal rather than NJ's.
+export function warrantyIdentityForBrand(brand, data) {
+  const isLegacyBrand = !brand || brand.id === 'nj';
+  return {
+    isLegacyBrand,
+    tradingOrg: isLegacyBrand
+      ? (data?.company?.tradingOrg || 'NOUFAL & JABBAR INTERNATIONAL LLP')
+      : (brand.name || ''),
+  };
+}

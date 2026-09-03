@@ -60,6 +60,13 @@ router = APIRouter()
 FONT_BODY = "Times New Roman"
 FONT_HEAD = "Times New Roman"
 
+# NJ's own identity. Printed ONLY on NJ / no-brand certificates, and on ones
+# saved before certData carried a brand-resolved tradingOrg. Any other brand
+# prints its own name (see _sig_area / _cert_details_common).
+NJ_TRADING_ORG = "NOUFAL & JABBAR INTERNATIONAL LLP"
+NJ_COMPANY_NAME = "NJ INDIA Trading Pvt. Ltd."
+NJ_COMPANY_ADDRESS = "Bypass Road, Ramanattukara"
+
 
 def _set_cell_border(cell, **kwargs):
     """Set borders on a table cell (top/bottom/left/right)."""
@@ -252,25 +259,36 @@ def _warranty_period_table(doc, rows=None, n_blank=4):
     return tbl
 
 
-def _sig_area(doc, has_seal=True):
-    """Blank signature + seal area at the bottom."""
+def _sig_area(doc, has_seal=True, cert_data=None):
+    """Blank signature + seal area at the bottom.
+
+    The company name and address here are NJ's. They are printed only for a
+    certificate that actually belongs to NJ: ``certData.tradingOrg`` carries the
+    brand-resolved organisation, so another brand prints its own name and no
+    address rather than NJ's. A certificate saved BEFORE the field existed has
+    no ``tradingOrg`` key at all, and keeps the original NJ output.
+    """
+    cert_data = cert_data or {}
+    legacy = "tradingOrg" not in cert_data
+    org = NJ_COMPANY_NAME if legacy else (cert_data.get("tradingOrg") or "")
     _blank_line(doc, 8)
     para = doc.add_paragraph()
     r1 = para.add_run("Company Name: ")
     r1.bold = True
     r1.font.name = FONT_BODY
     r1.font.size = Pt(10)
-    r2 = para.add_run("NJ INDIA Trading Pvt. Ltd.")
+    r2 = para.add_run(org)
     r2.font.name = FONT_BODY
     r2.font.size = Pt(10)
-    para2 = doc.add_paragraph()
-    r3 = para2.add_run("Address: ")
-    r3.bold = True
-    r3.font.name = FONT_BODY
-    r3.font.size = Pt(10)
-    r4 = para2.add_run("Bypass Road, Ramanattukara")
-    r4.font.name = FONT_BODY
-    r4.font.size = Pt(10)
+    if legacy or org == NJ_COMPANY_NAME:
+        para2 = doc.add_paragraph()
+        r3 = para2.add_run("Address: ")
+        r3.bold = True
+        r3.font.name = FONT_BODY
+        r3.font.size = Pt(10)
+        r4 = para2.add_run(NJ_COMPANY_ADDRESS)
+        r4.font.name = FONT_BODY
+        r4.font.size = Pt(10)
     para3 = doc.add_paragraph()
     r5 = para3.add_run("Seal & Sign:")
     r5.bold = True
@@ -322,9 +340,14 @@ def _cert_details_common(doc, cert_data, customer, template_id="default"):
     if template_id != "ceramic":
         _cert_row(doc, "Date:", f"  {date}")
 
-    # 5. Trading Organization (all templates EXCEPT Heatout)
+    # 5. Trading Organization (all templates EXCEPT Heatout).
+    # Brand-resolved: hardcoding NJ's entity here named NOUFAL & JABBAR
+    # INTERNATIONAL LLP on every other brand's certificate too. A pre-existing
+    # certificate has no tradingOrg key and keeps NJ's entity.
     if template_id != "heatout":
-        _cert_row(doc, "Trading Organization:", "  NOUFAL & JABBAR INTERNATIONAL LLP", underline_val=False)
+        org = NJ_TRADING_ORG if "tradingOrg" not in cert_data else (cert_data.get("tradingOrg") or "")
+        if org:
+            _cert_row(doc, "Trading Organization:", f"  {org}", underline_val=False)
 
     # 6. Seller's Name & Signature Row (all templates)
     _cert_row(doc, "Seller's Name & Signature", f"  {seller}")
@@ -463,7 +486,7 @@ def _gen_dynamic_warranty(doc, cert_data, customer, template, cert):
     _cert_details_common(doc, cert_data, customer, template_id=template.get("id"))
     
     # Signature block
-    _sig_area(doc, has_seal=True)
+    _sig_area(doc, has_seal=True, cert_data=cert_data)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
