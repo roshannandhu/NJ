@@ -11,10 +11,51 @@ from routers.json_stream import stream_json_rows
 router = APIRouter()
 
 
+def _without_snapshot_artwork(cert):
+    """Drop the base64 seal / logo / signature copied into a certificate's
+    template snapshot.
+
+    Every certificate stores a snapshot of its warranty template, artwork and
+    all, so 157 certificates carry ~21 MB of the same eight images — 96% of
+    what this list returns, fetched before the app can show anything. Nothing
+    renders from it: WarrantyDocument and QuotationDocument resolve the LIVE
+    template for logo, seal and signature and use the snapshot only when the
+    template was deleted (and the seal then falls back to the drawn one).
+    Text (sections, tables, opening) stays, so that fallback still works, and
+    GET /api/warranties/{id} still returns the record whole.
+    """
+    tpl = cert.get("template")
+    if isinstance(tpl, dict):
+        for key, value in list(tpl.items()):
+            if isinstance(value, str) and value.startswith("data:"):
+                del tpl[key]
+    return cert
+
+
+def _keep_stored_artwork(incoming, stored_raw):
+    """Put back any base64 artwork the stored snapshot has and the incoming
+    template is missing — the read side strips it, so a round-trip through the
+    UI would otherwise delete it."""
+    if not isinstance(incoming, dict):
+        return incoming
+    try:
+        stored = (json.loads(stored_raw or "{}") or {}).get("template")
+    except (ValueError, TypeError):
+        return incoming
+    if not isinstance(stored, dict):
+        return incoming
+    for key, value in stored.items():
+        if key not in incoming and isinstance(value, str) and value.startswith("data:"):
+            incoming[key] = value
+    return incoming
+
+
 @router.get("/api/warranties")
 def list_warranties():
     return stream_json_rows(
-        WarrantyCertificate, order_by=WarrantyCertificate.created_at.desc()
+        WarrantyCertificate,
+        order_by=WarrantyCertificate.created_at.desc(),
+        transform=_without_snapshot_artwork,
     )
 
 
@@ -70,6 +111,11 @@ def save_warranty(body: dict = Body(...)):
         body["updatedAt"] = now.isoformat()
         if is_new:
             body["createdAt"] = now.isoformat()
+        # A client that loaded this certificate from the list has no snapshot
+        # artwork any more (see _without_snapshot_artwork), so saving an edit
+        # must not wipe it from the stored record.
+        if not is_new:
+            body["template"] = _keep_stored_artwork(body.get("template"), row.data)
         row.data = json.dumps(body)
         db.commit()
         db.refresh(row)
