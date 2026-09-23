@@ -234,6 +234,20 @@ class _Provider:
         c = self.config()
         return bool(c.get("client_id")) and (bool(c.get("client_secret")) or not self.needs_secret)
 
+    def _forget_folder_id(self, folder_id: str) -> None:
+        """Drop a folder ID this provider can no longer use, so the next backup
+        falls back to the app's own folder instead of retrying it for ever.
+        Credentials are left untouched. save_config() cannot clear this field —
+        an empty value there preserves the existing one — so this is the only
+        way out of a folder ID that stopped working."""
+        with _io_lock:
+            cfg = _load_config()
+            entry = cfg.get(self.name) or {}
+            if entry.get("folder_id") == folder_id:
+                entry.pop("folder_id", None)
+                cfg[self.name] = entry
+                _save_config_dict(cfg)
+
     def _tokens(self) -> dict:
         return _load_tokens().get(self.name, {})
 
@@ -353,11 +367,19 @@ class GoogleDrive(_Provider):
         return r.json().get("email", "")
 
     def ensure_folder(self) -> str:
-        # If the user configured a specific Drive folder ID, use it directly —
-        # no search or folder creation needed.
+        # A configured folder ID is used as-is — but only if this app can
+        # actually reach it. The scope is drive.file, which sees only what the
+        # app itself created, so an ID pasted from a Drive URL, or one created
+        # under different credentials, or a folder since deleted, is invisible
+        # to us: every upload then fails with "404 Not Found" on the resumable
+        # endpoint, forever, because we handed Drive a parent it cannot see.
+        # That silently cost 20 days of backups. Verify it, and if it is
+        # unusable forget it and fall back to the app's own folder below.
         folder_id = self.config().get("folder_id", "").strip()
         if folder_id:
-            return folder_id
+            if self._folder_reachable(folder_id):
+                return folder_id
+            self._forget_folder_id(folder_id)
 
         h = self._headers()
         # Search for "NJ India Backups" at root level, or inside a parent if set.
@@ -380,6 +402,21 @@ class GoogleDrive(_Provider):
                        json=body, timeout=30)
         r.raise_for_status()
         return r.json()["id"]
+
+    def _folder_reachable(self, folder_id: str) -> bool:
+        """Can this app see that folder, and is it still alive?"""
+        try:
+            r = httpx.get(f"https://www.googleapis.com/drive/v3/files/{folder_id}",
+                          params={"fields": "id,trashed"},
+                          headers=self._headers(), timeout=20)
+        except Exception:
+            return True   # a network blip is not a verdict on the folder
+        if r.status_code != 200:
+            return False  # 404 (not ours, or gone) / 403 (no access)
+        try:
+            return not r.json().get("trashed", False)
+        except Exception:
+            return True
 
     def upload_file(self, path: Path, folder_id: str) -> None:
         data = path.read_bytes()
