@@ -25,6 +25,22 @@ echo ========== [1/5] Building frontend + share helper ==========
 python "%ROOT%sync_version.py" || goto :err
 cd /d "%ROOT%frontend" || goto :err
 call npm install || goto :err
+
+REM A build that compiles can still be dead on arrival: an identifier left behind
+REM after an edit (a removed useState, a renamed prop) is only a ReferenceError at
+REM runtime, and it blanks the whole app the moment that component renders. 1.1.3
+REM shipped two of them. Vite does not care, eslint does — so refuse to build when
+REM any turn up. Other lint noise (unused vars) is not fatal and is ignored here.
+echo --- checking for undefined variables ---
+call npx eslint src > "%TEMP%\nj_lint.txt" 2>&1
+findstr /C:"no-undef" "%TEMP%\nj_lint.txt" >nul
+if not errorlevel 1 (
+  findstr /C:"no-undef" "%TEMP%\nj_lint.txt"
+  echo.
+  echo BUILD STOPPED: undefined variables above would crash the app at runtime.
+  goto :err
+)
+
 set "VITE_API_URL=http://18.61.159.169:8000"
 call npm run build || goto :err
 

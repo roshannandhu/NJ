@@ -255,7 +255,7 @@ function CertificateDetails({ customer, certData: cd, template, fallbackDate, wa
       {isDocke && row('Batch Number', cd.batchNo)}
       {isCeramic && row('Batch Number (see on the packaging)', cd.batchNo)}
       {!isCeramic && row('Date', cd.purchaseDate || fallbackDate)}
-      {!isHeatout && certData.tradingOrg && row('Trading Organization', certData.tradingOrg, true)}
+      {!isHeatout && cd.tradingOrg && row('Trading Organization', cd.tradingOrg, true)}
       {row("Seller's Name & Signature", cd.sellerName)}
       {isCeramic && row('Date', cd.purchaseDate || fallbackDate)}
     </div>
