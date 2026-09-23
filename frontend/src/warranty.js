@@ -89,6 +89,11 @@ export function buildWarrantyCertsForQuotation(quotation, data, settings) {
         // prints nothing rather than NJ's name.
         sellerName: profile.name || (wIdentity.isLegacyBrand ? (data.company?.name || 'NOUFAL & JABBAR INTERNATIONAL LLP') : ''),
         tradingOrg: wIdentity.tradingOrg,
+        // Freeze the warranty period at issue. The certificate prints
+        // certData.warrantyPeriod in preference to the template's duration, so
+        // stamping it here means editing the template later cannot change the
+        // period on a certificate already in a customer's hands.
+        warrantyPeriod: tmpl.duration || '',
         batchNo: selectedItem?.batchNo || '',
         purchaseDate: today,
         siteAddress: (quotation.customer || {}).address || '',

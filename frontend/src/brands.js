@@ -112,6 +112,19 @@ export function legacyClassKey(className, items, data) {
   return 'default';
 }
 
+// The company details a SAVED document must print. A document that carries its
+// own `companyProfile` prints that one, frozen at the moment it was issued —
+// editing the address, GST or logo in Settings then changes new documents only,
+// never a quotation the customer already has a printout of. Documents saved
+// before this existed (and unsaved previews) still resolve live.
+export function companyProfileForDoc(doc, brand, data) {
+  const snap = doc?.companyProfile;
+  if (snap && (snap.name || snap.address || snap.phone || snap.gst)) {
+    return { logo: '', isGlobalFallback: false, ...snap };
+  }
+  return companyProfileForBrand(brand, data);
+}
+
 // Document-number prefixes for a brand. `brand.docPrefix` (Settings → Parent
 // Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…).
 // A non-NJ brand WITHOUT a configured prefix derives one from its name (word

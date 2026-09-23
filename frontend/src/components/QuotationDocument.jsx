@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus, Trash2, Sliders, MoreVertical, Check } from 'lucide-react';
 import { mediaUrl, corsMediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareElementPdf, shareElementsPdf, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
@@ -8,9 +8,11 @@ import { DEFAULT_DATA } from '../data';
 import { paginateQuotation } from '../quotationPagination';
 import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
-import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass, legacyClassKey, warrantyIdentityForBrand } from '../brands';
+import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForDoc, isLegacyBrandClass, legacyClassKey, warrantyIdentityForBrand } from '../brands';
 import { sanitizeDecimal } from '../numeric';
 import WarrantyCertificate from './WarrantyCertificate';
+import MobilePageViewport from './MobilePageViewport';
+import MobileAddItemSheet from './MobileAddItemSheet';
 
 // Preset design colors offered on the quotation page (first is the original plum).
 const THEME_PRESETS = ['#8a1856', '#1e3a8a', '#14532d', '#c2410c', '#1f2937'];
@@ -131,8 +133,13 @@ function QuotationDocumentInner() {
     activeTab,
     setActiveTab,
     showToast,
-    persistConfig
+    persistConfig,
+    documentEditMode,
+    setDocumentEditMode,
   } = useAppContext();
+
+  const isPhone = typeof window !== 'undefined' && window.innerWidth <= 860;
+  const [showAddItemSheet, setShowAddItemSheet] = React.useState(false);
 
   const settings = data.settings || {};
   // The quotation's PARENT BRAND drives all document branding (header, footer,
@@ -143,12 +150,15 @@ function QuotationDocumentInner() {
     || (generatedDoc?.brandId ? (data.brands || []).find(b => b.id === generatedDoc.brandId) : null)
     || null;
   // Per-brand company profile; only the no-brand/NJ paths may show NJ data.
-  const profile = companyProfileForBrand(docBrand, data);
+  // A saved quotation prints the profile frozen onto it at issue (Checkout),
+  // so later Settings edits cannot rewrite a header the customer already has.
+  const profile = companyProfileForDoc(generatedDoc, docBrand, data);
   const njBranded = profile.isGlobalFallback || docBrand?.id === 'nj';
   const [isDownloading, setIsDownloading] = React.useState(false);
   const [shareOpen, setShareOpen] = React.useState(false);
   const [isSharing, setIsSharing] = React.useState(false);
   const [phoneEditMode, setPhoneEditMode] = React.useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = React.useState(false);
   // Native color-picker draft: held locally while dragging, committed on close
   // so we don't fire a backend upsert per drag tick.
   const [draftColor, setDraftColor] = React.useState(null);
@@ -547,6 +557,10 @@ function QuotationDocumentInner() {
         }
       });
     };
+    if (isPhone) {
+      resetPreviewScale();
+      return;
+    }
     if (phoneEditMode || document.body.getAttribute('data-quotation-editing') === 'true') {
       resetPreviewScale();
       return;
@@ -963,14 +977,20 @@ function QuotationDocumentInner() {
 
   // Construct tabs array for unified document viewer
   const documentTabs = [
-    { id: 'quotation', label: 'Quotation Sheet', icon: <FileText size={16} /> },
-    ...bundledWarranties.map(w => ({
-      id: w.warrantyNo || w.id,
-      label: `${(w.template?.logo && !w.template.logo.startsWith('data:image/')) ? w.template.logo : (w.template?.title ? w.template.title.replace('Warranty Certificate', '').replace('Performance', '').trim() : 'Product')} Warranty`,
-      icon: <ShieldCheck size={16} />,
-      isWarranty: true,
-      cert: w
-    }))
+    { id: 'quotation', label: 'Quotation Sheet', shortLabel: 'Quotation', icon: <FileText size={16} /> },
+    ...bundledWarranties.map(w => {
+      const cleanTitle = (w.template?.name || (w.template?.title ? w.template.title.replace(/Warranty Certificate/i, '').replace(/Performance/i, '').trim() : '') || w.brand?.name || 'Product')
+        .replace(/Warranty/i, '')
+        .trim();
+      return {
+        id: w.warrantyNo || w.id,
+        label: `${cleanTitle || 'Product'} Warranty`,
+        shortLabel: 'Warranty',
+        icon: <ShieldCheck size={16} />,
+        isWarranty: true,
+        cert: w
+      };
+    })
   ];
 
   // Banks available to switch this quotation to (active + the current one).
@@ -979,10 +999,134 @@ function QuotationDocumentInner() {
 
   return (
     <>
-    <div className="animate-fade-up" style={{ paddingBottom: '100px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div className="animate-fade-up" style={{ paddingBottom: isPhone ? '0' : '100px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: isPhone ? '100%' : 'auto', flex: isPhone ? 1 : 'none', minHeight: 0 }}>
 
       {/* Unified Hub Styles supporting responsive tabs, sidebar panels and zero-margin printing */}
       <style dangerouslySetInnerHTML={{ __html: `
+        .q-phone-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          height: 52px;
+          min-height: 52px;
+          background: var(--surface);
+          border-bottom: 1px solid var(--line);
+          padding: 0 12px;
+          box-sizing: border-box;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        .q-phone-back {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          border: 1px solid var(--line);
+          background: var(--bg);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--ink);
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .q-phone-tabs-pill {
+          display: flex;
+          align-items: center;
+          background: var(--bg-warm);
+          border: 1px solid var(--line);
+          border-radius: 9999px;
+          padding: 2px;
+          max-width: 200px;
+        }
+        .q-phone-tab-btn {
+          border: none;
+          background: transparent;
+          padding: 5px 12px;
+          border-radius: 9999px;
+          font-size: 11.5px;
+          font-weight: 700;
+          color: var(--ink-soft);
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.15s ease;
+        }
+        .q-phone-tab-btn.is-active {
+          background: var(--accent);
+          color: white;
+          box-shadow: 0 2px 6px rgba(194, 65, 12, 0.25);
+        }
+        .q-phone-header-title {
+          font-size: 14.5px;
+          font-weight: 700;
+          color: var(--ink);
+          letter-spacing: -0.01em;
+        }
+        .q-phone-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .q-phone-action-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          border: 1px solid var(--line);
+          background: var(--surface);
+          color: var(--ink);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .q-phone-action-btn.is-primary {
+          background: var(--accent);
+          color: white;
+          border-color: var(--accent);
+          box-shadow: 0 2px 8px rgba(194, 65, 12, 0.3);
+        }
+        .q-phone-action-btn.is-active {
+          background: var(--accent-soft);
+          color: var(--accent);
+          border-color: var(--accent);
+        }
+        .q-phone-more-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.45);
+          backdrop-filter: blur(3px);
+          z-index: 10001;
+        }
+        .q-phone-more-sheet {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: var(--surface);
+          border-radius: 20px 20px 0 0;
+          border-top: 1px solid var(--line);
+          box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25);
+          padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 0px));
+          z-index: 10002;
+          animation: q-phone-slide-up 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+        @keyframes q-phone-slide-up {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+        .q-phone-sheet-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--line-soft);
+          margin-bottom: 14px;
+        }
         .document-tab-bar {
           display: flex;
           gap: 12px;
@@ -1091,7 +1235,9 @@ function QuotationDocumentInner() {
            never appears in the exported PDF / print). */
         .q-editable { border-radius: 2px; transition: background 0.15s, outline 0.15s; }
         .q-editable:hover { background: rgba(138,24,86,0.06); outline: 1px dashed rgba(138,24,86,0.4); }
-        body[data-quotation-editing="true"] .q-sheet-page { transform: none !important; margin-bottom: 0 !important; }
+        @media (min-width: 861px) {
+          body[data-quotation-editing="true"] .q-sheet-page { transform: none !important; margin-bottom: 0 !important; }
+        }
         /* While typing, let a growing textarea near a page bottom stay visible
            (pagination recomputes on blur and re-clips). */
         body[data-quotation-editing="true"] .q-sheet-page { overflow: visible !important; }
@@ -1256,47 +1402,106 @@ function QuotationDocumentInner() {
         }
       `}} />
 
-      {/* ── TOP: Document Hub Tab Switching System ── */}
-      <div className="document-tab-bar" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px' }}>
-        {documentTabs.map(tab => {
-          const isActive = activeTabId === tab.id;
-          return (
+      {/* ── MOBILE TOP BAR (Phone only) ── */}
+      {isPhone && (
+        <div className="q-phone-header">
+          <button type="button" className="q-phone-back" onClick={() => goBack()} title="Go back">
+            <ArrowLeft size={18} />
+          </button>
+          
+          {documentTabs.length > 1 ? (
+            <div className="q-phone-tabs-pill">
+              {documentTabs.map(tab => {
+                const isActive = activeTabId === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`q-phone-tab-btn ${isActive ? 'is-active' : ''}`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.shortLabel || tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="q-phone-header-title">Quotation Document</div>
+          )}
+
+          <div className="q-phone-header-actions">
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="hover-lift"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '12px 24px',
-                borderRadius: 'var(--radius-full)',
-                background: isActive ? 'var(--accent)' : 'var(--surface)',
-                color: isActive ? 'white' : 'var(--ink-soft)',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: 'pointer',
-                boxShadow: isActive ? 'var(--shadow-md)' : 'var(--shadow-sm)',
-                transition: 'all 0.2s',
-                border: isActive ? '1px solid var(--accent)' : '1px solid var(--line)'
-              }}
+              type="button"
+              className="q-phone-action-btn is-primary"
+              onClick={activeTabId === 'quotation' ? downloadQuotationPDF : downloadWarrantyPDF}
+              disabled={isDownloading}
+              title="Download PDF"
             >
-              {tab.icon} {tab.label}
+              <Download size={16} />
             </button>
-          );
-        })}
-      </div>
+            <button
+              type="button"
+              className="q-phone-action-btn"
+              onClick={() => setShareOpen(o => !o)}
+              title="Share"
+            >
+              <Share2 size={16} />
+            </button>
+            <button
+              type="button"
+              className={`q-phone-action-btn ${mobileMoreOpen ? 'is-active' : ''}`}
+              onClick={() => setMobileMoreOpen(o => !o)}
+              title="More options"
+            >
+              <Sliders size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── TOP: Document Hub Tab Switching System (Desktop only) ── */}
+      {!isPhone && (
+        <div className="document-tab-bar" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px' }}>
+          {documentTabs.map(tab => {
+            const isActive = activeTabId === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="hover-lift"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px 24px',
+                  borderRadius: 'var(--radius-full)',
+                  background: isActive ? 'var(--accent)' : 'var(--surface)',
+                  color: isActive ? 'white' : 'var(--ink-soft)',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  boxShadow: isActive ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+                  transition: 'all 0.2s',
+                  border: isActive ? '1px solid var(--accent)' : '1px solid var(--line)'
+                }}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Document Hub Page Layout dispatcher ── */}
-      <div className="document-hub-layout" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px' }}>
+      <div className="document-hub-layout" style={{ maxWidth: activeTabId === 'quotation' ? '860px' : '1200px', width: '100%', flex: isPhone ? 1 : 'none', minHeight: 0 }}>
         
         {/* Certificate hint removed - Document is read-only in this view */}
 
         {/* ── Document Preview & Actions column ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%', minHeight: 0 }}>
           
-          {/* Dispatcher Actions Bar */}
-          {activeTabId === 'quotation' ? (
+          {/* Dispatcher Actions Bar (Desktop only) */}
+          {!isPhone && (activeTabId === 'quotation' ? (
             /* ── Actions Bar for Quotation Tab ── */
             <>
             <div className="actions-bar document-actions" style={{ display: 'flex', gap: '16px', marginBottom: '24px', width: '100%', maxWidth: '860px' }}>
@@ -1370,12 +1575,6 @@ function QuotationDocumentInner() {
             <div className="q-edit-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', padding: '10px 14px', background: 'rgba(138,24,86,0.05)', border: '1px solid rgba(138,24,86,0.18)', borderRadius: '8px', fontSize: '12px', color: '#8a1856', fontWeight: 600, width: '100%', maxWidth: '860px' }}>
               <Edit3 size={13} /> <span><strong>Tap any field to edit</strong> — the document expands automatically on phone. Or use <strong>Edit Quotation</strong> above to edit in the Quotation Desk.</span>
             </div>
-            <button
-              className="q-phone-edit-btn"
-              onClick={() => loadQuotationForEdit(generatedDoc)}
-            >
-              <Edit3 size={14}/> Edit Quotation (Mobile Form)
-            </button>
 
             {/* ── Document options: watermark toggle + design color (screen-only;
                    sits outside #quotationSheet so it never reaches the PDF) ── */}
@@ -1467,6 +1666,107 @@ function QuotationDocumentInner() {
                 <RotateCcw size={18} /> New Order
               </button>
             </div>
+          ))}
+
+          {/* ── Mobile More Options Bottom Sheet ── */}
+          {isPhone && mobileMoreOpen && (
+            <>
+              <div className="q-phone-more-backdrop" onClick={() => setMobileMoreOpen(false)} />
+              <div className="q-phone-more-sheet" onClick={e => e.stopPropagation()}>
+                <div className="q-phone-sheet-head">
+                  <div>
+                    <strong style={{ fontSize: '15px', color: 'var(--ink)' }}>Quotation Options</strong>
+                    <div style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>#{doc.id} · {custName}</div>
+                  </div>
+                  <button type="button" onClick={() => setMobileMoreOpen(false)} style={{ background: 'none', border: 'none', padding: '6px', color: 'var(--ink-soft)', cursor: 'pointer' }}>
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); loadQuotationForEdit(generatedDoc); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-warm)', border: '1px solid var(--line-soft)', color: 'var(--ink)', fontWeight: 600, fontSize: '13.5px', cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    <Edit3 size={16} color="var(--accent)" />
+                    <div>
+                      <div>Edit in Quotation Desk</div>
+                      <small style={{ color: 'var(--ink-soft)', fontSize: '11px' }}>Modify items, quantities, and pricing in the desk</small>
+                    </div>
+                  </button>
+
+                  {!generatedDoc.warrantyOnly && (
+                    <button
+                      type="button"
+                      onClick={() => { setMobileMoreOpen(false); startAddonOrder?.(generatedDoc); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', borderRadius: '12px', background: '#FDF6EC', border: '1px solid #b45309', color: '#b45309', fontWeight: 600, fontSize: '13.5px', cursor: 'pointer', textAlign: 'left' }}
+                    >
+                      <PackagePlus size={16} />
+                      <div>
+                        <div>Add More Items (Add-on Order)</div>
+                        <small style={{ color: '#9a3412', fontSize: '11px' }}>Add new products while freezing original quotation</small>
+                      </div>
+                    </button>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => commitDoc({ watermarkEnabled: !wmEnabled })}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', borderRadius: '10px', background: wmEnabled ? 'var(--accent-soft)' : 'var(--bg-warm)', border: `1px solid ${wmEnabled ? 'var(--accent)' : 'var(--line)'}`, color: wmEnabled ? 'var(--accent-deep)' : 'var(--ink-soft)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                    >
+                      {wmEnabled ? <Eye size={14} /> : <EyeOff size={14} />} Watermark: {wmEnabled ? 'On' : 'Off'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => advanceOn ? commitDoc({ advanceEnabled: false, advanceReceived: 0 }) : commitDoc({ advanceEnabled: true })}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', borderRadius: '10px', background: advanceOn ? 'rgba(29,78,216,0.08)' : 'var(--bg-warm)', border: `1px solid ${advanceOn ? '#1d4ed8' : 'var(--line)'}`, color: advanceOn ? '#1d4ed8' : 'var(--ink-soft)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                    >
+                      <Wallet size={14} /> Advance: {advanceOn ? 'On' : 'Off'}
+                    </button>
+                  </div>
+
+                  <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'var(--bg-warm)', border: '1px solid var(--line-soft)', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Design Theme Color</span>
+                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: PLUM, fontWeight: 700 }}>{PLUM}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      {THEME_PRESETS.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => applyThemeColor(c)}
+                          style={{ width: '32px', height: '32px', borderRadius: '50%', background: c, border: 'none', cursor: 'pointer', boxShadow: PLUM.toLowerCase() === c ? `0 0 0 2px var(--surface), 0 0 0 4px ${c}` : 'inset 0 0 0 1px rgba(0,0,0,0.12)' }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMoreOpen(false); startNew(); }}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', borderRadius: '12px', background: 'var(--surface)', border: '1px solid var(--line)', color: 'var(--ink)', fontWeight: 600, fontSize: '13px', cursor: 'pointer', marginTop: '6px' }}
+                  >
+                    <RotateCcw size={15} /> Start New Order
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Mobile Share Bottom Sheet ── */}
+          {isPhone && shareOpen && (
+            <>
+              <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 10005, background: 'rgba(0,0,0,0.45)' }} />
+              <div style={{ position: 'fixed', bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))', left: '16px', right: '16px', zIndex: 10006, background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: '16px', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
+                <div style={{ padding: '14px 16px 8px', borderBottom: '1px solid var(--line-soft)', fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>Share Document</div>
+                <button style={shareItemStyle} onClick={shareCurrent}>Share this {activeTabId === 'quotation' ? 'quotation' : 'warranty'} (PDF)</button>
+                <button style={{ ...shareItemStyle, borderBottom: 'none' }} onClick={shareFullSet}>Share full set (Quotation + All Warranties)</button>
+                <button style={{ ...shareItemStyle, color: 'var(--ink-soft)', textAlign: 'center', borderTop: '1px solid var(--line-soft)', borderBottom: 'none' }} onClick={() => setShareOpen(false)}>Cancel</button>
+              </div>
+            </>
           )}
 
           {/* ── Document Dispatcher Render Preview Block ── */}
@@ -1764,6 +2064,16 @@ function QuotationDocumentInner() {
                     return (
                     <tr key={item.cartId ?? i} data-q-item-row={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}>
                       <td style={{ ...TB, padding: D.rowPad, textAlign: 'center', fontWeight: '600', fontSize: D.rowFont, color: '#333' }}>
+                        {isPhone && (
+                          <button
+                            className="mpv-row-delete-btn q-edit-only"
+                            data-html2canvas-ignore="true"
+                            onClick={() => removeItemRow(item.cartId)}
+                            title="Delete this row"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        )}
                         {i + 1}
                       </td>
                       <td style={{ ...TB, padding: QFIT(4), textAlign: 'center', verticalAlign: 'middle' }}>
@@ -2212,52 +2522,75 @@ function QuotationDocumentInner() {
               ];
               const pageList = (qPages && qPages.length) ? qPages : [allSegments];
 
-              return (
-            <div className={phoneEditMode ? 'q-pages-edit-scroll' : ''} style={phoneEditMode ? undefined : { width: '100%', overflow: 'hidden' }}>
-            <div className="q-pages" ref={qPagesWrapRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: '100%' }}>
-              {pageList.map((segs, pi) => (
-              <div
-                key={pi}
-                className="printable-sheet q-sheet-page"
-                id={pi === 0 ? 'quotationSheet' : undefined}
-                style={{
-                  width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
-                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                  background: '#FFFFFF',
-                  padding: PAGE_PAD, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
-                  color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
-                  border: '1px solid #E5E7EB', position: 'relative', flexShrink: 0,
-                }}>
+              const pagesContent = (
+                <div className="q-pages" ref={qPagesWrapRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', width: isPhone ? '794px' : '100%' }}>
+                  {pageList.map((segs, pi) => (
+                  <div
+                    key={pi}
+                    className="printable-sheet q-sheet-page"
+                    id={pi === 0 ? 'quotationSheet' : undefined}
+                    style={{
+                      width: '794px', maxWidth: '794px', height: '1123px', boxSizing: 'border-box',
+                      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                      background: '#FFFFFF',
+                      padding: PAGE_PAD, boxShadow: '0 20px 40px rgba(0,0,0,0.07)',
+                      color: '#1A1A1A', fontFamily: '"Inter", system-ui, sans-serif',
+                      border: '1px solid #E5E7EB', position: 'relative', flexShrink: 0,
+                    }}>
 
-                {/* ── Brand watermark (faint, behind content; on every page) ── */}
-                {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(docAllItems, data)} fallbackText="" />}
+                    {/* ── Brand watermark (faint, behind content; on every page) ── */}
+                    {wmEnabled && <BrandWatermark brand={watermarkBrandForItems(docAllItems, data)} fallbackText="" />}
 
-                {/* ── HEADER BAND (fixed, every page) ── */}
-                {headerBand()}
+                    {/* ── HEADER BAND (fixed, every page) ── */}
+                    {headerBand()}
 
-                {/* ── CUSTOMER + DATE (fixed, every page — shared state, so an
-                       edit on any page reflects on all pages) ── */}
-                {renderCust()}
+                    {/* ── CUSTOMER + DATE (fixed, every page — shared state, so an
+                           edit on any page reflects on all pages) ── */}
+                    {renderCust()}
 
-                {/* ── BODY — this page's flowing segments, at fixed sizes ── */}
-                <div className="q-body" style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
-                  {segs.map(renderSegment)}
+                    {/* ── BODY — this page's flowing segments, at fixed sizes ── */}
+                    <div className="q-body" style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+                      {segs.map(renderSegment)}
+                    </div>
+
+                    {/* ── TERMS & CONDITIONS + VALIDITY (fixed, every page) ── */}
+                    {renderTerms()}
+                    {renderValidity()}
+
+                    {/* ── PAGE FOOTER (every page) ── */}
+                    <div className="q-page-footer" style={{ flexShrink: 0, borderTop: '1px solid #E5E7EB', paddingTop: '6px', fontSize: '10px', fontWeight: 600, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')} — Quotation {doc.id}</span>
+                      <span>Page {pi + 1} of {pageList.length}</span>
+                    </div>
+                  </div>
+                  ))}
                 </div>
+              );
 
-                {/* ── TERMS & CONDITIONS + VALIDITY (fixed, every page) ── */}
-                {renderTerms()}
-                {renderValidity()}
-
-                {/* ── PAGE FOOTER (every page) ── */}
-                <div className="q-page-footer" style={{ flexShrink: 0, borderTop: '1px solid #E5E7EB', paddingTop: '6px', fontSize: '10px', fontWeight: 600, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{profile.name || (profile.isGlobalFallback ? 'NJ India Trading Pvt. Ltd.' : docBrand?.name || '')} — Quotation {doc.id}</span>
-                  <span>Page {pi + 1} of {pageList.length}</span>
+              return isPhone ? (
+                <>
+                  <MobilePageViewport
+                    initialEditMode={documentEditMode}
+                    onAddItem={() => setShowAddItemSheet(true)}
+                    documentType="quotation"
+                    onDone={() => setDocumentEditMode(false)}
+                  >
+                    {pagesContent}
+                  </MobilePageViewport>
+                  <MobileAddItemSheet
+                    isOpen={showAddItemSheet}
+                    onClose={() => setShowAddItemSheet(false)}
+                    onAddItem={(newItem) => {
+                      commitDoc({ items: [...(generatedDoc.items || []), { cartId: 'item_' + Date.now(), ...newItem }] });
+                      showToast(`Added ${newItem.name} to quotation`);
+                    }}
+                  />
+                </>
+              ) : (
+                <div className={phoneEditMode ? 'q-pages-edit-scroll' : ''} style={phoneEditMode ? undefined : { width: '100%', overflow: 'hidden' }}>
+                  {pagesContent}
                 </div>
-              </div>
-              ))}
-            </div>
-            </div>
-            );
+              );
             })()}
 
             </>
@@ -2302,19 +2635,32 @@ function QuotationDocumentInner() {
             const certIdentity = warrantyIdentityForBrand(
               resolveQuotationBrand(activeCert.items || [], data), data);
 
-            return (
-            <WarrantyCertificate
-              isLegacyBrand={certIdentity.isLegacyBrand}
-              template={tmpl}
-              openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-              variant="certificate"
-              customer={activeCert.customer || {}}
-              certData={{ ...cd, tradingOrg: certIdentity.tradingOrg }}
-              fallbackDate={activeCert.date}
-              warrantyNo={activeCert.warrantyNo || activeCert.id}
-              orderNo={activeCert.quotationId || doc.id || ''}
-            />
-            ); })()}
+            const certJSX = (
+              <div style={{ width: '794px' }}>
+                <WarrantyCertificate
+                  isLegacyBrand={certIdentity.isLegacyBrand}
+                  template={tmpl}
+                  openingText={tmpl.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
+                  variant="certificate"
+                  customer={activeCert.customer || {}}
+                  certData={{ ...cd, tradingOrg: certIdentity.tradingOrg }}
+                  fallbackDate={activeCert.date}
+                  warrantyNo={activeCert.warrantyNo || activeCert.id}
+                  orderNo={activeCert.quotationId || doc.id || ''}
+                />
+              </div>
+            );
+
+            return isPhone ? (
+              <MobilePageViewport
+                initialEditMode={documentEditMode}
+                documentType="warranty"
+                onDone={() => setDocumentEditMode(false)}
+              >
+                {certJSX}
+              </MobilePageViewport>
+            ) : certJSX;
+            })()}
 
 
         </div>

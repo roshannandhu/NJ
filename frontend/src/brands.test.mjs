@@ -3,7 +3,7 @@
 // a HIGHLANDER class named "STONECOATED" must not inherit NJ's spec text,
 // NJ's 50-year warranty line, or NJ's warranty certificate template.
 import assert from 'node:assert';
-import { isLegacyBrandClass, legacyClassKey, companyProfileForBrand, warrantyIdentityForBrand } from './brands.js';
+import { isLegacyBrandClass, legacyClassKey, companyProfileForBrand, companyProfileForDoc, warrantyIdentityForBrand } from './brands.js';
 
 const data = {
   brands: [{ id: 'nj', name: 'NJ INDIA' }, { id: 'brand_hl', name: 'HIGHLANDER' }],
@@ -112,4 +112,25 @@ assert.equal(
 );
 
 console.log('brands: legacy-brand gating + company-profile + warranty-identity isolation OK');
+// ── A saved document prints the company details it was issued with ──────
+// Editing the address or GST in Settings must not rewrite the header of a
+// quotation the customer already has a printout of.
+const issued = { name: 'NJ India Trading Pvt. Ltd.', address: 'Old Road, Kochi',
+                 phone: '11111', gst: 'GST-OLD', email: '', website: '', logo: '' };
+const moved = { ...profileData, company: { ...profileData.company, address: 'New Road, Kochi', gst: 'GST-NEW' } };
+
+const frozen = companyProfileForDoc({ companyProfile: issued }, moved.brands[0], moved);
+assert.equal(frozen.address, 'Old Road, Kochi', 'a saved quotation keeps its issued address');
+assert.equal(frozen.gst, 'GST-OLD');
+
+// No snapshot (older quotations, and live previews) still resolve from Settings.
+const liveNow = companyProfileForDoc({}, moved.brands[0], moved);
+assert.equal(liveNow.address, 'New Road, Kochi');
+assert.equal(companyProfileForDoc(null, null, moved).isGlobalFallback, true);
+
+// An empty snapshot is not a snapshot — fall back rather than print a blank header.
+assert.equal(companyProfileForDoc({ companyProfile: { name: '', address: '' } }, moved.brands[0], moved).address,
+             'New Road, Kochi');
+
 console.log('brands: legacy keyword buckets shared by Settings and the quotation OK');
+console.log('brands: a saved document keeps the company details it was issued with OK');

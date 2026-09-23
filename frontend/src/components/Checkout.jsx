@@ -2,7 +2,7 @@ import React from 'react';
 import { useAppContext } from '../AppContext';
 import { ArrowLeft, Plus, Trash2, User, FileText, ShieldCheck, Tag, Percent, Edit3, Wallet, PackagePlus } from 'lucide-react';
 import { createQuotation, createWarranty } from '../api';
-import { resolveQuotationBrand, docPrefixesForBrand } from '../brands';
+import { resolveQuotationBrand, docPrefixesForBrand, companyProfileForBrand } from '../brands';
 import { buildWarrantyCertsForQuotation, warrantyTemplatesForQuotation } from '../warranty';
 import { addonItemsOf, addonTotalOf, allItemsOf } from '../addons';
 import NumberField from './NumberField';
@@ -34,6 +34,7 @@ export default function Checkout() {
   // (Checkout remounts each time it's opened, so these lazy initialisers re-run
   // with the right source.)
   const editingExisting = !!(activeQuotation && activeQuotation.id === activeQuotationId);
+  const isPhone = typeof window !== 'undefined' && window.innerWidth <= 860;
 
   // Per-checkout overrides (from the edited quotation, else global defaults)
   const [taxEnabled, setTaxEnabled] = React.useState(() =>
@@ -290,8 +291,7 @@ export default function Checkout() {
       && activeQuotation?.warrantyOnly;
     const reuseId = (intent !== 'warranty' || retryingWarrantyOnly) ? activeQuotationId : null;
     // The quotation's parent brand: brands its number (HL-Q-… via docPrefix)
-    // and is stored on the snapshot. Rendering still resolves the brand LIVE
-    // from the items, so renames/profile edits update existing quotations.
+    // and is stored on the snapshot.
     const qBrand = resolveQuotationBrand(cart, data);
     const qNo = reuseId || `${docPrefixesForBrand(qBrand, settings).quotation}-${Date.now().toString().slice(-6)}`;
     const isRegenerate = !!reuseId;
@@ -345,6 +345,11 @@ export default function Checkout() {
       // (audit-safe even if that bank was later removed from Settings).
       bank: selectedBank ? { ...selectedBank } : (!bankChanged ? (base.bank ?? null) : null),
       bankId: selectedBankId || '',
+      // Company details frozen onto the quotation, so a later edit to the
+      // address, GST or logo in Settings cannot rewrite the header of a
+      // quotation the customer already holds. An update keeps the profile the
+      // quotation was issued with.
+      companyProfile: (isRegenerate && base.companyProfile) || companyProfileForBrand(qBrand, data),
       // Editable, per-quotation fields: preserve on update, seed fresh on create.
       // Terms FOLLOW the latest Settings text on every finalize unless this
       // quotation's terms were hand-edited on its document (termsCustomized) —
@@ -536,7 +541,7 @@ export default function Checkout() {
   }
 
   return (
-    <div className="animate-fade-up checkout-layout" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '48px', minHeight: 'calc(100vh - 120px)' }}>
+    <div className="animate-fade-up checkout-layout" style={{ display: isPhone ? 'flex' : 'grid', gridTemplateColumns: isPhone ? '1fr' : '1.5fr 1fr', flexDirection: isPhone ? 'column' : undefined, gap: isPhone ? '18px' : '48px', minHeight: 'calc(100vh - 120px)' }}>
       <nav className="checkout-mobile-nav" aria-label="Checkout sections">
         <button type="button" onClick={() => document.getElementById('checkout-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
           <span>1</span><strong>Items</strong><small>{cart.length}</small>
@@ -673,10 +678,10 @@ export default function Checkout() {
                   border: '1px solid var(--line)', 
                   borderLeft: `5px solid ${borderLeftColor}`,
                   borderRadius: 'var(--radius-lg)', 
-                  padding: '24px', 
-                  display: 'grid', 
-                  gridTemplateColumns: '1.2fr 130px 110px auto', 
-                  gap: '24px', 
+                  padding: isPhone ? '14px 16px' : '24px',
+                  display: 'grid',
+                  gridTemplateColumns: isPhone ? '1fr 1fr' : '1.2fr 130px 110px auto',
+                  gap: isPhone ? '12px 10px' : '24px',
                   alignItems: 'center', 
                   transition: 'transform 0.2s, box-shadow 0.2s',
                   boxShadow: 'var(--shadow-sm)'
