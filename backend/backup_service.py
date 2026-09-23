@@ -11,10 +11,16 @@ extra installs. Provides:
   * compute_status() / compute_health() — data for the Settings UI.
   * start_scheduler() / run_startup_backup() — automatic daily + on-launch backups.
 
-A backup "set" is three files sharing a timestamp stem:
-    nj_backup_YYYYMMDD_HHMMSS.db            (atomic SQLite copy)
+A backup "set" is the files sharing a timestamp stem:
     nj_backup_YYYYMMDD_HHMMSS.json          (config + quotations + warranties)
     nj_backup_YYYYMMDD_HHMMSS.manifest.json (checksums, counts, verify results)
+    nj_backup_YYYYMMDD_HHMMSS.db            (atomic SQLite copy — full sets only)
+    nj_backup_YYYYMMDD_HHMMSS.uploads.zip   (images — only when they changed)
+
+The .json restores everything on its own and is what every restore/recovery path
+reads; the .db rides along with scheduled and manual sets as a raw escape hatch,
+not with the event snapshots that fire after each edit. Old sets are pruned by
+age, not by count — see retention.py.
 """
 
 import json
@@ -32,6 +38,7 @@ from pathlib import Path
 from database import DB_PATH, DATA_DIR, SessionLocal
 from models import AppConfig, BackupState, Quotation, WarrantyCertificate
 import cloud_backup  # OAuth cloud destinations (Google Drive / OneDrive)
+from retention import keep_stems  # time-tiered retention policy (shared with cloud_backup)
 
 UPLOADS_DIR = DATA_DIR / "uploads"
 
@@ -492,15 +499,28 @@ def _base_stem(name):
     return name.rsplit(".", 1)[0]
 
 
-def _rotate(directory, keep, prefix=PREFIX):
-    """Keep only the newest `keep` backup sets in `directory`; delete the rest."""
+def _rotate(directory, keep, prefix=PREFIX, tiered=True):
+    """Prune old backup sets in `directory`.
+
+    Tiered (the default, for real backup sets): time-based retention — every set
+    for the last couple of days, then one per day, month and year, never fewer
+    than the newest `keep` (see retention.py). Counting sets is the wrong unit
+    when event backups fire on every change: 30 sets can be one busy afternoon.
+    tiered=False keeps the old count-based rule, used for the small pre-restore
+    and archive snapshots where only recency matters.
+    """
     try:
         d = Path(directory)
         stems = sorted(
             {_base_stem(f.name) for f in d.glob(prefix + "*")},
             reverse=True,
         )
-        for stem in stems[keep:]:
+        if tiered:
+            survivors = keep_stems(stems, keep_recent=keep)
+            doomed = [s for s in stems if s not in survivors]
+        else:
+            doomed = stems[keep:]
+        for stem in doomed:
             for f in d.glob(stem + "*"):
                 try:
                     f.unlink()
@@ -511,8 +531,9 @@ def _rotate(directory, keep, prefix=PREFIX):
 
 
 def _count_sets(directory, prefix=PREFIX):
+    # Count SETS, not .db files: event sets ship without one (see make_backup).
     try:
-        return len(list(Path(directory).glob(prefix + "*.db")))
+        return len({_base_stem(f.name) for f in Path(directory).glob(prefix + "*")})
     except Exception:
         return 0
 
@@ -638,6 +659,19 @@ def make_backup(reason="manual", force_catalog=False):
             }
             verified = integrity == "ok" and json_ok and zip_ok
 
+            # Ship the raw .db with scheduled/manual sets only. Nothing in the app
+            # ever READS a backup .db — every restore and recovery path goes
+            # through the .json (restore_from_payload / analyze / recover); the
+            # .db is the human escape hatch, "copy this file into place". Event
+            # backups fire ~8s after any edit, so including it there re-uploaded a
+            # full copy of a barely-changed database all day long (33 MB of a
+            # ~59 MB set). Daily granularity is plenty for an escape hatch; the
+            # .json in every set still restores everything.
+            full_set = reason != "event"
+            manifest["full_set"] = full_set
+            if not full_set:
+                manifest["note"] = "event snapshot — payload .json only; the .db ships with daily/manual sets"
+
             tmp_manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
             # 3) fan out to every enabled target
@@ -652,7 +686,7 @@ def make_backup(reason="manual", force_catalog=False):
                     if not cloud_backup.is_connected(name):
                         manifest["targets"][name] = "unavailable (not signed in — connect the account in Settings)"
                         continue
-                    files = [tmp_db, tmp_json, tmp_manifest]
+                    files = ([tmp_db] if full_set else []) + [tmp_json, tmp_manifest]
                     if uploads_count > 0:
                         files.append(tmp_uploads)
                     cok, cmsg = cloud_backup.upload_set(name, files, keep)
@@ -680,7 +714,8 @@ def make_backup(reason="manual", force_catalog=False):
                     continue
                 try:
                     dest = Path(cfg["path"])
-                    shutil.copy2(tmp_db, dest / tmp_db.name)
+                    if full_set:
+                        shutil.copy2(tmp_db, dest / tmp_db.name)
                     shutil.copy2(tmp_json, dest / tmp_json.name)
                     if uploads_count > 0:
                         shutil.copy2(tmp_uploads, dest / tmp_uploads.name)
@@ -751,7 +786,7 @@ def snapshot_pre_restore():
         (dest / f"{stem}.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        _rotate(dest, KEEP_PRE_RESTORE, prefix=PRE_RESTORE_PREFIX)
+        _rotate(dest, KEEP_PRE_RESTORE, prefix=PRE_RESTORE_PREFIX, tiered=False)
         return str(dest / f"{stem}.db")
     except Exception:
         return None
@@ -1362,7 +1397,7 @@ def _archive_records(quotations=None, warranties=None):
         if warranties:
             (dest / "warranty_certificates.json").write_text(
                 json.dumps(warranties, ensure_ascii=False, indent=2), encoding="utf-8")
-        _rotate(Path(path), KEEP_PRE_RESTORE, prefix=ARCHIVE_PREFIX)
+        _rotate(Path(path), KEEP_PRE_RESTORE, prefix=ARCHIVE_PREFIX, tiered=False)
         return str(dest)
     except Exception:
         return None

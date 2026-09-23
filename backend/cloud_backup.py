@@ -46,6 +46,7 @@ except Exception:          # keep import working on a box without it (tests inje
     httpx = None
 
 from database import DATA_DIR
+from retention import keep_stems  # shared retention policy (see backup_service._rotate)
 
 _CONFIG_PATH = DATA_DIR / "cloud_config.json"
 _TOKENS_PATH = DATA_DIR / "cloud_tokens.json"
@@ -324,18 +325,15 @@ class _Provider:
         return True, "ok"
 
     def _rotate(self, keep: int) -> None:
+        # Same time-tiered policy the local targets use (retention.py): every set
+        # for the last couple of days, then one per day, month and year. The old
+        # rule here was "newest `keep` + one per calendar month", which held no
+        # daily depth at all — with event backups those `keep` sets are often a
+        # single day, so a week-old deletion could only be undone from a monthly.
         sets = sorted(self.list_sets(), key=lambda x: x["stem"], reverse=True)
-        recent = sets[:max(keep, 1)]
-        older  = sets[max(keep, 1):]
-        # Keep the newest backup of each calendar month from older sets
-        monthly: dict[str, dict] = {}
-        for s in older:
-            month = s["stem"][10:16]  # nj_backup_YYYYMMDD_HHMM → YYYYMM
-            if month not in monthly:
-                monthly[month] = s
-        keep_stems = {s["stem"] for s in recent} | {s["stem"] for s in monthly.values()}
+        survivors = keep_stems([s["stem"] for s in sets], keep_recent=keep)
         for s in sets:
-            if s["stem"] not in keep_stems:
+            if s["stem"] not in survivors:
                 self.delete_set(s)
 
 
