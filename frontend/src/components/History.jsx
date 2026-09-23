@@ -10,7 +10,7 @@ import { addonItemsOf } from '../addons';
 const PAGE_SIZE = 100;
 
 export default function History({ type }) {
-  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, startAddonOrder, setActiveTab, showToast } = useAppContext();
+  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, loadWarrantyForEdit, startNewWarranty, startAddonOrder, setActiveTab, showToast } = useAppContext();
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Add-on selection mode: armed by the "Add-on Order" button above the list;
@@ -256,6 +256,30 @@ export default function History({ type }) {
           </button>
         )}
 
+        {/* New Warranty Button on Warranties tab */}
+        {!isQuotation && (
+          <button
+            onClick={startNewWarranty}
+            className="hover-lift"
+            title="Create a new warranty certificate"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '12px 20px',
+              background: 'rgba(194, 65, 12, 0.08)',
+              border: '1.5px solid var(--accent)',
+              color: 'var(--accent)',
+              borderRadius: 'var(--radius)',
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontSize: '13px',
+            }}
+          >
+            <ShieldCheck size={16} /> + New Warranty
+          </button>
+        )}
+
         {/* Clear History Registry Button */}
         {rawList.length > 0 && (
           <button
@@ -429,7 +453,16 @@ export default function History({ type }) {
                   {isQuotation && (
                     <button
                       onClick={(e) => { e.stopPropagation(); loadQuotationForEdit(row); }}
-                      title="Edit this quotation (loads it into Checkout)"
+                      title="Edit this quotation"
+                      style={{ ...iconBtn, color: 'var(--accent)' }}
+                    >
+                      <Edit3 size={15}/>
+                    </button>
+                  )}
+                  {!isQuotation && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); loadWarrantyForEdit(row); }}
+                      title="Edit this warranty certificate"
                       style={{ ...iconBtn, color: 'var(--accent)' }}
                     >
                       <Edit3 size={15}/>

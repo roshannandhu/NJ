@@ -8,7 +8,7 @@ import { addonItemsOf, addonTotalOf, allItemsOf } from '../addons';
 import NumberField from './NumberField';
 
 export default function Checkout() {
-  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent, addonQuotationId, cancelAddonOrder } = useAppContext();
+  const { cart, cartTotal, customer, setCustomer, data, setData, setCurrentView, goBack, setCart, showToast, setActiveQuotation, setActiveWarranty, setActiveTab, activeQuotation, activeQuotationId, setActiveQuotationId, generateIntent, setGenerateIntent, addonQuotationId, cancelAddonOrder } = useAppContext();
 
   const settings = data.settings || {};
 
@@ -554,7 +554,7 @@ export default function Checkout() {
         
         {/* Back Link with hover animation */}
         <button 
-          onClick={() => setCurrentView('quotation_desk')}
+          onClick={() => goBack()}
           style={{ 
             display: 'inline-flex', 
             alignItems: 'center', 

@@ -6,6 +6,7 @@ import {
   Award, Wrench, X, ChevronLeft, ChevronRight, Copy, GripVertical, Pencil,
 } from 'lucide-react';
 import NumberField from './NumberField';
+import { legacyClassKey } from '../brands';
 import './ProductsCatalog.css';
 
 const newId = (p) => `${p}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -69,6 +70,21 @@ export default function ProductsClassesSettings() {
   // Edited here so the catalogue class is the single place to manage it.
   const updateClassSetting = (mapName, id, val) =>
     commit({ ...data, settings: { ...data.settings, [mapName]: { ...(data.settings?.[mapName] || {}), [id]: val } } });
+
+  // The description the quotation ACTUALLY prints for a class. Settings writes it
+  // by class.id, but pre-brand configs stored it in a keyword bucket
+  // ("stone_coated", …) and the document still falls back to that — so reading
+  // the id alone showed an empty box while the quotation printed text the user
+  // could not find anywhere. Same fallback the document uses, brand gate included.
+  const classSpecValue = (cls) => {
+    const specs = data.settings?.classSpecs || {};
+    const kw = legacyClassKey(cls.name, [], data);
+    const raw = specs[cls.id] ?? (kw ? specs[kw] : undefined);
+    if (typeof raw === 'string') return raw;
+    // Oldest form: { title, specs } — flatten to the title/spec-lines string.
+    if (raw?.specs) return [raw.title || cls.name, raw.specs].join('\n');
+    return '';
+  };
   const updateVariety = (id, patch) => commit({ ...data, varieties: data.varieties.map(v => v.id === id ? { ...v, ...patch } : v) });
   const updateType = (vid, idx, patch) => commit({ ...data, varieties: data.varieties.map(v => v.id === vid ? { ...v, colors: (v.colors || []).map((c, i) => i === idx ? { ...c, ...patch } : c) } : v) });
   const setColors = (vid, fn) => commit({ ...data, varieties: data.varieties.map(v => v.id === vid ? { ...v, colors: fn(v.colors || []) } : v) });
@@ -450,7 +466,7 @@ export default function ProductsClassesSettings() {
                   </select></div>
                 <div className="set-field span2"><span className="set-label">Class Description</span>
                   <textarea className="set-textarea" rows={4}
-                    value={data.settings?.classSpecs?.[modalClass.id] ?? ''}
+                    value={classSpecValue(modalClass)}
                     onChange={e => updateClassSetting('classSpecs', modalClass.id, e.target.value)}
                     placeholder="Product title on the first line, then spec lines — shown in the quotation's Product Details table." />
                 </div>

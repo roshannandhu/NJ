@@ -129,7 +129,21 @@ export default function LiveQuotation() {
                 <div className="lq-item-main">
                   <div className="lq-item-class">{item.className || 'Product'}</div>
                   <h4>{item.name}</h4>
-                  <p>{item.color !== 'Standard' ? `${item.color} / ` : ''}{cur}{money(item.price)} per {item.unit}</p>
+                  <p style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', margin: '4px 0' }}>
+                    {item.color !== 'Standard' ? `${item.color} / ` : ''}
+                    <span>{cur}</span>
+                    <NumberField
+                      value={item.price}
+                      min={0}
+                      step="any"
+                      allowFloat
+                      fallback={0}
+                      onCommit={n => setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, price: n } : it))}
+                      aria-label={`${item.name} price`}
+                      style={{ width: '64px', padding: '2px 4px', border: '1px solid var(--line-soft)', borderRadius: '4px', fontSize: '12px', background: 'var(--bg-warm)', fontWeight: 600, color: 'var(--ink)' }}
+                    />
+                    <span>per {item.unit}</span>
+                  </p>
                   <div className="lq-stepper">
                     <button type="button" aria-label={`Decrease ${item.name} quantity`} onClick={() => updateCartQty(item.cartId, item.qty - 1)}><Minus size={14} /></button>
                     <NumberField value={item.qty} min={1} step="any" allowFloat fallback={1} onCommit={n => updateCartQty(item.cartId, n)} aria-label={`${item.name} quotation quantity`} />

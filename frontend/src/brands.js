@@ -95,6 +95,23 @@ export function isLegacyBrandClass(className, items, data) {
   return !brandId || brandId === legacyBrandId;
 }
 
+// The legacy keyword bucket a class name falls into ("stone_coated", "laminated",
+// …), or null when the class belongs to a brand other than the original one.
+// Pre-brand configs stored classSpecs / classTerms under these buckets, and the
+// quotation still falls back to them, so this is the ONE place that maps a name
+// to a bucket — Settings and the document must agree, or Settings shows an empty
+// box while the quotation prints text the user cannot find anywhere.
+export function legacyClassKey(className, items, data) {
+  if (!isLegacyBrandClass(className, items, data)) return null;
+  const n = (className || '').toLowerCase();
+  if (n.includes('laminated') || n.includes('asphalt')) return 'laminated';
+  if (n.includes('stone') || n.includes('metal')) return 'stone_coated';
+  if (n.includes('heat') || n.includes('ceiling')) return 'heatout';
+  if (n.includes('ceramic') || n.includes('clay')) return 'ceramic';
+  if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return 'docke';
+  return 'default';
+}
+
 // Document-number prefixes for a brand. `brand.docPrefix` (Settings → Parent
 // Brands, e.g. "HL") brands the quotation/warranty numbers (HL-Q-…, HL-W-…).
 // A non-NJ brand WITHOUT a configured prefix derives one from its name (word

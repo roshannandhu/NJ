@@ -243,6 +243,7 @@ export default function Dashboard() {
     setActiveTab,
     loadQuotationForEdit,
     startAddonOrder,
+    startNewWarranty,
   } = useAppContext();
 
   const [prefs, setPrefs] = React.useState(loadPreferences);
@@ -629,6 +630,10 @@ export default function Dashboard() {
               <button type="button" onClick={() => setCurrentView('quotations')}>
                 <FileText size={18} />
                 <span>View Quotations</span>
+              </button>
+              <button type="button" onClick={startNewWarranty}>
+                <ShieldCheck size={18} />
+                <span>New Warranty</span>
               </button>
               <button type="button" onClick={() => setCurrentView('warranties')}>
                 <ShieldCheck size={18} />

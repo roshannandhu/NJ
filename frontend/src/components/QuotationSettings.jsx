@@ -284,18 +284,6 @@ export default function QuotationSettings() {
 
   const initSettings = data.settings || {};
 
-  // Maps a class name to the legacy keyword key — used ONLY to seed defaults and
-  // to backfill existing keyword-keyed configs when migrating to id-keying.
-  const keywordKey = (name) => {
-    const n = (name || '').toLowerCase();
-    if (n.includes('laminated') || n.includes('asphalt')) return 'laminated';
-    if (n.includes('stone') || n.includes('metal')) return 'stone_coated';
-    if (n.includes('heat') || n.includes('ceiling')) return 'heatout';
-    if (n.includes('ceramic') || n.includes('clay')) return 'ceramic';
-    if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return 'docke';
-    return 'default';
-  };
-
   // Per-class blocks are derived from the live class list (keyed by stable
   // class.id) so any class added in Products & Catalog shows up here automatically,
   // plus a synthetic Default/fallback block. Tools & Accessories classes are excluded
@@ -307,10 +295,6 @@ export default function QuotationSettings() {
       .map(c => ({ key: c.id, label: c.name, color: c.color || '#8a857a', name: c.name })),
     { key: 'default', label: 'Default / Mixed Orders (Fallback)', color: '#8a857a', name: '' },
   ];
-
-  // Seed a block's value: saved-by-id → saved-by-keyword → keyword default → generic default.
-  const seedTerms = (key, name) =>
-    initSettings.classTerms?.[key] ?? initSettings.classTerms?.[keywordKey(name)] ?? DEFAULT_CLASS_TERMS[keywordKey(name)] ?? DEFAULT_CLASS_TERMS.default;
 
   // Financial settings
   const [settings, setSettings] = useState({
@@ -346,12 +330,10 @@ export default function QuotationSettings() {
 
   // Per-class T&C — kept in storage for backward compatibility with old quotations.
   // No longer edited in the UI (replaced by the single Common Terms & Conditions field),
-  // but preserved on save so previously generated quotations still render their terms.
-  const [classTerms] = useState(() => {
-    const obj = {};
-    classBlocks.forEach(b => { obj[b.key] = seedTerms(b.key, b.name); });
-    return obj;
-  });
+  // so it is preserved EXACTLY as saved. It used to be re-seeded from the legacy
+  // keyword buckets on every save, which wrote NJ's terms ("NJ metal tiles …")
+  // under every same-sounding class of every other brand.
+  const [classTerms] = useState(() => initSettings.classTerms || {});
 
   // Guarantee text is always opt-in. Never seed a new class from hardcoded or
   // keyword defaults: an empty field must stay absent from the quotation.

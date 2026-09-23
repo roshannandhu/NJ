@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { ShoppingCart, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
+import { useAppContext } from '../AppContext';
 
 export default function Topbar({ title, subtitle, cartCount, onOpenCart, currentView, setCurrentView }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const { goBack } = useAppContext();
 
   return (
     <div className="app-topbar" style={{
@@ -29,6 +31,29 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {currentView !== 'dashboard' && currentView !== 'quotation_desk' && (
+              <button
+                type="button"
+                className="hover-lift"
+                onClick={() => goBack()}
+                title="Go back"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
+                  color: 'var(--ink)',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <ArrowLeft size={18} />
+              </button>
+            )}
             <div className="app-topbar-title-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <h2 className="app-topbar-title" style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 400, color: 'var(--ink)' }}>
                 {title}

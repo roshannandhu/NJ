@@ -1,6 +1,6 @@
-﻿import React from 'react';
+import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, ImagePlus, X, Eye, EyeOff, Palette, Wallet, PackagePlus } from 'lucide-react';
 import { mediaUrl, corsMediaUrl, createQuotation, createWarranty, uploadImage } from '../api';
 import { elementToPdf, elementToPdfFile, elementsToPdf, elementsToPdfFile, shareElementPdf, shareElementsPdf, shareFiles, quotationFileName, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import { buildWarrantyCertsForQuotation } from '../warranty';
@@ -8,7 +8,7 @@ import { DEFAULT_DATA } from '../data';
 import { paginateQuotation } from '../quotationPagination';
 import { addonItemsOf, addonTotalOf, addonSavingsOf, allItemsOf, formatAddedAt } from '../addons';
 import BrandWatermark from './BrandWatermark';
-import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass, warrantyIdentityForBrand } from '../brands';
+import { watermarkBrandForItems, resolveQuotationBrand, companyProfileForBrand, isLegacyBrandClass, legacyClassKey, warrantyIdentityForBrand } from '../brands';
 import { sanitizeDecimal } from '../numeric';
 import WarrantyCertificate from './WarrantyCertificate';
 
@@ -118,7 +118,8 @@ function QuotationDocumentInner() {
     activeQuotation: generatedDoc,
     data, 
     setData, 
-    setCurrentView, 
+    setCurrentView,
+    goBack, 
     setCart, 
     setCustomer, 
     setActiveQuotation,
@@ -723,17 +724,6 @@ function QuotationDocumentInner() {
     new Set(docAllItems.map(i => i.className))
   ).filter(name => name !== 'Custom' && !name.toLowerCase().includes('tool'));
 
-  // Class-key resolver (maps class name → settings key)
-  const resolveClassKey = (className) => {
-    const n = className.toLowerCase();
-    if (n.includes('laminated') || n.includes('asphalt'))       return 'laminated';
-    if (n.includes('stone') || n.includes('metal'))             return 'stone_coated';
-    if (n.includes('heat') || n.includes('ceiling'))            return 'heatout';
-    if (n.includes('ceramic') || n.includes('clay'))            return 'ceramic';
-    if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return 'docke';
-    return 'default';
-  };
-
   // Storage key for a class's description: prefer the stable class.id (matching how
   // Settings stores classSpecs), falling back to the keyword key for legacy configs.
   const classDescKey = (className) => {
@@ -743,8 +733,7 @@ function QuotationDocumentInner() {
 
   // The legacy keyword key for a class, or null when the class belongs to a
   // brand other than the original one — those must never inherit NJ's text.
-  const legacySpecKey = (className) =>
-    (isLegacyBrandClass(className, docAllItems, data) ? resolveClassKey(className) : null);
+  const legacySpecKey = (className) => legacyClassKey(className, docAllItems, data);
 
   // Build the ordered element list for the PDF: every quotation page, in order.
   // Used by download + share so both produce the same document.
@@ -803,6 +792,13 @@ function QuotationDocumentInner() {
         </>
       );
     }
+
+    // An emptied description means "no description" — print the class name alone.
+    // Without this, clearing the field in Settings drops through to the hardcoded
+    // blurbs below and the old NJ text reappears, with nothing left to edit.
+    if (typeof text === 'string') return (
+      <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', textTransform: 'uppercase' }}>{className}</div>
+    );
 
     // Legacy object form { title, specs }
     if (text && text.specs) {
@@ -869,8 +865,12 @@ function QuotationDocumentInner() {
   // legacy quotations saved before terms were snapshotted onto the document.
   const getTermsAndConditions = (items) => {
     // Settings writes classTerms keyed by class.id; look those up first, or every
-    // class silently lands on the generic "default" block below.
+    // class silently lands on the generic "default" block below. Older builds
+    // seeded every class's terms from NJ's keyword buckets, so another brand's
+    // class can still carry "NJ metal tiles …" under its own id — same rule as
+    // the keyword fallback: only the original brand's classes may use them.
     for (const i of items) {
+      if (!isLegacyBrandClass(i.className || '', items, data)) continue;
       const id = data.classes?.find(c => c.name === i.className)?.id;
       const saved = id && settings.classTerms?.[id];
       if (saved) return saved.split('\n').filter(l => l.trim());
@@ -1371,10 +1371,10 @@ function QuotationDocumentInner() {
               <Edit3 size={13} /> <span><strong>Tap any field to edit</strong> — the document expands automatically on phone. Or use <strong>Edit Quotation</strong> above to edit in the Quotation Desk.</span>
             </div>
             <button
-              className={`q-phone-edit-btn${phoneEditMode ? ' is-active' : ''}`}
-              onClick={() => setPhoneEditMode(m => !m)}
+              className="q-phone-edit-btn"
+              onClick={() => loadQuotationForEdit(generatedDoc)}
             >
-              {phoneEditMode ? <><Minimize2 size={14}/> Collapse Preview</> : <><Maximize2 size={14}/> Expand to Edit Fields</>}
+              <Edit3 size={14}/> Edit Quotation (Mobile Form)
             </button>
 
             {/* ── Document options: watermark toggle + design color (screen-only;

@@ -1,9 +1,9 @@
 import React from 'react';
 import { useAppContext } from '../AppContext';
-import { ArrowLeft, RotateCcw, ShieldCheck, FileText, Download, Edit3, Share2, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ShieldCheck, Download, Edit3, Share2 } from 'lucide-react';
 import { createWarranty } from '../api';
 import { DEFAULT_DATA } from '../data';
-import { elementToPdf, elementToPdfFile, shareElementPdf, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
+import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
 import { isLegacyBrandClass, resolveQuotationBrand, warrantyIdentityForBrand } from '../brands';
 
@@ -15,11 +15,11 @@ import { isLegacyBrandClass, resolveQuotationBrand, warrantyIdentityForBrand } f
 export default function WarrantyDocument() {
   const {
     activeWarranty: doc, data, setData, setCurrentView, persistConfig,
-    setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, setActiveTab, setGenerateIntent, showToast
+    setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, setGenerateIntent, showToast,
+    goBack, loadWarrantyForEdit
   } = useAppContext();
 
   const [isDownloading, setIsDownloading] = React.useState(false);
-  const [phoneEditMode, setPhoneEditMode] = React.useState(false);
 
   if (!doc) {
     return (
@@ -196,15 +196,16 @@ export default function WarrantyDocument() {
         {/* ── ACTION BAR ── */}
         <div className="wd-actions document-actions is-warranty-editor">
           <button
-            onClick={() => {
-              if (isStandalone) { setCurrentView('warranties'); return; }
-              setActiveQuotation(parentQuote);
-              setActiveTab?.(doc.warrantyNo || doc.id);
-              setCurrentView('quotation_document');
-            }}
+            onClick={() => goBack()}
             className="hover-lift wd-action is-secondary"
             style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-            <ArrowLeft size={15}/> {isStandalone ? 'Back to Warranties' : 'Back'}
+            <ArrowLeft size={15}/> Back
+          </button>
+          <button
+            onClick={() => loadWarrantyForEdit(doc)}
+            className="hover-lift wd-action is-secondary"
+            style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'rgba(194, 65, 12, 0.08)', color:'var(--accent)', border:'1.5px solid var(--accent)', borderRadius:'var(--radius-full)', fontWeight:700, cursor:'pointer', fontSize:'13px' }}>
+            <Edit3 size={15}/> Edit Certificate
           </button>
           {!isStandalone && (
             <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift wd-action is-secondary"
@@ -233,10 +234,10 @@ export default function WarrantyDocument() {
           <div><strong>Tap any field to edit</strong><span> — the certificate expands on phone. Use <strong>Edit Quotation</strong> above to change products or prices.</span></div>
         </div>
         <button
-          className={`wd-phone-edit-btn${phoneEditMode ? ' is-active' : ''}`}
-          onClick={() => setPhoneEditMode(m => !m)}
+          className="wd-phone-edit-btn"
+          onClick={() => loadWarrantyForEdit(doc)}
         >
-          {phoneEditMode ? <><Minimize2 size={14}/> Collapse Preview</> : <><Maximize2 size={14}/> Expand to Edit Fields</>}
+          <Edit3 size={14}/> Edit Certificate (Mobile Form)
         </button>
 
         <div className={`wd-preview-frame${phoneEditMode ? ' is-phone-edit' : ''}`}>

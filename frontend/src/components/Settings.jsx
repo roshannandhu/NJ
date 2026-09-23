@@ -26,7 +26,7 @@ function SetToggle({ checked, onChange, title, desc }) {
 }
 
 export default function Settings() {
-  const { data, setData, showToast, persistConfig, askSaveLocation, setAskSaveLocation, setCurrentView } = useAppContext();
+  const { data, setData, showToast, persistConfig, askSaveLocation, setAskSaveLocation, setCurrentView, goBack } = useAppContext();
   const [activeModule, setActiveModule] = useState('brands');
   const mainRef = useRef(null);
 
@@ -109,7 +109,7 @@ export default function Settings() {
   return (
     <div className="set-shell">
       <div className="set-topbar">
-        <button className="set-back-btn app-nav-mobile-only" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCurrentView('dashboard'); }} title="Back to Dashboard" style={{
+        <button className="set-back-btn app-nav-mobile-only" onClick={(e) => { e.preventDefault(); e.stopPropagation(); goBack(); }} title="Back" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.04)', border: 'none', borderRadius: '50%', width: '38px', height: '38px', cursor: 'pointer', color: 'var(--ink)', zIndex: 100, position: 'relative'
         }}>
           <ArrowLeft size={18} strokeWidth={2.5} />

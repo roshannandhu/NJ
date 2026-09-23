@@ -36,7 +36,7 @@ const normalizeCartSpelling = (record) => {
 };
 
 export function AppProvider({ children }) {
-  // --- Hardware Back Button Interception (Capacitor) ---
+  // --- Hardware & In-App Navigation Stack ---
   const backHandlers = useRef([]);
   const registerBackHandler = useCallback((handler) => {
     backHandlers.current.push(handler);
@@ -45,35 +45,92 @@ export function AppProvider({ children }) {
     };
   }, []);
 
+  const [currentView, _setCurrentView] = useState('quotation_desk'); // dashboard, quotation_desk, checkout, quotations, warranties, settings, mobile_quotation_editor, mobile_warranty_editor
+  const viewHistory = useRef([]);
+  const lastBackPress = useRef(0);
+  const currentViewRef = useRef(currentView);
+  useEffect(() => { currentViewRef.current = currentView; }, [currentView]);
+
+  const [toasts, setToasts] = useState([]);
+  const showToast = useCallback((message, type = 'success') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  }, []);
+
+  const navigate = useCallback((nextView, replace = false) => {
+    _setCurrentView(prev => {
+      if (prev === nextView) return prev;
+      if (!replace) {
+        viewHistory.current.push(prev);
+      }
+      currentViewRef.current = nextView;
+      return nextView;
+    });
+  }, []);
+
+  const setCurrentView = useCallback((next) => {
+    navigate(next, false);
+  }, [navigate]);
+
+  const goBack = useCallback(() => {
+    // 1. Give active back handlers (sheets, dialogs, drawers, catalog breadcrumbs) first priority
+    if (backHandlers.current.length > 0) {
+      for (let i = backHandlers.current.length - 1; i >= 0; i--) {
+        const handler = backHandlers.current[i];
+        if (typeof handler === 'function') {
+          const handled = handler();
+          if (handled) return true;
+        }
+      }
+    }
+
+    // 2. Check if there is history in our stack
+    if (viewHistory.current.length > 0) {
+      const prevView = viewHistory.current.pop();
+      _setCurrentView(prevView);
+      currentViewRef.current = prevView;
+      return true;
+    }
+
+    // 3. If history is empty but not on root desk/dashboard, go to desk
+    if (currentViewRef.current !== 'quotation_desk' && currentViewRef.current !== 'dashboard') {
+      _setCurrentView('quotation_desk');
+      currentViewRef.current = 'quotation_desk';
+      return true;
+    }
+
+    // 4. We are at root (quotation_desk / dashboard): 2-second double-tap exit guard
+    const now = Date.now();
+    if (now - lastBackPress.current < 2000) {
+      CapApp.exitApp().catch(() => {});
+      return true;
+    } else {
+      lastBackPress.current = now;
+      showToast('Press back again to exit', 'info');
+      return true;
+    }
+  }, [showToast]);
+
   useEffect(() => {
     let listener = null;
     CapApp.addListener('backButton', () => {
-      if (backHandlers.current.length > 0) {
-        const handler = backHandlers.current[backHandlers.current.length - 1];
-        const handled = handler();
-        if (handled) return;
-      }
-      
-      const hash = window.location.hash.replace('#', '');
-      if (hash && hash !== 'dashboard' && hash !== 'quotation_desk') {
-        window.history.back();
-      } else {
-        CapApp.exitApp();
-      }
+      goBack();
     }).then(l => listener = l).catch(() => {});
     return () => { if (listener) listener.remove(); };
-  }, []);
+  }, [goBack]);
 
-  const [currentView, setCurrentView] = useState('quotation_desk'); // dashboard, quotation_desk, checkout, quotations, warranties, settings
   const [selectedClassId, setSelectedClassId] = useState(null);
   const [selectedVarietyId, setSelectedVarietyId] = useState(null);
   
   const [customer, setCustomer] = useState({ name: '', phone: '', email: '', address: '' });
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
-  const [toasts, setToasts] = useState([]);
   const [activeQuotation, setActiveQuotation] = useState(null);
   const [activeWarranty,  setActiveWarranty]  = useState(null);
+  const [activeWarrantyId, setActiveWarrantyId] = useState(null);
   const [activeTab, setActiveTab] = useState('quotation');
 
   // Identity of the quotation currently being drafted/edited in this session.
@@ -110,14 +167,6 @@ export function AppProvider({ children }) {
   const setAskSaveLocation = (v) => {
     setAskSaveLocationState(!!v);
     try { localStorage.setItem('nj_ask_save_location', v ? '1' : '0'); } catch { /* ignore */ }
-  };
-
-  const showToast = (message, type = 'success') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
   };
 
   const refreshBackupStatus = async () => {
@@ -360,7 +409,23 @@ export function AppProvider({ children }) {
     setActiveTab('quotation');
     // Editing an existing quotation is always a plain quotation finalize.
     setGenerateIntent('quote');
-    setCurrentView('checkout');
+    const isMobile = window.innerWidth <= 860;
+    navigate(isMobile ? 'mobile_quotation_editor' : 'checkout');
+  };
+
+  const loadWarrantyForEdit = (w) => {
+    if (!w) return;
+    setActiveWarranty(w);
+    setActiveWarrantyId(w.id || w.warrantyNo || null);
+    const isMobile = window.innerWidth <= 860;
+    navigate(isMobile ? 'mobile_warranty_editor' : 'warranty_document');
+  };
+
+  const startNewWarranty = () => {
+    setActiveWarranty(null);
+    setActiveWarrantyId(null);
+    const isMobile = window.innerWidth <= 860;
+    navigate(isMobile ? 'mobile_warranty_editor' : 'quotation_desk');
   };
 
   // Start an Add-on Order for an existing quotation: a fresh EMPTY cart locked
@@ -398,7 +463,8 @@ export function AppProvider({ children }) {
   const startFreshDesk = () => {
     const dirty = cart.length > 0 || addonQuotationId;
     if (dirty && !window.confirm('Start a new quotation? The current cart will be cleared.')) {
-      setCurrentView('quotation_desk');
+      _setCurrentView('quotation_desk');
+      currentViewRef.current = 'quotation_desk';
       return;
     }
     setCart([]);
@@ -407,17 +473,21 @@ export function AppProvider({ children }) {
     setActiveQuotationId(null);
     setAddonQuotationId(null);
     setGenerateIntent('quote');
-    setCurrentView('quotation_desk');
+    viewHistory.current = [];
+    _setCurrentView('quotation_desk');
+    currentViewRef.current = 'quotation_desk';
   };
 
   const value = {
-    currentView, setCurrentView,
+    currentView, setCurrentView, navigate, goBack,
     selectedClassId, setSelectedClassId,
     selectedVarietyId, setSelectedVarietyId,
     customer, setCustomer,
     cart, setCart, cartOpen, setCartOpen,
     addToCart, updateCartQty, removeFromCart, cartTotal,
     loadQuotationForEdit,
+    loadWarrantyForEdit, startNewWarranty,
+    activeWarrantyId, setActiveWarrantyId,
     addonQuotationId, startAddonOrder, cancelAddonOrder,
     startFreshDesk,
     toasts, showToast,

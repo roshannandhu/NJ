@@ -14,6 +14,8 @@ import QuotationDocument from './components/QuotationDocument';
 import WarrantyDocument from './components/WarrantyDocument';
 import BackupSettings from './components/BackupSettings';
 import UpdaterBanner from './components/UpdaterBanner';
+import MobileQuotationEditor from './components/MobileQuotationEditor';
+import MobileWarrantyEditor from './components/MobileWarrantyEditor';
 import { useAppContext, AppProvider } from './AppContext';
 
 // On Android (Capacitor) the WebView process is killed when the app goes to
@@ -22,7 +24,7 @@ import { useAppContext, AppProvider } from './AppContext';
 const pinStore = window.Capacitor ? localStorage : sessionStorage;
 
 function AppContent() {
-  const { data, currentView, setCurrentView, cart, setCartOpen } = useAppContext();
+  const { data, currentView, setCurrentView, cart, setCartOpen, goBack, activeWarrantyId } = useAppContext();
 
   const [unlocked, setUnlocked] = useState(() => pinStore.getItem('nj_unlocked') === 'true');
   const [pinInput, setPinInput] = useState('');
@@ -35,38 +37,18 @@ function AppContent() {
     mainScrollRef.current.scrollLeft = 0;
   }, [currentView]);
 
-  // ── Back-button guard (Android APK / browser) ─────────────────────────────
-  // Push a history entry on every view change so the hardware back button
-  // navigates within the app instead of closing it. A ref flag prevents the
-  // push from firing when the view change itself was triggered by the pop.
-  const isBackNav = useRef(false);
-  const currentViewRef = useRef(currentView);
-  useEffect(() => { currentViewRef.current = currentView; }, [currentView]);
-
+  // Synchronize browser history entry with current view
   useEffect(() => {
-    // Seed the initial state so there is always something to pop back to
-    window.history.replaceState({ view: currentView }, '');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (isBackNav.current) { isBackNav.current = false; return; }
     window.history.pushState({ view: currentView }, '');
   }, [currentView]);
 
   useEffect(() => {
-    const onPop = (e) => {
-      const view = e.state?.view;
-      if (view) {
-        isBackNav.current = true;
-        setCurrentView(view);
-      } else {
-        // Fell past our history — re-push to stay in the app
-        window.history.pushState({ view: currentViewRef.current }, '');
-      }
+    const onPop = () => {
+      goBack();
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []); // register once; reads currentView via ref
+  }, [goBack]);
 
   const isLocked = data?.settings?.pinEnabled && !unlocked;
 
@@ -169,6 +151,16 @@ function AppContent() {
       pageSubtitle = "Automatic backups, verification, and smart recovery";
       mainContent = <BackupSettings />;
       break;
+    case 'mobile_quotation_editor':
+      pageTitle = "Edit Quotation";
+      pageSubtitle = "Update quotation items and pricing";
+      mainContent = <MobileQuotationEditor />;
+      break;
+    case 'mobile_warranty_editor':
+      pageTitle = activeWarrantyId ? "Edit Warranty" : "New Warranty";
+      pageSubtitle = "Certificate and warranty coverage";
+      mainContent = <MobileWarrantyEditor />;
+      break;
     default:
       mainContent = <div>404</div>;
   }
@@ -180,7 +172,7 @@ function AppContent() {
         <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
 
         <main className="app-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)' }}>
-        {currentView !== 'settings' && (
+        {currentView !== 'settings' && currentView !== 'mobile_quotation_editor' && currentView !== 'mobile_warranty_editor' && (
           <Topbar
             title={pageTitle}
             subtitle={pageSubtitle}
@@ -195,7 +187,7 @@ function AppContent() {
           data-view={currentView}
           ref={mainScrollRef}
           style={{
-            padding: (currentView === 'settings' || currentView === 'quotation_desk') ? 0 : '40px',
+            padding: (currentView === 'settings' || currentView === 'quotation_desk' || currentView === 'mobile_quotation_editor' || currentView === 'mobile_warranty_editor') ? 0 : '40px',
             flex: 1,
             minHeight: 0, // Prevents container from stretching past viewport in flex columns
             overflow: currentView === 'quotation_desk' ? 'hidden' : 'auto',
@@ -207,7 +199,7 @@ function AppContent() {
         </div>
       </main>
 
-        {currentView !== 'quotation_desk' && currentView !== 'checkout' && <CartDrawer />}
+        {currentView !== 'quotation_desk' && currentView !== 'checkout' && currentView !== 'mobile_quotation_editor' && currentView !== 'mobile_warranty_editor' && <CartDrawer />}
       </div>
     </div>
   );
