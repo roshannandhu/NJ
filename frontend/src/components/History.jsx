@@ -10,7 +10,7 @@ import { addonItemsOf } from '../addons';
 const PAGE_SIZE = 100;
 
 export default function History({ type }) {
-  const { data, setData, setCurrentView, setActiveQuotation, setActiveWarranty, loadQuotationForEdit, loadWarrantyForEdit, startNewWarranty, startAddonOrder, setActiveTab, showToast } = useAppContext();
+  const { data, setData, setCurrentView, setActiveQuotation, setActiveQuotationId, setActiveWarranty, setActiveWarrantyId, loadQuotationForEdit, loadWarrantyForEdit, startNewWarranty, startAddonOrder, setActiveTab, showToast, setDocumentEditMode } = useAppContext();
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Add-on selection mode: armed by the "Add-on Order" button above the list;
@@ -437,10 +437,8 @@ export default function History({ type }) {
                   </span>
                 </div>
                 
-                {/* Actions — compact icon buttons so they never overflow the
-                    column (text labels for 3-4 actions used to spill into the
-                    Date / Grand Total columns). Tooltips carry the meaning. */}
-                <div className="history-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                {/* Actions — Desktop: compact icon buttons */}
+                <div className="history-actions history-actions-desktop" style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                   {isQuotation && rowCerts.length > 0 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openWarranty(row, rowCerts[0]); }}
@@ -469,7 +467,7 @@ export default function History({ type }) {
                     </button>
                   )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleView(row); }}
+                    onClick={(e) => { e.stopPropagation(); setDocumentEditMode(false); handleView(row); }}
                     title="View"
                     style={{ ...iconBtn, color: 'var(--ink)' }}
                   >
@@ -481,6 +479,88 @@ export default function History({ type }) {
                     style={{ ...iconBtn, color: 'var(--red)', borderColor: 'var(--red)' }}
                   >
                     <Trash2 size={15}/>
+                  </button>
+                </div>
+
+                {/* Actions — Mobile: Two prominent buttons (View Document & Edit Page) */}
+                <div className="history-actions-mobile" style={{ display: 'none', gap: '8px', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--line-soft)' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDocumentEditMode(false);
+                      handleView(row);
+                    }}
+                    style={{
+                      flex: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '10px 12px',
+                      borderRadius: '12px',
+                      border: '1.5px solid var(--line)',
+                      background: 'var(--surface)',
+                      color: 'var(--ink)',
+                      fontWeight: 700,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Eye size={15} /> {isQuotation ? 'View Document' : 'View Certificate'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDocumentEditMode(true);
+                      if (isQuotation) {
+                        setActiveQuotation(row);
+                        setActiveQuotationId(row.id || null);
+                        if (setActiveTab) setActiveTab('quotation');
+                        setCurrentView('quotation_document');
+                      } else {
+                        setActiveWarranty(row);
+                        setActiveWarrantyId(row.id || row.warrantyNo || null);
+                        setCurrentView('warranty_document');
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '10px 12px',
+                      borderRadius: '12px',
+                      border: 'none',
+                      background: 'var(--accent)',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(194, 65, 12, 0.3)',
+                    }}
+                  >
+                    <Edit3 size={15} /> Edit Page
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteRow(row); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #fee2e2',
+                      background: '#fff5f5',
+                      color: 'var(--red)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>

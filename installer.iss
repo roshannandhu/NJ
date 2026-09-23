@@ -10,7 +10,7 @@
 ; ===========================================================================
 
 #define AppName "NJ India System"
-#define AppVersion "1.1.4"
+#define AppVersion "1.1.5"
 #define AppPublisher "NJ India Trading"
 #define AppPublisherURL "https://njindia.in"
 
