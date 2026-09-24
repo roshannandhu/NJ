@@ -6,6 +6,12 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { goBack } = useAppContext();
 
+  // On phone screens, QuotationDocument and WarrantyDocument have their own dedicated headers
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 860;
+  if (isMobile && (currentView === 'quotation_document' || currentView === 'warranty_document')) {
+    return null;
+  }
+
   return (
     <div className="app-topbar" style={{
       position: 'relative',
@@ -34,7 +40,7 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
             {currentView !== 'dashboard' && currentView !== 'quotation_desk' && (
               <button
                 type="button"
-                className="hover-lift"
+                className="hover-lift app-topbar-back"
                 onClick={() => goBack()}
                 title="Go back"
                 style={{

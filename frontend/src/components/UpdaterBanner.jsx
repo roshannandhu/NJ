@@ -57,7 +57,10 @@ export default function UpdaterBanner() {
 
   return (
     <div style={{
-      background: 'var(--brand)',
+      // --brand has never existed: the declaration was dropped, leaving white
+      // text on a transparent strip — the update notice was invisible, and so
+      // was the button below (white on white).
+      background: 'var(--accent)',
       color: 'white',
       padding: '12px 24px',
       display: 'flex',
@@ -78,9 +81,10 @@ export default function UpdaterBanner() {
           disabled={updating}
           style={{
             background: 'white',
-            color: 'var(--brand)',
+            color: 'var(--accent)',
             border: 'none',
             padding: '6px 16px',
+            minHeight: 44,
             borderRadius: 6,
             fontWeight: 600,
             fontSize: 13,
@@ -97,7 +101,13 @@ export default function UpdaterBanner() {
             border: 'none',
             color: 'white',
             cursor: 'pointer',
-            display: 'flex',
+            // 44px is the minimum comfortable touch target (WCAG 2.5.5); this
+            // was 26px, which on a phone is a miss waiting to happen.
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 44,
+            minHeight: 44,
             padding: 4,
             opacity: 0.8
           }}

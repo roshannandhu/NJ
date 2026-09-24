@@ -5,7 +5,11 @@
   --surface: #FFFFFF;
   --ink: #1a1a1a;
   --ink-mid: #4a463f;
-  --ink-soft: #8a857a;
+  /* Was #8a857a: 3.67:1 on white, 3.46:1 on --bg, 3.21:1 on --bg-warm — under
+     the 4.5:1 WCAG AA minimum, and it carries every label, hint and subtitle in
+     the app. Same warm grey, 18% darker, so it clears AA on all three surfaces
+     it is ever used on: 5.16 / 4.86 / 4.50. */
+  --ink-soft: #716d64;
   --line: #e5e1d8;
   --line-soft: #efeae0;
 
@@ -2270,10 +2274,21 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   font: 700 9px var(--font-mono);
 }
 
+@media (max-width: 860px) {
+  .app-sidebar.app-sidebar-hidden-on-mobile {
+    display: none !important;
+  }
+  .main-content-scroll-container {
+    padding: 0 !important;
+  }
+}
+
 @media (max-width: 760px) {
   .app-shell {
     height: 100dvh !important;
     flex-direction: column;
+    padding-top: max(32px, env(safe-area-inset-top, 0px)) !important;
+    background: var(--bg);
   }
 
   .app-main {
@@ -2359,7 +2374,7 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   .main-content-scroll-container[data-view="settings"],
   .main-content-scroll-container[data-view="quotation_desk"] { padding: 0 !important; }
   .main-content-scroll-container[data-view="quotation_document"],
-  .main-content-scroll-container[data-view="warranty_document"] { padding: 12px !important; }
+  .main-content-scroll-container[data-view="warranty_document"] { padding: 0 !important; }
 
   .app-lock-shell { padding: 18px; box-sizing: border-box; }
   .app-lock-card { width: 100% !important; padding: 28px 20px !important; }
@@ -2398,36 +2413,58 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   .history-actions button { width: 40px !important; height: 40px !important; }
 
   .checkout-layout {
+    display: flex !important;
+    flex-direction: column !important;
     grid-template-columns: minmax(0, 1fr) !important;
-    gap: 26px !important;
+    gap: 18px !important;
+    padding: 10px 12px 60px 12px !important;
     min-height: 0 !important;
+    box-sizing: border-box !important;
   }
   .checkout-title-row {
     align-items: flex-start !important;
     flex-direction: column;
-    gap: 14px;
-    margin-bottom: 20px !important;
+    gap: 10px;
+    padding: 14px 16px !important;
+    border-radius: 16px !important;
+    margin-bottom: 16px !important;
   }
-  .checkout-title-row h1 { font-size: 29px !important; }
+  .checkout-title-row h1 { font-size: 22px !important; }
+  .checkout-title-row p { font-size: 13px !important; margin-top: 4px !important; line-height: 1.45 !important; }
   .checkout-title-row > button { width: 100%; justify-content: center; }
   .checkout-item-card {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
-    gap: 18px 14px !important;
-    padding: 18px !important;
+    gap: 12px 10px !important;
+    padding: 14px 16px !important;
+    border-radius: 16px !important;
   }
   .checkout-item-info { grid-column: 1 / -1; }
-  .checkout-item-price { grid-column: 1; }
-  .checkout-item-qty { grid-column: 2; }
+  .checkout-item-price { grid-column: 1; padding: 8px 10px !important; border-radius: 10px !important; }
+  .checkout-item-qty { grid-column: 2; padding: 8px 10px !important; border-radius: 10px !important; }
   .checkout-item-total {
     grid-column: 1 / -1;
     min-width: 0 !important;
-    padding-top: 12px;
+    padding-top: 10px;
     border-top: 1px solid var(--line-soft);
     flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between;
   }
-  .checkout-summary { padding: 24px 18px !important; }
+  .checkout-summary { padding: 18px 16px !important; border-radius: 18px !important; }
+
+  /* Prevent Android WebView / mobile browser auto-zoom when tapping inputs */
+  .checkout-layout input,
+  .checkout-layout select,
+  .checkout-layout textarea,
+  .checkout-item-card input,
+  .checkout-item-qty input,
+  .checkout-item-price input,
+  .checkout-controls input,
+  .checkout-controls select,
+  .checkout-customer-card input,
+  .checkout-customer-card textarea {
+    font-size: 16px !important;
+  }
 
   .backup-settings-page { min-width: 0; }
   .backup-tabs {
@@ -2597,7 +2634,9 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   }
   .app-topbar-subtitle {
     max-width: calc(100vw - 92px) !important;
-    color: #8b8175 !important;
+    /* Was a hardcoded #8b8175 — 3.82:1 at 10.5px, so it missed the token fix
+       and stayed under AA. Use the token so it tracks the palette. */
+    color: var(--ink-soft) !important;
     font-size: 10.5px !important;
   }
   .app-topbar-cart {
@@ -2695,6 +2734,19 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
     box-shadow: inset 0 0 0 1px rgba(194, 65, 12, 0.1);
   }
   .history-search { min-height: 48px; border-radius: 15px !important; background: rgba(255, 255, 255, 0.9) !important; }
+  /* The field itself was only 20px tall inside a 48px box, so two thirds of
+     what looks like the search box did nothing when tapped. */
+  .history-search input { align-self: stretch; height: auto; min-height: 44px; }
+
+  /* Touch targets below the 44px minimum (WCAG 2.5.5). Measured on a 390px
+     viewport: back 36, settings back 42, brand row actions 40, date-range
+     pills 38, checkboxes 15. Widths were already fine — only height was short,
+     so these grow downward without reflowing anything. */
+  .app-topbar-back { width: 44px !important; height: 44px !important; }
+  .set-back-btn { width: 44px !important; height: 44px !important; }
+  .brand-settings-card-actions button { min-width: 44px; min-height: 44px; }
+  .dash-range button { min-height: 44px; }
+  input[type="checkbox"] { width: 20px; height: 20px; }
   .history-table {
     display: flex;
     flex-direction: column;
@@ -2710,6 +2762,8 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
     background: linear-gradient(145deg, #fff, #fcfaf7) !important;
     box-shadow: 0 8px 22px rgba(73, 56, 36, 0.055);
   }
+  .history-actions-desktop { display: none !important; }
+  .history-actions-mobile { display: flex !important; }
   .history-actions button { border-radius: 12px !important; }
 
   .checkout-title-row h1,
@@ -2840,74 +2894,75 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
     grid-column: 1 / -1;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 5px;
-    padding: 5px;
-    margin: -2px 0 2px;
+    gap: 4px;
+    padding: 4px;
+    margin: -2px 0 6px;
     border: 1px solid rgba(218, 209, 196, 0.95);
-    border-radius: 17px;
+    border-radius: 14px;
     background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 10px 25px rgba(73, 56, 36, 0.08);
+    box-shadow: 0 6px 18px rgba(73, 56, 36, 0.08);
     backdrop-filter: blur(15px);
   }
   .checkout-mobile-nav button {
     min-width: 0;
-    min-height: 48px;
+    min-height: 38px;
     display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 5px;
-    padding: 6px;
-    border-radius: 12px;
+    gap: 4px;
+    padding: 4px 6px;
+    border-radius: 10px;
     color: var(--ink-mid);
     text-align: left;
+    font-size: 11.5px;
   }
   .checkout-mobile-nav button:first-child { background: var(--accent-soft); color: var(--accent-deep); }
   .checkout-mobile-nav button span {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     display: grid;
     place-items: center;
     border: 1px solid currentColor;
-    border-radius: 9px;
+    border-radius: 8px;
     font: 800 10px var(--font-mono);
   }
-  .checkout-mobile-nav button strong { min-width: 0; font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+  .checkout-mobile-nav button strong { min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
   .checkout-mobile-nav button small {
-    min-width: 18px;
-    height: 18px;
+    min-width: 16px;
+    height: 16px;
     display: grid;
     place-items: center;
-    padding: 0 5px;
+    padding: 0 4px;
     border-radius: 999px;
     background: var(--surface);
     font: 800 9px var(--font-mono);
   }
   .checkout-review,
   .checkout-customer-card,
-  .checkout-summary { scroll-margin-top: 68px; }
+  .checkout-summary { scroll-margin-top: 54px; }
   .checkout-review > button:first-child {
-    min-height: 40px;
-    margin-bottom: 14px !important;
-    padding: 0 13px;
+    min-height: 36px;
+    margin-bottom: 10px !important;
+    padding: 0 12px;
     border: 1px solid var(--line) !important;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.72) !important;
   }
   .checkout-title-row {
-    padding: 19px !important;
+    padding: 14px 16px !important;
     border: 1px solid rgba(194, 65, 12, 0.14);
-    border-radius: 20px;
+    border-radius: 16px;
     background:
       radial-gradient(circle at 100% 0, rgba(194, 65, 12, 0.13), transparent 145px),
       linear-gradient(145deg, #fffdf9, #f8f1e8);
-    box-shadow: 0 9px 24px rgba(73, 56, 36, 0.055);
+    box-shadow: 0 6px 18px rgba(73, 56, 36, 0.05);
   }
-  .checkout-title-row h1 { font-size: 31px !important; }
-  .checkout-title-row p { font-size: 13px !important; line-height: 1.55; }
+  .checkout-title-row h1 { font-size: 22px !important; }
+  .checkout-title-row p { font-size: 12.5px !important; line-height: 1.45; }
   .checkout-title-row > button {
-    min-height: 46px;
+    min-height: 40px;
     border-style: solid !important;
-    border-radius: 13px !important;
+    border-radius: 11px !important;
     background: rgba(255, 255, 255, 0.86) !important;
   }
   .checkout-item-price,
