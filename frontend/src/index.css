@@ -2751,7 +2751,6 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
      pills 38, checkboxes 15. Widths were already fine — only height was short,
      so these grow downward without reflowing anything. */
   .app-topbar-back { width: 44px !important; height: 44px !important; }
-  .set-back-btn { width: 44px !important; height: 44px !important; }
   .brand-settings-card-actions button { min-width: 44px; min-height: 44px; }
   .dash-range button { min-height: 44px; }
   input[type="checkbox"] { width: 20px; height: 20px; }

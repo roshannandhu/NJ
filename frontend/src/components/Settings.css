@@ -553,7 +553,8 @@
   }
   .set-topbar .set-topbar-icon { display: none; }
   .set-topbar h1 { font-size: 17px; }
-  .set-back-btn { width: 42px !important; height: 42px !important; flex: 0 0 42px; }
+  /* 44px is the touch minimum (WCAG 2.5.5); this was 42. */
+  .set-back-btn { width: 44px !important; height: 44px !important; flex: 0 0 44px; }
 
   .set-nav-buttons { padding: 8px 12px; }
   .set-nav-item { min-height: 44px; padding: 9px 13px; }
@@ -730,7 +731,10 @@
     white-space: nowrap;
   }
   .backup-settings-page > div:nth-child(2) { margin-top: 14px !important; }
-  .backup-settings-page button { min-height: 40px; }
+  /* Was 40px. Same specificity as `.backup-tabs button { min-height: 44px }`
+     but declared later, so it quietly capped every button on this page —
+     tabs, destination rows and "Back up now" — below the touch minimum. */
+  .backup-settings-page button { min-height: 44px; }
 
   .backup-destinations { overflow: hidden !important; border-radius: 12px !important; }
   .backup-destination-head { display: none !important; }
