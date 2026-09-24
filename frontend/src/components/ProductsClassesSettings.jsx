@@ -96,7 +96,10 @@ export default function ProductsClassesSettings() {
     setEditClassId(cls.id);
   };
   const addVariety = () => {
-    const v = { id: newId('var'), classId: activeClassId, name: 'New Variety', description: '', unit: 'sqft', basePrice: 0, image: null, colors: [] };
+    // The quotation prints each PRODUCT's own description, so a new product
+    // starts from its class's text rather than blank — edit it per product.
+    const seed = data.settings?.classSpecs?.[activeClassId] || '';
+    const v = { id: newId('var'), classId: activeClassId, name: 'New Variety', description: typeof seed === 'string' ? seed : '', unit: 'sqft', basePrice: 0, image: null, colors: [] };
     commit({ ...data, varieties: [...data.varieties, v] });
     setEditVarId(v.id); setEditTypeIdx(null);
   };
@@ -464,11 +467,12 @@ export default function ProductsClassesSettings() {
                     <option value="">— No warranty —</option>
                     {data.warranties?.map(w => <option key={w.id} value={w.id}>{w.title} ({w.duration})</option>)}
                   </select></div>
-                <div className="set-field span2"><span className="set-label">Class Description</span>
+                <div className="set-field span2"><span className="set-label">Default Description For New Products</span>
                   <textarea className="set-textarea" rows={4}
                     value={classSpecValue(modalClass)}
                     onChange={e => updateClassSetting('classSpecs', modalClass.id, e.target.value)}
-                    placeholder="Product title on the first line, then spec lines — shown in the quotation's Product Details table." />
+                    placeholder="Starting text for products added to this class. Quotations print each product's own description, not this." />
+                  <span className="set-hint">Quotations print the description set on each product. This text is only the starting point for the next product you add here.</span>
                 </div>
               </div>
             </div>

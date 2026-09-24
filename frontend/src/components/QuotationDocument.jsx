@@ -741,12 +741,6 @@ function QuotationDocumentInner() {
     }
   };
 
-  // Find all unique warranties matching tile items in this quotation (for checking template presence)
-  // Tile classes only (exclude tools/accessories)
-  const tileClasses = Array.from(
-    new Set(docAllItems.map(i => i.className))
-  ).filter(name => name !== 'Custom' && !name.toLowerCase().includes('tool'));
-
   // Storage key for a class's description: prefer the stable class.id (matching how
   // Settings stores classSpecs), falling back to the keyword key for legacy configs.
   const classDescKey = (className) => {
@@ -757,6 +751,42 @@ function QuotationDocumentInner() {
   // The legacy keyword key for a class, or null when the class belongs to a
   // brand other than the original one — those must never inherit NJ's text.
   const legacySpecKey = (className) => legacyClassKey(className, docAllItems, data);
+
+  // The catalogue product behind a line item. Items store it inside `id` as
+  // "<varietyId>-<colour>" rather than as a field of its own; that resolves 97%
+  // of historical lines, the rest being manual "Custom" entries with no product.
+  const varietyForItem = (item) => {
+    const id = String(item?.id || '');
+    if (!id || id === 'custom') return null;
+    return (data.varieties || []).find(v => id === v.id || id.startsWith(`${v.id}-`)) || null;
+  };
+
+  // One PRODUCT DETAILS row per product, not per class. A class holds many
+  // products with different specs — NJ Stone Coated alone has 44 — so a single
+  // class blurb described none of them accurately: a quotation for NJ DECRA
+  // printed the generic stone-coated text instead of its own thickness,
+  // coating and warranty. Deduplicated by product, so the same product in two
+  // colours still prints one row.
+  const specRows = (() => {
+    const rows = [], seen = new Set();
+    for (const it of docAllItems) {
+      const className = it.className || '';
+      if (className === 'Custom' || className.toLowerCase().includes('tool')) continue;
+      const variety = varietyForItem(it);
+      const key = variety ? variety.id : (classDescKey(className) || className);
+      // Collapse rows that would print the same words. Products that inherited
+      // their class's text share it verbatim, and repeating an identical block
+      // once per product reads worse than the single box this replaced; rows
+      // split only where the products genuinely describe themselves differently.
+      const override = doc.classDescriptions?.[key] ?? doc.classDescriptions?.[classDescKey(className)];
+      const text = ((override != null && override !== '') ? override : (variety?.description || '')).trim();
+      const dedupe = text || `name:${variety?.name || it.name || className}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      rows.push({ key, className, variety, item: it });
+    }
+    return rows;
+  })();
 
   // Build the ordered element list for the PDF: every quotation page, in order.
   // Used by download + share so both produce the same document.
@@ -787,102 +817,32 @@ function QuotationDocumentInner() {
     return (settings.classGuarantee?.[key] || '').trim();
   };
 
-  // Table 1: Class Description cell. Priority: per-quotation override →
-  // settings.classSpecs (string form) → legacy object form → hard fallback.
-  const getClassSpecRow = (className) => {
-    // Keyword bucket only for the original brand's classes (see isLegacyBrandClass).
-    const kwKey = legacySpecKey(className);
-    const idKey = data.classes?.find(c => c.name === className)?.id;
-    const override = doc.classDescriptions?.[idKey] ?? doc.classDescriptions?.[kwKey];
-    const savedRaw = settings.classSpecs?.[idKey] ?? settings.classSpecs?.[kwKey];
-    const text = (override != null && override !== '') ? override : savedRaw;
-
-    // Current storage form is a plain string: first line = title, rest = spec lines.
+  // Table 1: the PRODUCT DETAILS cell for one product. Priority: a
+  // per-quotation override (product key, then the class key older quotations
+  // used) → the product's own catalogue description → its name. Class
+  // descriptions are deliberately not consulted here: every product carries its
+  // own text, so the class blurb no longer speaks for products it does not fit.
+  const getProductSpecRow = (row) => {
+    const titleStyle = { fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px', textTransform: 'uppercase' };
+    const override = doc.classDescriptions?.[row.key] ?? doc.classDescriptions?.[classDescKey(row.className)];
+    const text = (override != null && override !== '') ? override : (row.variety?.description || '');
     if (typeof text === 'string' && text.trim()) {
       const lines = text.split('\n');
-      const title = lines[0];
       const rest = lines.slice(1).join('\n');
       return (
         <>
-          <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px', textTransform: 'uppercase' }}>
-            {title}
-          </div>
+          <div style={titleStyle}>{lines[0]}</div>
           {rest.trim() && (
-            <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
-              {rest}
-            </div>
+            <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.6', whiteSpace: 'pre-line' }}>{rest}</div>
           )}
         </>
       );
     }
-
-    // An emptied description means "no description" — print the class name alone.
-    // Without this, clearing the field in Settings drops through to the hardcoded
-    // blurbs below and the old NJ text reappears, with nothing left to edit.
-    if (typeof text === 'string') return (
-      <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', textTransform: 'uppercase' }}>{className}</div>
-    );
-
-    // Legacy object form { title, specs }
-    if (text && text.specs) {
-      return (
-        <>
-          <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px', textTransform: 'uppercase' }}>
-            {text.title || className}
-          </div>
-          <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
-            {text.specs}
-          </div>
-        </>
-      );
-    }
-
-    // Hard fallback definitions — product specs only, no warranty/guarantee text
-    // (warranty duration is controlled via Settings → Product Guarantee Text toggle).
-    // These blurbs are NJ's, so a class of any other brand prints its own name
-    // instead of borrowing them; its description is set in Products & Catalog.
-    if (!kwKey) return (
-      <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', textTransform: 'uppercase' }}>{className}</div>
-    );
-    const n = className.toLowerCase();
-    if (n.includes('laminated') || n.includes('asphalt')) return (
-      <>
-        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM LAMINATED SHINGLES</div>
-        <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.7' }}>
-          One bundle shingles covers : 32.7 sq/ft<br />
-          One bundle ridge covers : 32 RFT
-        </div>
-      </>
-    );
-    if (n.includes('stone') || n.includes('metal')) return (
-      <>
-        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ STONE COATED METAL TILES</div>
-        <div style={{ fontSize: '12px', color: '#444', lineHeight: '1.7' }}>
-          One Bundle : 72 sq/ft — 12 Tiles<br />
-          Ridge : 1.3 RFT — 1 tile
-        </div>
-      </>
-    );
-    if (n.includes('heat') || n.includes('ceiling')) return (
-      <>
-        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM HEAT OUT CEILING</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>High thermal insulation &amp; ceiling panel technology</div>
-      </>
-    );
-    if (n.includes('ceramic') || n.includes('clay')) return (
-      <>
-        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>NJ PREMIUM CERAMIC ROOF TILES</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>Premium fired clay roofing tile</div>
-      </>
-    );
-    if (n.includes('pie') || n.includes('bitumen') || n.includes('docke')) return (
-      <>
-        <div style={{ fontSize: '13px', fontWeight: '800', color: '#1A1A1A', marginBottom: '4px' }}>DOCKE PIE BITUMEN SHINGLES</div>
-        <div style={{ fontSize: '12px', color: '#444' }}>Self-adhesive bitumen shingle tile</div>
-      </>
-    );
-    return <div style={{ fontSize: '12px', color: '#888', fontStyle: 'italic' }}>Standard Roofing Products</div>;
+    // No description yet (Highlander products and the accessories): the product
+    // name alone, never the class blurb.
+    return <div style={{ ...titleStyle, marginBottom: 0 }}>{row.variety?.name || row.item?.name || row.className}</div>;
   };
+
 
   // Terms resolver (reads from settings.classTerms if available). Only reached by
   // legacy quotations saved before terms were snapshotted onto the document.
@@ -1791,7 +1751,7 @@ function QuotationDocumentInner() {
               // segments; the paginator assigns them to as many A4 pages as
               // needed (see the measure-and-assign effect + quotationPagination).
               const D = QD;
-              const showSpec = settings.showClassSpecBox !== false && tileClasses.length > 0;
+              const showSpec = settings.showClassSpecBox !== false && specRows.length > 0;
 
               // ── Fixed header band — repeated on every page ──
               // All branding comes from the quotation's PARENT BRAND `profile`
@@ -1915,17 +1875,22 @@ function QuotationDocumentInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tileClasses.slice(from, to).map((className, k) => {
+                    {specRows.slice(from, to).map((row, k) => {
                       const idx = from + k;
+                      const className = row.className;
                       const itemClass = data.classes?.find(c => c.name === className);
                       const brandColor = itemClass ? itemClass.color : PLUM;
-                      const imgKey = classDescKey(className);
+                      // Keyed by product now; the old class key is still read so
+                      // images and edits saved on existing quotations (when this
+                      // box was per class) keep showing.
+                      const imgKey = row.key;
+                      const legacyImgKey = classDescKey(className);
                       // Product image, in priority: a per-quotation image the user added
                       // here → an item in this quotation that carries one. We intentionally
                       // do NOT fall back to the class's catalogue logo (that was rendering
                       // the small NJ mark); a missing image shows the placeholder instead.
-                      const itemImg = doc.items.find(it => it.className === className && it.image)?.image;
-                      const rawImg = doc.classImages?.[imgKey] || itemImg || '';
+                      const itemImg = row.item?.image || doc.items.find(it => it.className === className && it.image)?.image;
+                      const rawImg = doc.classImages?.[imgKey] || doc.classImages?.[legacyImgKey] || itemImg || '';
                       const imgSrc = rawImg ? corsMediaUrl(rawImg) : '';
                       const svgPlaceholder = (
                         <svg viewBox="0 0 100 60" style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'block' }}>
@@ -1954,18 +1919,18 @@ function QuotationDocumentInner() {
                               );
                             })()}
                             {(() => {
-                              const key = classDescKey(className);
+                              const key = row.key;
                               const raw = (doc.classDescriptions?.[key] != null)
                                 ? doc.classDescriptions[key]
-                                : (settings.classSpecs?.[key] ?? settings.classSpecs?.[legacySpecKey(className)] ?? '');
+                                : (doc.classDescriptions?.[legacyImgKey] ?? row.variety?.description ?? '');
                               return (
                                 <EditableCell
                                   value={raw}
                                   onSave={v => updateClassDesc(key, v)}
                                   multiline
-                                  placeholder="click to add class description"
+                                  placeholder="click to add product description"
                                   renderValue={() => {
-                                    const spec = getClassSpecRow(className);
+                                    const spec = getProductSpecRow(row);
                                     const g = getGuaranteeText(className);
                                     if (!g) return spec;
                                     return <>{spec}<div style={{ fontSize: '12px', color: '#555', marginTop: '5px', whiteSpace: 'pre-line', borderTop: '1px solid #eee', paddingTop: '4px' }}>{g}</div></>;
@@ -2525,7 +2490,7 @@ function QuotationDocumentInner() {
               // block can be measured; the page clips (overflow:hidden) and the
               // layout effect re-renders the settled assignment before paint.
               const allSegments = [
-                ...(showSpec ? [{ type: 'spec', from: 0, to: tileClasses.length, withHead: true }] : []),
+                ...(showSpec ? [{ type: 'spec', from: 0, to: specRows.length, withHead: true }] : []),
                 { type: 'items', from: 0, to: doc.items.length, withHead: true },
                 ...(docHasAddons ? [{ type: 'addonItems', from: 0, to: docAddonItems.length, withHead: true }] : []),
                 { type: 'addRow' },
