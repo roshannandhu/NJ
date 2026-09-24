@@ -32,6 +32,11 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   // <input> mid-selection and the value can never be copied. This guard keeps
   // single-click-to-edit while letting users select & Ctrl+C any displayed text.
   const onMouseDown = (e) => { downPos.current = { x: e.clientX, y: e.clientY }; };
+  const onTouchStart = (e) => {
+    if (e.touches && e.touches[0]) {
+      downPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  };
   const handleClick = (e) => {
     const moved = downPos.current && (Math.abs(e.clientX - downPos.current.x) > 3 || Math.abs(e.clientY - downPos.current.y) > 3);
     const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
@@ -42,10 +47,11 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
 
   if (editing) {
     const s = {
-      width: '100%', border: 'none', borderBottom: '1.5px solid #8a1856',
-      background: 'rgba(138,24,86,0.05)', padding: '1px 3px',
+      width: '100%', border: 'none', borderBottom: '2px solid #c2410c',
+      background: 'rgba(194,65,12,0.06)', padding: '2px 4px',
       fontSize: 'inherit', fontFamily: 'inherit', fontWeight: 'inherit',
-      color: 'inherit', textAlign: 'inherit', outline: 'none', boxSizing: 'border-box', ...style,
+      color: 'inherit', textAlign: 'inherit', outline: 'none', boxSizing: 'border-box',
+      borderRadius: '2px', ...style,
     };
     return multiline
       ? <textarea autoFocus value={draft} style={s}
@@ -66,9 +72,12 @@ function EditableCell({ value, onSave, multiline = false, numeric = false, style
   }
 
   const isEmpty = value == null || value === '';
-  const display = renderValue ? renderValue(value) : (isEmpty ? <span style={{ color: '#bbb', fontStyle: 'italic' }}>{placeholder}</span> : value);
+  // #bbb read at 1.92:1 — these "add phone" / "add notes" hints are how you
+  // discover the document is editable, and they were nearly invisible. They sit
+  // inside q-edit-only, so this never reaches the printed PDF.
+  const display = renderValue ? renderValue(value) : (isEmpty ? <span style={{ color: 'var(--ink-soft)', fontStyle: 'italic' }}>{placeholder}</span> : value);
   return (
-    <span onMouseDown={onMouseDown} onClick={handleClick} title="Click to edit · drag to select & copy"
+    <span onMouseDown={onMouseDown} onTouchStart={onTouchStart} onClick={handleClick} title="Click to edit · drag to select & copy"
       className="q-editable" style={{ cursor: 'text', userSelect: 'text', WebkitUserSelect: 'text', ...style }}>
       {display}
     </span>
@@ -1020,8 +1029,9 @@ function QuotationDocumentInner() {
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
         .q-phone-back {
-          width: 36px;
-          height: 36px;
+          /* 44px is the touch minimum (WCAG 2.5.5); these were 36. */
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           border: 1px solid var(--line);
           background: var(--bg);
@@ -1044,6 +1054,8 @@ function QuotationDocumentInner() {
         .q-phone-tab-btn {
           border: none;
           background: transparent;
+          /* Was 24px tall — the Quotation/Warranty switch is a primary control. */
+          min-height: 44px;
           padding: 5px 12px;
           border-radius: 9999px;
           font-size: 11.5px;
@@ -1070,8 +1082,8 @@ function QuotationDocumentInner() {
           gap: 6px;
         }
         .q-phone-action-btn {
-          width: 36px;
-          height: 36px;
+          width: 44px;
+          height: 44px;
           border-radius: 50%;
           border: 1px solid var(--line);
           background: var(--surface);

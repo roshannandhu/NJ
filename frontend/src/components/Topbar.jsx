@@ -44,11 +44,12 @@ export default function Topbar({ title, subtitle, cartCount, onOpenCart, current
                 onClick={() => goBack()}
                 title="Go back"
                 style={{
+                  // Size lives in CSS (.app-topbar-back) so the phone
+                  // breakpoint can grow it to the 44px touch minimum — an
+                  // inline width fights the stylesheet on every re-render.
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  width: '36px',
-                  height: '36px',
                   borderRadius: '50%',
                   background: 'var(--surface)',
                   border: '1px solid var(--line)',

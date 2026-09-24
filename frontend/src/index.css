@@ -2357,7 +2357,7 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
 
   .app-topbar-inner { padding: 12px 16px !important; }
   .app-topbar-title { font-size: 20px !important; font-weight: 600 !important; }
-  .app-topbar-subtitle {
+.app-topbar-subtitle {
     max-width: 58vw;
     margin-top: 2px !important;
     font-size: 11px !important;
@@ -2465,6 +2465,14 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   .checkout-customer-card textarea {
     font-size: 16px !important;
   }
+
+  /* The price and quantity fields read as big cards but the input inside them
+     was only 20px tall, so most of the card did nothing when tapped — and these
+     are the two controls this screen exists for. Let the field fill its card. */
+  .checkout-item-qty > div,
+  .checkout-item-price > div { flex: 1; align-items: center; }
+  .checkout-item-qty input,
+  .checkout-item-price input { min-height: 38px; }
 
   .backup-settings-page { min-width: 0; }
   .backup-tabs {
@@ -3387,3 +3395,8 @@ input, textarea, select, [contenteditable="true"], .q-editable, .wc-editable {
   .quotation-document-page .document-actions .doc-warranty-status,
   .warranty-document-page .wd-actions .is-new { grid-column: 1; }
 }
+
+/* Topbar back button: size owned by CSS (Topbar.jsx no longer sets it inline,
+   where it fought this rule on every React re-render). The phone breakpoint
+   above raises it to the 44px touch minimum. */
+.app-topbar-back { width: 36px; height: 36px; }

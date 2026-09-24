@@ -36,7 +36,7 @@ export default function Sidebar({ currentView, setCurrentView }) {
 
       {/* ── Sidebar panel ── */}
       <div
-        className="app-sidebar"
+        className={`app-sidebar ${['quotation_document', 'warranty_document'].includes(currentView) ? 'app-sidebar-hidden-on-mobile' : ''}`}
         style={{
           width: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
           minWidth: expanded ? `${W_EXPANDED}px` : `${W_COLLAPSED}px`,
@@ -124,7 +124,10 @@ export default function Sidebar({ currentView, setCurrentView }) {
             }}>
               NJ<span style={{ color: 'var(--accent)' }}>.</span>
             </h1>
-            <div style={{ fontSize: '9.5px', textTransform: 'uppercase', letterSpacing: '0.16em', color: '#6a6558', marginTop: '5px' }}>
+            {/* #6a6558 read 3.0:1 against the near-black rail at 9.5px — the
+                same warm grey lightened until it clears AA (4.54:1). This one
+                sits on a DARK surface, so it goes lighter, not darker. */}
+            <div style={{ fontSize: '9.5px', textTransform: 'uppercase', letterSpacing: '0.16em', color: '#888271', marginTop: '5px' }}>
               Home Care · Kerala
             </div>
           </div>
