@@ -1,0 +1,246 @@
+/* ── Mobile Page Viewport Styles ────────────────────────────────────────── */
+
+.mpv-root {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  background: #f1f5f9;
+  background-image: radial-gradient(circle at 50% 15%, #f8fafc 0%, #e2e8f0 100%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mpv-scroll-container {
+  flex: 1;
+  width: 100%;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  display: block;
+  padding: 12px 6px 120px 6px; /* Space for the floating bottom bar */
+  box-sizing: border-box;
+}
+
+.mpv-stage {
+  box-sizing: border-box;
+  margin: 0 auto;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1), height 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mpv-canvas-wrapper {
+  margin: 0;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Reset legacy mobile beige border/label around A4 pages inside viewport */
+.mpv-canvas-wrapper .q-pages {
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  gap: 16px !important;
+}
+
+.mpv-canvas-wrapper .q-pages::before {
+  display: none !important;
+}
+
+.mpv-canvas-wrapper .printable-sheet,
+.mpv-canvas-wrapper .q-sheet-page {
+  border-radius: 6px !important;
+  box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.12), 0 4px 10px -2px rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+/* ── Floating Mobile Action Bar ────────────────────────────────────────── */
+
+.mpv-floating-bar {
+  position: fixed;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 5px 8px;
+  border-radius: 9999px;
+  max-width: calc(100vw - 20px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+@media (max-height: 520px) {
+  .mpv-floating-bar {
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 20px);
+  }
+}
+
+.mpv-floating-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.mpv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 12px;
+  border-radius: 9999px;
+  border: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  min-height: 44px;   /* WCAG 2.5.5 — same floor as every other control */
+  flex-shrink: 0;
+}
+
+.mpv-btn-primary {
+  background: #c2410c;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(194, 65, 12, 0.4);
+}
+.mpv-btn-primary:active {
+  transform: scale(0.96);
+  background: #9a3412;
+}
+
+.mpv-btn-secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+}
+.mpv-btn-secondary:active {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(0.96);
+}
+
+.mpv-btn-success {
+  background: #059669;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
+}
+.mpv-btn-success:active {
+  background: #047857;
+  transform: scale(0.96);
+}
+
+/* ── Zoom Controls Pill ────────────────────────────────────────────────── */
+
+.mpv-zoom-pill {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.mpv-zoom-btn {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.mpv-zoom-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.mpv-zoom-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  padding: 0 3px;
+  min-width: 34px;
+  text-align: center;
+}
+
+/* ── In-Page Edit Mode Highlights ──────────────────────────────────────── */
+
+body.mpv-edit-active .q-editable,
+body.mpv-edit-active .wc-editable {
+  outline: 1.5px dashed rgba(194, 65, 12, 0.6) !important;
+  background: rgba(194, 65, 12, 0.06) !important;
+  border-radius: 3px !important;
+  cursor: pointer !important;
+}
+
+body.mpv-edit-active .q-editable:active,
+body.mpv-edit-active .wc-editable:active {
+  background: rgba(194, 65, 12, 0.2) !important;
+  outline: 2px solid #c2410c !important;
+}
+
+/* Focused active cell while typing */
+.q-editable-focused,
+.wc-editable-focused {
+  outline: 2.5px solid #c2410c !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(194, 65, 12, 0.25), 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  z-index: 100 !important;
+  position: relative !important;
+  border-radius: 4px !important;
+}
+
+/* Quick Delete Row Button on document table */
+.mpv-row-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+  vertical-align: middle;
+}
+.mpv-row-delete-btn:active {
+  background: #dc2626;
+  color: #ffffff;
+  transform: scale(0.9);
+}
+
+/* Print and PDF generation must hide mobile toolbar & edit styles */
+@media print {
+  .mpv-floating-bar,
+  .mpv-row-delete-btn {
+    display: none !important;
+  }
+  .mpv-root {
+    background: transparent !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+  .mpv-canvas-wrapper {
+    transform: none !important;
+  }
+}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DownloadCloud, X } from 'lucide-react';
 import { API_BASE, SHARE_API_BASE } from '../api';
 import { LOCAL_VERSION } from '../version';
+import { isNewerVersion } from '../versionCompare';
 
 export default function UpdaterBanner() {
   const [updateInfo, setUpdateInfo] = useState(null);
@@ -13,7 +14,10 @@ export default function UpdaterBanner() {
     fetch(`${API_BASE}/api/version`)
       .then(res => res.json())
       .then(data => {
-        if (data && data.version && data.version !== LOCAL_VERSION) {
+        // Only a NEWER build is an update: `!==` also fired when the server
+        // reported an older version, and Update Now installs whatever it is
+        // handed — a silent downgrade. See versionCompare.js.
+        if (data && isNewerVersion(data.version, LOCAL_VERSION)) {
           setUpdateInfo(data);
         }
       })

@@ -33,7 +33,8 @@ function neutralizeScale(el) {
   const apply = (node) => {
     const t = node.style && node.style.transform;
     if (t && t !== 'none') {
-      saved.push({ node, transform: t, origin: node.style.transformOrigin, width: node.style.width });
+      saved.push({ node, transform: t, origin: node.style.transformOrigin, width: node.style.width, transition: node.style.transition });
+      node.style.transition = 'none';
       node.style.transform = 'none';
       node.style.transformOrigin = 'top left';
       node.style.width = '';
@@ -41,6 +42,25 @@ function neutralizeScale(el) {
   };
   apply(el);
   el.querySelectorAll('[style*="transform"]').forEach(apply);
+  // ANCESTORS too. On phones the page sits inside MobilePageViewport, whose
+  // wrapper carries the pinch/fit scale — above the captured element, so the
+  // subtree walk above never sees it. html2canvas positions each WORD from
+  // getClientRects (scaled by that ancestor) but draws it with the computed
+  // font-size (not scaled), so an un-neutralised ancestor scale exports a page
+  // where every word overlaps the next. Width is left alone here: these
+  // wrappers size themselves, and clearing it would collapse the layout.
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const t = p.style && p.style.transform;
+    if (t && t !== 'none') {
+      // MobilePageViewport animates its zoom (transition: transform .22s), so
+      // without killing the transition the phone would watch the document lurch
+      // to 100% and back on every export. Suppressed for the capture, restored
+      // with everything else.
+      saved.push({ node: p, transform: t, origin: p.style.transformOrigin, width: p.style.width, transition: p.style.transition });
+      p.style.transition = 'none';
+      p.style.transform = 'none';
+    }
+  }
   return saved;
 }
 function restoreScale(saved) {
@@ -48,6 +68,10 @@ function restoreScale(saved) {
     s.node.style.transform = s.transform;
     s.node.style.transformOrigin = s.origin;
     s.node.style.width = s.width;
+    // Put the layout back before re-arming the transition, or restoring the
+    // scale animates from 100% and the flash comes back on the way out.
+    void s.node.offsetHeight;
+    s.node.style.transition = s.transition;
   }
 }
 
