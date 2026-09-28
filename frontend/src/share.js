@@ -83,17 +83,28 @@ function restoreScale(saved) {
 // the .warranty-doc class rule, so nulling them here removes both the quotation's
 // inline border and the warranty's class border. Restored in elementToPdf's
 // finally, leaving the on-screen preview untouched.
+//
+// The resets are written with 'important': MobilePageViewport.css frames the
+// page with border / radius / box-shadow declared !important, and a plain
+// inline style LOSES to that — so on phones the frame was never stripped. In
+// desktop Chrome the shadow falls outside the page and is clipped off (only the
+// rounded border shows); the Android WebView paints html2canvas's shadow OVER
+// the page instead, and the two shadows (0.12 + 0.05 black) turned every white
+// page into flat grey: 255 × 0.88 × 0.95 = 213, the exact grey in the PDFs.
+const FRAME = { border: 'none', 'box-shadow': 'none', 'border-radius': '0' };
 function stripFrame(el) {
-  const s = { el, border: el.style.border, boxShadow: el.style.boxShadow, borderRadius: el.style.borderRadius };
-  el.style.border = 'none';
-  el.style.boxShadow = 'none';
-  el.style.borderRadius = '0';
-  return s;
+  const saved = {};
+  for (const [prop, val] of Object.entries(FRAME)) {
+    saved[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
+    el.style.setProperty(prop, val, 'important');
+  }
+  return { el, saved };
 }
-function restoreFrame(s) {
-  s.el.style.border = s.border;
-  s.el.style.boxShadow = s.boxShadow;
-  s.el.style.borderRadius = s.borderRadius;
+function restoreFrame({ el, saved }) {
+  for (const [prop, [val, prio]] of Object.entries(saved)) {
+    if (val) el.style.setProperty(prop, val, prio);
+    else el.style.removeProperty(prop);
+  }
 }
 
 // ── ONE PDF engine for everything ───────────────────────────────────────────
