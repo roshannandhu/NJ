@@ -369,7 +369,7 @@ export default function BackupDashboard() {
                   <tr key={i} style={{ borderTop: '1px solid var(--line-soft)' }}>
                     <td style={td}>{fmtDateTime(r.date)}</td>
                     <td style={td}>{r.item_type}</td>
-                    <td style={{ ...td, fontFamily: 'monospace' }}>{r.record_id || '—'}</td>
+                    <td style={{ ...td, fontFamily: 'var(--font-mono)' }}>{r.record_id || '—'}</td>
                     <td style={td}>{r.action}</td>
                     <td style={{ ...td, color: 'var(--ink-soft)' }}>{r.source}</td>
                     <td style={td}>

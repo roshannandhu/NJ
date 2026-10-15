@@ -1702,7 +1702,7 @@ function QuotationDocumentInner() {
                   <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'var(--bg-warm)', border: '1px solid var(--line-soft)', marginTop: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Design Theme Color</span>
-                      <span style={{ fontSize: '11px', fontFamily: 'monospace', color: PLUM, fontWeight: 700 }}>{PLUM}</span>
+                      <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: PLUM, fontWeight: 700 }}>{PLUM}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       {THEME_PRESETS.map(c => (

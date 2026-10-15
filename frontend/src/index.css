@@ -37,7 +37,17 @@
   
   --font-display: 'Inter', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* Numbers (prices, totals, bank details). Was JetBrains Mono, whose "0" is drawn like
+     an "8": outer ring, counter, and a centre dot 0.06em off the walls. Only its 400/500
+     faces were bundled, so the 700-900 money styles were fake-bolded, and on phones the
+     page is captured at 1x and saved as JPEG — the dot bridged the walls and ₹1,155.00
+     printed as ₹1,155.88. Inter's zero is a plain open oval (2 contours), and Inter also
+     carries ₹, which JetBrains Mono lacked (it fell back to Consolas).
+     Keep this a plain family with NO numeric OpenType features: html2canvas (PDF + Share)
+     keeps only normal/small-caps from font-variant, so tabular-nums would draw
+     proportional digits at the screen's tabular positions — amounts land short of the
+     right edge in the PDF. */
+  --font-mono: 'Inter', system-ui, sans-serif;
 }
 
 * {

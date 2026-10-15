@@ -557,7 +557,7 @@ export default function BackupSettings() {
                           {t.enabled ? (isOk ? 'Ready' : 'Error') : 'Off'}
                         </div>
                         
-                        <div style={{ fontFamily: 'monospace', color: t.enabled && (isCloud ? cs.connected : t.path) ? 'var(--ink-mid)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', color: t.enabled && (isCloud ? cs.connected : t.path) ? 'var(--ink-mid)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {pathLabel}
                         </div>
                         
@@ -635,12 +635,12 @@ export default function BackupSettings() {
                           <div className="backup-destination-controls" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                             {name === 'local' ? (
                               <div style={{ flex: 1 }}>
-                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. C:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'monospace' }} />
+                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. C:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'var(--font-mono)' }} />
                                 <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>Enter a folder path on your Windows PC. The app will save backups here automatically every day.</div>
                               </div>
                             ) : name === 'usb' ? (
                               <div style={{ flex: 1 }}>
-                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. E:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'monospace' }} />
+                                <input value={t.path || ''} onChange={e => { patchTarget(name, { path: e.target.value }); setTestRes(r => ({ ...r, [name]: null })); }} placeholder="e.g. E:\NJ Backups" style={{ ...inpStyle, width: '100%', fontFamily: 'var(--font-mono)' }} />
                                 <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>Enter the USB drive folder path on your Windows PC.</div>
                               </div>
                             ) : (
@@ -947,7 +947,7 @@ export default function BackupSettings() {
                       <div className="backup-file-row" key={i} style={{ display: 'grid', gridTemplateColumns: '150px 120px 1fr 80px', padding: '8px 12px', borderTop: '1px solid var(--line)', alignItems: 'center', fontSize: 12 }}>
                         <div>{new Date(f.modified_iso).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
                         <div style={{ color: 'var(--ink-mid)' }}>{DEST[f.target]?.label}</div>
-                        <div style={{ color: 'var(--ink-soft)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>{f.filename}</div>
+                        <div style={{ color: 'var(--ink-soft)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 10 }}>{f.filename}</div>
                         <button style={{ ...btnStyle, padding: '4px 8px', fontSize: 11 }} disabled={!!restoringP} onClick={() => handleRestoreFromPath(f.path, f.filename)}>
                           {restoringP === f.path ? '...' : 'Restore'}
                         </button>
@@ -1004,7 +1004,7 @@ export default function BackupSettings() {
                 onClick={() => loadDirs(browse.name, browse.parent || '')}>
                 <ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} /> Up
               </button>
-              <div style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, color: 'var(--ink-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+              <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                 title={browse.current || 'This PC'}>
                 {browse.current || 'This PC — choose a drive'}
               </div>

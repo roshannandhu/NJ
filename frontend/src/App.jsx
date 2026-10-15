@@ -77,7 +77,7 @@ function AppContent() {
             onKeyDown={e => {
               if (e.key === 'Enter') handleUnlock();
             }}
-            style={{ width: '100%', boxSizing: 'border-box', padding: '12px', fontSize: 24, textAlign: 'center', letterSpacing: '0.3em', border: `1px solid ${pinError ? 'red' : 'var(--line)'}`, borderRadius: 6, marginBottom: 16, outline: 'none', fontFamily: 'monospace' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '12px', fontSize: 24, textAlign: 'center', letterSpacing: '0.3em', border: `1px solid ${pinError ? 'red' : 'var(--line)'}`, borderRadius: 6, marginBottom: 16, outline: 'none', fontFamily: 'var(--font-mono)' }}
           />
 
           <button
