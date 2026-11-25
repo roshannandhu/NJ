@@ -1880,17 +1880,26 @@ function QuotationDocumentInner() {
                       const className = row.className;
                       const itemClass = data.classes?.find(c => c.name === className);
                       const brandColor = itemClass ? itemClass.color : PLUM;
-                      // Keyed by product now; the old class key is still read so
-                      // images and edits saved on existing quotations (when this
-                      // box was per class) keep showing.
-                      const imgKey = row.key;
+                      // Each product cell owns its image. Key by the line item
+                      // (unique per product+colour) so a paste/change/remove on one
+                      // cell never touches a sibling. row.key degraded to the shared
+                      // class key for any line without a distinct variety, which made
+                      // every row in a class write and read one slot. The per-variety
+                      // key (row.key) and the per-class key are still READ below so
+                      // images saved before this box was per-product keep showing.
+                      const imgKey = row.item?.id || row.key;
                       const legacyImgKey = classDescKey(className);
-                      // Product image, in priority: a per-quotation image the user added
-                      // here → an item in this quotation that carries one. We intentionally
-                      // do NOT fall back to the class's catalogue logo (that was rendering
-                      // the small NJ mark); a missing image shows the placeholder instead.
-                      const itemImg = row.item?.image || doc.items.find(it => it.className === className && it.image)?.image;
-                      const rawImg = doc.classImages?.[imgKey] || doc.classImages?.[legacyImgKey] || itemImg || '';
+                      // Product image, in priority: a per-quotation image saved for
+                      // THIS cell → older saves under the variety/class key → the
+                      // row's own catalogue image. We no longer borrow another item's
+                      // image from the same class (that was what made every row show
+                      // the same picture), nor the class logo; otherwise the
+                      // placeholder shows.
+                      const itemImg = row.item?.image || '';
+                      const rawImg = doc.classImages?.[imgKey]
+                        || doc.classImages?.[row.key]
+                        || doc.classImages?.[legacyImgKey]
+                        || itemImg || '';
                       const imgSrc = rawImg ? corsMediaUrl(rawImg) : '';
                       const svgPlaceholder = (
                         <svg viewBox="0 0 100 60" style={{ width: '100%', height: '100%', background: '#f5f5f5', display: 'block' }}>

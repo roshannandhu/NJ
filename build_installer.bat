@@ -52,7 +52,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%backend\share_helper\
 echo.
 echo ========== [2/5] Staging app folder ==========
 cd /d "%ROOT%" || goto :err
-if exist "%BUILD%" rmdir /s /q "%BUILD%"
+if not exist "%BUILD%" mkdir "%BUILD%"
+if exist "%BUILD%\app" rmdir /s /q "%BUILD%\app"
 mkdir "%BUILD%\app" || goto :err
 
 REM Copy backend code
@@ -92,25 +93,29 @@ copy /y "%ROOT%version.json" "%BUILD%\app\version.json" >nul || goto :err
 echo.
 echo ========== [3/5] Preparing embedded Python ==========
 cd /d "%BUILD%" || goto :err
-if not exist "%PYEMBED%.zip" (
-  echo Downloading %PYEMBED%.zip ...
-  powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYVER%/%PYEMBED%.zip' -OutFile '%PYEMBED%.zip'" || goto :err
-)
-if exist "python" rmdir /s /q "python"
-powershell -NoProfile -Command "Expand-Archive -Force '%PYEMBED%.zip' 'python'" || goto :err
+if not exist "python\python.exe" (
+  if not exist "%PYEMBED%.zip" (
+    echo Downloading %PYEMBED%.zip ...
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYVER%/%PYEMBED%.zip' -OutFile '%PYEMBED%.zip'" || goto :err
+  )
+  if exist "python" rmdir /s /q "python"
+  powershell -NoProfile -Command "Expand-Archive -Force '%PYEMBED%.zip' 'python'" || goto :err
 
-REM Enable 'import site' so pip works inside embedded Python
-powershell -NoProfile -Command "(Get-Content 'python\python312._pth') -replace '#import site','import site' | Set-Content 'python\python312._pth'" || goto :err
+  REM Enable 'import site' so pip works inside embedded Python
+  powershell -NoProfile -Command "(Get-Content 'python\python312._pth') -replace '#import site','import site' | Set-Content 'python\python312._pth'" || goto :err
 
-if not exist "get-pip.py" (
-  echo Downloading get-pip.py ...
-  powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'" || goto :err
+  if not exist "get-pip.py" (
+    echo Downloading get-pip.py ...
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'" || goto :err
+  )
+  mkdir "python\Lib\site-packages" 2>nul
+  "python\python.exe" get-pip.py --no-warn-script-location || goto :err
+  REM setuptools+wheel are needed to build pywebview's pure-python deps (proxy_tools)
+  "python\python.exe" -m pip install --no-warn-script-location setuptools wheel || goto :err
+  "python\python.exe" -m pip install --no-warn-script-location --no-build-isolation -r "%ROOT%backend\requirements.txt" || goto :err
+) else (
+  echo Embedded Python environment found at %BUILD%\python
 )
-mkdir "python\Lib\site-packages" 2>nul
-"python\python.exe" get-pip.py --no-warn-script-location || goto :err
-REM setuptools+wheel are needed to build pywebview's pure-python deps (proxy_tools)
-"python\python.exe" -m pip install --no-warn-script-location setuptools wheel || goto :err
-"python\python.exe" -m pip install --no-warn-script-location --no-build-isolation -r "%ROOT%backend\requirements.txt" || goto :err
 
 echo.
 echo ========== [4/5] Building installer (Inno Setup) ==========

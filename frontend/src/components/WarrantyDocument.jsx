@@ -6,6 +6,7 @@ import { DEFAULT_DATA } from '../data';
 import { elementToPdf, elementToPdfFile, shareFiles, warrantyFileName, beginPdfSave, finishPdfSave } from '../share';
 import WarrantyCertificate from './WarrantyCertificate';
 import { isLegacyBrandClass, resolveQuotationBrand, warrantyIdentityForBrand } from '../brands';
+import MobilePageViewport from './MobilePageViewport';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Standalone warranty view. The certificate body itself is the shared
@@ -16,9 +17,10 @@ export default function WarrantyDocument() {
   const {
     activeWarranty: doc, data, setData, setCurrentView, persistConfig,
     setCart, setCustomer, setActiveWarranty, setActiveQuotation, setActiveQuotationId, setGenerateIntent, showToast,
-    goBack, loadWarrantyForEdit
+    goBack, loadWarrantyForEdit, documentEditMode, setDocumentEditMode,
   } = useAppContext();
 
+  const isPhone = typeof window !== 'undefined' && window.innerWidth <= 860;
   const [isDownloading, setIsDownloading] = React.useState(false);
 
   if (!doc) {
@@ -184,78 +186,124 @@ export default function WarrantyDocument() {
       `}} />
 
       <div className="wd-page-wrap">
-        <div className="wd-mobile-context">
-          <span><ShieldCheck size={19} /></span>
-          <div>
-            <small>Warranty certificate</small>
-            <strong>{doc.warrantyNo || doc.id || 'Warranty'}</strong>
-            <p>{customer.name || 'Customer document'}</p>
+        {/* On Phone, sleek top app bar */}
+        {isPhone ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', height: '52px', minHeight: '52px', background: 'var(--surface)', borderBottom: '1px solid var(--line)', padding: '0 12px', position: 'sticky', top: 0, zIndex: 100 }}>
+            <button type="button" onClick={() => goBack()} style={{ width: '36px', height: '36px', borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)', cursor: 'pointer' }} title="Go back">
+              <ArrowLeft size={18} />
+            </button>
+            <div style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--ink)' }}>Warranty Certificate</div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={downloadPDF}
+                disabled={isDownloading}
+                style={{ width: '36px', height: '36px', borderRadius: '50%', border: 'none', background: 'var(--accent)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                title="Download PDF"
+              >
+                <Download size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={shareWarranty}
+                disabled={isDownloading}
+                style={{ width: '36px', height: '36px', borderRadius: '50%', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                title="Share"
+              >
+                <Share2 size={16} />
+              </button>
+            </div>
           </div>
-          <b>1 page</b>
-        </div>
-        {/* ── ACTION BAR ── */}
-        <div className="wd-actions document-actions is-warranty-editor">
-          <button
-            onClick={() => goBack()}
-            className="hover-lift wd-action is-secondary"
-            style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-            <ArrowLeft size={15}/> Back
-          </button>
-          <button
-            onClick={() => loadWarrantyForEdit(doc)}
-            className="hover-lift wd-action is-secondary"
-            style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'rgba(194, 65, 12, 0.08)', color:'var(--accent)', border:'1.5px solid var(--accent)', borderRadius:'var(--radius-full)', fontWeight:700, cursor:'pointer', fontSize:'13px' }}>
-            <Edit3 size={15}/> Edit Certificate
-          </button>
-          {!isStandalone && (
-            <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift wd-action is-secondary"
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-              <Edit3 size={15}/> Edit Quotation
-            </button>
-          )}
-          <div style={{ marginLeft:'auto', display:'flex', gap:'10px' }}>
-            <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift wd-action is-download"
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
-              <Download size={15}/> {isDownloading ? 'Generating…' : 'Download PDF'}
-            </button>
-            <button onClick={shareWarranty} disabled={isDownloading} className="hover-lift wd-action is-share"
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
-              <Share2 size={15}/> Share
-            </button>
-            <button onClick={startNew} className="hover-lift wd-action is-new"
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
-              <RotateCcw size={15}/> New Order
-            </button>
+        ) : (
+          <>
+            <div className="wd-mobile-context">
+              <span><ShieldCheck size={19} /></span>
+              <div>
+                <small>Warranty certificate</small>
+                <strong>{doc.warrantyNo || doc.id || 'Warranty'}</strong>
+                <p>{customer.name || 'Customer document'}</p>
+              </div>
+              <b>1 page</b>
+            </div>
+            {/* ── ACTION BAR ── */}
+            <div className="wd-actions document-actions is-warranty-editor">
+              <button
+                onClick={() => goBack()}
+                className="hover-lift wd-action is-secondary"
+                style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
+                <ArrowLeft size={15}/> Back
+              </button>
+              <button
+                onClick={() => loadWarrantyForEdit(doc)}
+                className="hover-lift wd-action is-secondary"
+                style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'rgba(194, 65, 12, 0.08)', color:'var(--accent)', border:'1.5px solid var(--accent)', borderRadius:'var(--radius-full)', fontWeight:700, cursor:'pointer', fontSize:'13px' }}>
+                <Edit3 size={15}/> Edit Certificate
+              </button>
+              {!isStandalone && (
+                <button onClick={() => { setGenerateIntent?.('quote'); setCurrentView('checkout'); }} className="hover-lift wd-action is-secondary"
+                  style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
+                  <Edit3 size={15}/> Edit Quotation
+                </button>
+              )}
+              <div style={{ marginLeft:'auto', display:'flex', gap:'10px' }}>
+                <button onClick={downloadPDF} disabled={isDownloading} className="hover-lift wd-action is-download"
+                  style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
+                  <Download size={15}/> {isDownloading ? 'Generating…' : 'Download PDF'}
+                </button>
+                <button onClick={shareWarranty} disabled={isDownloading} className="hover-lift wd-action is-share"
+                  style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'var(--radius-full)', fontWeight:600, cursor:isDownloading?'not-allowed':'pointer', fontSize:'13px', opacity:isDownloading?0.7:1 }}>
+                  <Share2 size={15}/> Share
+                </button>
+                <button onClick={startNew} className="hover-lift wd-action is-new"
+                  style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 18px', background:'var(--surface)', color:'var(--ink)', border:'1px solid var(--line)', borderRadius:'var(--radius-full)', fontWeight:600, cursor:'pointer', fontSize:'13px' }}>
+                  <RotateCcw size={15}/> New Order
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* On Phone, render within MobilePageViewport */}
+        {isPhone ? (
+          <MobilePageViewport
+            initialEditMode={documentEditMode}
+            documentType="warranty"
+            onDone={() => setDocumentEditMode(false)}
+          >
+            <div style={{ width: '794px' }}>
+              <WarrantyCertificate
+                isLegacyBrand={wIdentity.isLegacyBrand}
+                template={template}
+                openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
+                variant="customer"
+                customer={customer}
+                certData={{ ...certData, tradingOrg: wIdentity.tradingOrg }}
+                fallbackDate={doc.date}
+                invoiceFallback={doc.quotationId || parentQuote?.id || ''}
+                warrantyNo={doc.warrantyNo || doc.id}
+                orderNo={doc.quotationId || parentQuote?.id || ''}
+                edit={edit}
+              />
+            </div>
+          </MobilePageViewport>
+        ) : (
+          <div className="wd-preview-frame">
+            <div className="wd-preview-title"><ShieldCheck size={14} /><strong>A4 certificate preview</strong><span>Tap highlighted fields to edit</span></div>
+            <WarrantyCertificate
+              isLegacyBrand={wIdentity.isLegacyBrand}
+              template={template}
+              openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
+              variant="customer"
+              customer={customer}
+              certData={{ ...certData, tradingOrg: wIdentity.tradingOrg }}
+              fallbackDate={doc.date}
+              invoiceFallback={doc.quotationId || parentQuote?.id || ''}
+              warrantyNo={doc.warrantyNo || doc.id}
+              orderNo={doc.quotationId || parentQuote?.id || ''}
+              edit={edit}
+            />
           </div>
-        </div>
-
-        <div className="wd-hint">
-          <span className="wd-hint-icon"><Edit3 size={14} /></span>
-          <div><strong>Tap any field to edit</strong><span> — the certificate expands on phone. Use <strong>Edit Quotation</strong> above to change products or prices.</span></div>
-        </div>
-        <button
-          className="wd-phone-edit-btn"
-          onClick={() => loadWarrantyForEdit(doc)}
-        >
-          <Edit3 size={14}/> Edit Certificate (Mobile Form)
-        </button>
-
-        <div className={`wd-preview-frame${phoneEditMode ? ' is-phone-edit' : ''}`}>
-          <div className="wd-preview-title"><ShieldCheck size={14} /><strong>A4 certificate preview</strong><span>Tap highlighted fields to edit</span></div>
-          <WarrantyCertificate
-            isLegacyBrand={wIdentity.isLegacyBrand}
-            template={template}
-            openingText={template.opening || 'Congratulations on your purchase. We did our best to ensure that our products fully meet your requirements and that the quality corresponds to the highest world standards. We strongly recommend that you read this document thoroughly to ensure you are well-informed about the warranty coverage of your purchase.'}
-            variant="customer"
-            customer={customer}
-            certData={{ ...certData, tradingOrg: wIdentity.tradingOrg }}
-            fallbackDate={doc.date}
-            invoiceFallback={doc.quotationId || parentQuote?.id || ''}
-            warrantyNo={doc.warrantyNo || doc.id}
-            orderNo={doc.quotationId || parentQuote?.id || ''}
-            edit={edit}
-          />
-        </div>
+        )}
       </div>
     </div>
   );

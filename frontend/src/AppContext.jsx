@@ -394,11 +394,11 @@ export function AppProvider({ children }) {
 
   const cartTotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-  // Load a saved quotation back into a fully editable session: its line items
-  // into the cart, its customer, and its identity (activeQuotationId) so that
-  // re-finalizing from Checkout UPDATES the same record instead of creating a
-  // duplicate. Single entry point reused by History, Dashboard and the
-  // "Edit in Checkout" action on the Quotation Document.
+  const [documentEditMode, setDocumentEditMode] = useState(false);
+
+  // Load a saved quotation back into an editable session:
+  // On mobile, routes directly to the Visual Document Page Editor (quotation_document).
+  // On desktop, loads into cart + Checkout.
   const loadQuotationForEdit = (q) => {
     if (!q) return;
     setCart(Array.isArray(q.items) ? q.items.map(it => ({ ...it })) : []);
@@ -407,18 +407,22 @@ export function AppProvider({ children }) {
     setActiveQuotationId(q.id || null);
     setAddonQuotationId(null); // a full edit session replaces any add-on session
     setActiveTab('quotation');
-    // Editing an existing quotation is always a plain quotation finalize.
     setGenerateIntent('quote');
     const isMobile = window.innerWidth <= 860;
-    navigate(isMobile ? 'mobile_quotation_editor' : 'checkout');
+    if (isMobile) {
+      setDocumentEditMode(true);
+      navigate('quotation_document');
+    } else {
+      navigate('checkout');
+    }
   };
 
   const loadWarrantyForEdit = (w) => {
     if (!w) return;
     setActiveWarranty(w);
     setActiveWarrantyId(w.id || w.warrantyNo || null);
-    const isMobile = window.innerWidth <= 860;
-    navigate(isMobile ? 'mobile_warranty_editor' : 'warranty_document');
+    setDocumentEditMode(true);
+    navigate('warranty_document');
   };
 
   const startNewWarranty = () => {
@@ -501,6 +505,7 @@ export function AppProvider({ children }) {
     backupStatus, refreshBackupStatus,
     askSaveLocation, setAskSaveLocation,
     registerBackHandler,
+    documentEditMode, setDocumentEditMode,
   };
 
   const days = backupStatus?.days_since_last_backup;
@@ -536,12 +541,17 @@ export function AppProvider({ children }) {
 
       {/* 7-day no-backup reminder */}
       {showReminder && (
-        <div style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9998,
-          background: 'var(--gold)', color: '#1a1a1a', padding: '12px 24px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px',
-          fontWeight: 600, fontSize: '13px', boxShadow: '0 -4px 16px rgba(0,0,0,0.12)',
-        }}>
+        <div 
+          className="backup-reminder-banner"
+          style={{
+            position: 'fixed',
+            bottom: typeof window !== 'undefined' && window.innerWidth <= 860 ? 'calc(62px + env(safe-area-inset-bottom, 0px))' : 0,
+            left: 0, right: 0, zIndex: 9998,
+            background: 'var(--gold)', color: '#1a1a1a', padding: '10px 16px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px',
+            fontWeight: 600, fontSize: '12.5px', boxShadow: '0 -4px 16px rgba(0,0,0,0.12)',
+          }}
+        >
           <span>
             ⏰ No verified backup in {days == null ? 'a while' : `${Math.floor(days)} days`} —
             open <b>Settings → Security &amp; Backup</b> and click “Back up now”.

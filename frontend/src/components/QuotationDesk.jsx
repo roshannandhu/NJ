@@ -468,7 +468,8 @@ export default function QuotationDesk() {
         className={`qd2-step-btn${mobileTab === 'cart' ? ' is-active' : ''}`}
         onClick={() => goTab('cart')}>
         <div className="qd2-step-num">3</div>
-        <span>Checkout</span>
+        <span>Cart</span>
+        {hasItems && <span className="qd2-tab-badge">{cart.length}</span>}
       </button>
     </nav>
   );
@@ -489,7 +490,7 @@ export default function QuotationDesk() {
                 </div>
                 <div className="qd2-field is-name" style={addonQuotationId ? { opacity: 0.65 } : undefined}>
                   <label>Customer Name *</label>
-                  <input name="name" value={customer.name || ''} onChange={e => setCustomer(p => ({ ...p, name: e.target.value }))} disabled={!!addonQuotationId} placeholder="Required for quotation" autoFocus />
+                  <input name="name" value={customer.name || ''} onChange={e => setCustomer(p => ({ ...p, name: e.target.value }))} disabled={!!addonQuotationId} placeholder="Required for quotation" autoFocus={false} />
                 </div>
                 <div className="qd2-field is-phone" style={addonQuotationId ? { opacity: 0.65 } : undefined}>
                   <label>Phone</label>
